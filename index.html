@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
+  <meta name="description" content="Edit, trim, title and export YouTube videos on your device. Works offline." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Video Editor" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="css/fonts.css" />
+  <link rel="stylesheet" href="css/app.css" />
+  <link rel="modulepreload" href="js/app.js" />
+  <title>Video Editor</title>
+</head>
+<body>
+<main class="app" id="app">
+  <header class="masthead">
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="" width="40" height="40" />
+      <div>
+        <h1>Shape the story, frame by frame.</h1>
+        <p><button class="project-btn" id="projectBtn" type="button" aria-haspopup="dialog"><span id="projectName">Untitled project</span> <span aria-hidden="true">▾</span></button> <span class="save-state" id="saveState">Not saved yet</span></p>
+      </div>
+    </div>
+    <div class="masthead-actions">
+      <div class="history-btns">
+        <button class="icon-btn" id="undoBtn" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
+        <button class="icon-btn" id="redoBtn" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>↷</button>
+        <button class="icon-btn" id="helpBtn" type="button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+        <button class="icon-btn" id="themeBtn" type="button" title="Switch light / dark" aria-label="Switch theme">◐</button>
+      </div>
+      <button class="btn install-btn" id="installBtn" type="button">Install app</button>
+      <div class="project-stats" aria-label="Project summary">
+        <div class="stat"><b id="clipCount">0 clips</b><span>sequence</span></div>
+        <div class="stat"><b id="projectDuration">00:00</b><span>runtime</span></div>
+        <div class="stat"><b id="outputFormat">16:9 FHD</b><span>output</span></div>
+      </div>
+    </div>
+  </header>
+
+  <section class="install-help" id="installHelp" aria-live="polite">
+    <p id="installCopy"></p>
+    <button class="btn ghost" id="closeInstall" type="button">Got it</button>
+  </section>
+  <section class="update-bar" id="updateBar" hidden>
+    <p><b>A new version is ready.</b> Reload to update — your project is saved.</p>
+    <button class="btn primary" id="reloadBtn" type="button">Reload</button>
+  </section>
+
+  <section class="editor" aria-label="Video editing workspace">
+    <div class="stage-column">
+      <div class="stage-bar"><span class="stage-name" id="stageName">No clips yet</span><span class="stage-meta" id="stageMeta">PREVIEW · 00:00 / 00:00</span></div>
+      <div class="preview-shell" id="dropTarget">
+        <div class="dropzone" id="dropzone">
+          <div class="drop-icon" aria-hidden="true"></div>
+          <h2>Start with your footage</h2>
+          <p>Add MP4, MOV or WebM clips and JPG/PNG images. Everything stays on this device and is saved automatically.</p>
+          <label class="btn primary" for="videoInput">Choose clips &amp; images</label>
+          <input id="videoInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,.mov,.mp4,.m4v,.webm" multiple />
+          <small>Or drag files here</small>
+        </div>
+        <div class="stage-wrap" id="stageWrap" hidden>
+          <canvas id="stage" aria-label="Preview"></canvas>
+        </div>
+      </div>
+      <div class="transport">
+        <button id="toStartBtn" type="button" aria-label="Go to start" title="Start (Home)">⏮</button>
+        <button id="frameBackBtn" type="button" aria-label="Previous frame" title="Previous frame (←)">◀︎|</button>
+        <button id="playBtn" class="play" type="button" aria-label="Play or pause" title="Play / pause (Space)">▶</button>
+        <button id="frameFwdBtn" type="button" aria-label="Next frame" title="Next frame (→)">|▶︎</button>
+        <button id="toEndBtn" type="button" aria-label="Go to end" title="End (End)">⏭</button>
+        <span class="transport-time mono" id="timecode">00:00:00 / 00:00</span>
+      </div>
+    </div>
+
+    <aside class="inspector" aria-label="Editing controls">
+      <div class="tabs" role="tablist">
+        <button class="active" data-tab="clip" type="button" role="tab">Clip</button>
+        <button data-tab="text" type="button" role="tab">Text</button>
+        <button data-tab="audio" type="button" role="tab">Audio</button>
+        <button data-tab="look" type="button" role="tab">Look</button>
+        <button data-tab="youtube" type="button" role="tab">YouTube</button>
+      </div>
+
+      <!-- CLIP -->
+      <div class="tab-panel active" id="tab-clip">
+        <section class="section">
+          <div class="section-head"><h2>Media</h2><label class="btn ghost" for="addInput">＋ Add clips</label><input id="addInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,.mov,.mp4,.m4v,.webm" multiple /></div>
+          <p class="hint" id="clipEmptyHint">Select a clip on the timeline to trim it, change speed, volume, transition, framing and color. Images become title cards.</p>
+        </section>
+        <div id="clipPanel" hidden>
+          <div class="offline-banner" id="offlineBanner" hidden>
+            <p><b>Media missing.</b> This clip's file isn't stored on this device (e.g. imported project). Relink it:</p>
+            <label class="btn secondary" for="relinkInput">Choose file…</label><input id="relinkInput" type="file" accept="video/*,image/*,audio/*" />
+          </div>
+          <section class="section">
+            <div class="section-head"><h2 id="clipTitle">Clip</h2><span class="hint mono" id="clipLenLabel">00:00</span></div>
+            <label><span class="label">Name (used for chapters)</span><input class="field" data-bind="clip.name" data-commit="change" maxlength="80" /></label>
+            <div id="trimBlock">
+              <div class="field-row" style="margin-top:10px">
+                <label><span class="label">In point (s)</span><input class="field mono" id="clipIn" type="number" min="0" step="0.1" /></label>
+                <label><span class="label">Out point (s)</span><input class="field mono" id="clipOut" type="number" min="0" step="0.1" /></label>
+              </div>
+              <div class="range-block"><div class="range-stack"><div class="range-track"><div class="range-fill" id="rangeFill"></div></div><input id="startRange" type="range" min="0" max="1" value="0" step="0.01" aria-label="Trim start" /><input id="endRange" type="range" min="0" max="1" value="1" step="0.01" aria-label="Trim end" /></div></div>
+            </div>
+            <div id="imageDurBlock" hidden>
+              <div class="slider-row"><label>Duration</label><input type="range" id="imageDur" min="0.5" max="30" step="0.5" /><output id="imageDurOut">4s</output></div>
+            </div>
+            <div class="button-row" style="margin-top:12px">
+              <button class="btn secondary" data-action="split" type="button" title="Split at playhead (S)">✂ Split</button>
+              <button class="btn secondary" data-action="duplicate" type="button" title="Duplicate (Ctrl+D)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3.5V3a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 2 3v6a1.5 1.5 0 0 0 1.5 1.5H4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg> Duplicate</button>
+              <button class="btn secondary" data-action="moveLeft" type="button" aria-label="Move earlier">←</button>
+              <button class="btn secondary" data-action="moveRight" type="button" aria-label="Move later">→</button>
+              <button class="btn ghost danger" data-action="delete" type="button" title="Delete (Del)">Delete</button>
+            </div>
+          </section>
+          <section class="section" id="speedSection">
+            <h2 class="sh">Speed &amp; sound</h2>
+            <span class="label">Speed</span>
+            <div class="segmented six" data-bind="clip.speed" data-num="1"><button data-value="0.25" type="button">¼×</button><button data-value="0.5" type="button">½×</button><button data-value="1" type="button">1×</button><button data-value="1.5" type="button">1.5×</button><button data-value="2" type="button">2×</button><button data-value="4" type="button">4×</button></div>
+            <div class="slider-row"><label>Fine speed</label><input type="range" min="0.25" max="4" step="0.05" data-bind="clip.speed" /><output data-out="clip.speed" data-fmt="x"></output></div>
+            <div class="slider-row"><label>Volume</label><input type="range" min="0" max="2" step="0.05" data-bind="clip.volume" /><output data-out="clip.volume" data-fmt="pct"></output></div>
+            <label class="check"><input type="checkbox" data-bind="clip.muted" /> Mute this clip</label>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Audio fade in (s)</span><input class="field mono" type="number" min="0" max="10" step="0.1" data-bind="clip.fadeIn" data-commit="change" /></label>
+              <label><span class="label">Audio fade out (s)</span><input class="field mono" type="number" min="0" max="10" step="0.1" data-bind="clip.fadeOut" data-commit="change" /></label>
+            </div>
+          </section>
+          <section class="section">
+            <h2 class="sh">Transition into this clip</h2>
+            <div class="segmented" data-bind="clip.transition.type"><button data-value="cut" type="button">Cut</button><button data-value="crossfade" type="button">Crossfade</button><button data-value="fade" type="button">Fade to black</button></div>
+            <div class="slider-row"><label>Duration</label><input type="range" min="0.2" max="3" step="0.1" data-bind="clip.transition.duration" /><output data-out="clip.transition.duration" data-fmt="s"></output></div>
+            <p class="hint" style="margin:6px 0 0">On the first clip, “Fade to black” fades in from black.</p>
+          </section>
+          <section class="section">
+            <div class="section-head"><h2>Frame, crop &amp; motion</h2><button class="btn ghost small" data-action="resetTransform" type="button">Reset</button></div>
+            <label><span class="label">Fit</span><select data-bind="clip.fit"><option value="inherit">Project default</option><option value="contain">Show full frame</option><option value="cover">Fill &amp; crop</option></select></label>
+            <div class="slider-row"><label>Zoom</label><input type="range" min="1" max="4" step="0.01" data-bind="clip.transform.zoom" /><output data-out="clip.transform.zoom" data-fmt="x"></output></div>
+            <div class="slider-row"><label>Pan X</label><input type="range" min="-1" max="1" step="0.01" data-bind="clip.transform.x" /><output data-out="clip.transform.x" data-fmt="n2"></output></div>
+            <div class="slider-row"><label>Pan Y</label><input type="range" min="-1" max="1" step="0.01" data-bind="clip.transform.y" /><output data-out="clip.transform.y" data-fmt="n2"></output></div>
+            <div class="button-row" style="margin-top:10px">
+              <button class="btn secondary" data-action="rotL" type="button" aria-label="Rotate left">⟲ 90°</button>
+              <button class="btn secondary" data-action="rotR" type="button" aria-label="Rotate right">⟳ 90°</button>
+              <button class="btn secondary toggle" data-toggle="clip.transform.flipH" type="button">⇋ Flip H</button>
+              <button class="btn secondary toggle" data-toggle="clip.transform.flipV" type="button">⇵ Flip V</button>
+            </div>
+            <label style="display:block;margin-top:10px"><span class="label">Ken Burns motion</span><select data-bind="clip.transform.kenBurns"><option value="none">None</option><option value="in">Slow zoom in</option><option value="out">Slow zoom out</option><option value="left">Pan left → right</option><option value="right">Pan right → left</option></select></label>
+          </section>
+          <section class="section">
+            <div class="section-head"><h2>Clip color</h2><button class="btn ghost small" data-action="resetClipColor" type="button">Reset</button></div>
+            <div class="chips" data-bind="clip.color.preset" data-presets="1"></div>
+            <div class="slider-row"><label>Brightness</label><input type="range" min="-100" max="100" data-bind="clip.color.brightness" /><output data-out="clip.color.brightness"></output></div>
+            <div class="slider-row"><label>Contrast</label><input type="range" min="-100" max="100" data-bind="clip.color.contrast" /><output data-out="clip.color.contrast"></output></div>
+            <div class="slider-row"><label>Saturation</label><input type="range" min="-100" max="100" data-bind="clip.color.saturation" /><output data-out="clip.color.saturation"></output></div>
+            <div class="slider-row"><label>Warmth</label><input type="range" min="-100" max="100" data-bind="clip.color.temperature" /><output data-out="clip.color.temperature"></output></div>
+            <div class="slider-row"><label>Vignette</label><input type="range" min="0" max="100" data-bind="clip.color.vignette" /><output data-out="clip.color.vignette"></output></div>
+          </section>
+        </div>
+      </div>
+
+      <!-- TEXT -->
+      <div class="tab-panel" id="tab-text">
+        <section class="section">
+          <div class="section-head"><h2>Text layers</h2><button class="btn primary small" data-action="addText" type="button">＋ Text at playhead</button></div>
+          <div class="item-list" id="textList"></div>
+          <p class="hint" id="textEmptyHint">Add titles, lower thirds, or a key verse. Each layer has its own timing, position and style. Drag text on the preview to move it.</p>
+        </section>
+        <div id="textPanel" hidden>
+          <section class="section">
+            <label><span class="label">Text</span><textarea data-bind="text.text" maxlength="400" placeholder="A strong opening line or key verse"></textarea></label>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Start (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="text.start" data-commit="change" /></label>
+              <label><span class="label">End (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="text.end" data-commit="change" /></label>
+            </div>
+            <div class="button-row" style="margin-top:8px"><button class="btn ghost small" data-action="textStartHere" type="button">Start at playhead</button><button class="btn ghost small" data-action="textEndHere" type="button">End at playhead</button></div>
+          </section>
+          <section class="section">
+            <h2 class="sh">Position &amp; size</h2>
+            <div class="segmented four" id="textPosPresets"><button data-y="0.12" type="button">Top</button><button data-y="0.5" type="button">Center</button><button data-y="0.72" type="button">Lower ⅓</button><button data-y="0.86" type="button">Bottom</button></div>
+            <div class="slider-row"><label>Horizontal</label><input type="range" min="0" max="1" step="0.005" data-bind="text.x" /><output data-out="text.x" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Vertical</label><input type="range" min="0" max="1" step="0.005" data-bind="text.y" /><output data-out="text.y" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Size</label><input type="range" min="0.025" max="0.25" step="0.0025" data-bind="text.size" /><output data-out="text.size" data-fmt="size"></output></div>
+            <div class="slider-row"><label>Max width</label><input type="range" min="0.3" max="1" step="0.01" data-bind="text.maxWidth" /><output data-out="text.maxWidth" data-fmt="pct"></output></div>
+          </section>
+          <section class="section">
+            <h2 class="sh">Style</h2>
+            <div class="segmented four" data-bind="text.style"><button data-value="clean" type="button">Clean</button><button data-value="band" type="button">Band</button><button data-value="box" type="button">Box</button><button data-value="outline" type="button">Outline</button></div>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Font</span><select data-bind="text.font" id="fontSelect"></select></label>
+              <label><span class="label">Align</span><select data-bind="text.align"><option value="center">Center</option><option value="left">Left</option><option value="right">Right</option></select></label>
+            </div>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Text color</span><input class="field color" type="color" data-bind="text.color" /></label>
+              <label><span class="label">Band / box / outline color</span><input class="field color" type="color" data-bind="text.bg" /></label>
+            </div>
+            <div class="slider-row"><label>Bg opacity</label><input type="range" min="0" max="1" step="0.01" data-bind="text.bgOpacity" /><output data-out="text.bgOpacity" data-fmt="pct"></output></div>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Fade in (s)</span><input class="field mono" type="number" min="0" max="5" step="0.1" data-bind="text.fadeIn" data-commit="change" /></label>
+              <label><span class="label">Fade out (s)</span><input class="field mono" type="number" min="0" max="5" step="0.1" data-bind="text.fadeOut" data-commit="change" /></label>
+            </div>
+            <div class="button-row" style="margin-top:12px"><button class="btn secondary" data-action="duplicateText" type="button"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3.5V3a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 2 3v6a1.5 1.5 0 0 0 1.5 1.5H4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg> Duplicate</button><button class="btn ghost danger" data-action="deleteText" type="button">Delete text</button></div>
+          </section>
+        </div>
+      </div>
+
+      <!-- AUDIO -->
+      <div class="tab-panel" id="tab-audio">
+        <section class="section">
+          <div class="section-head"><h2>Music &amp; audio tracks</h2><label class="btn primary small" for="musicInput">＋ Add music</label><input id="musicInput" type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac" multiple /></div>
+          <div class="item-list" id="audioList"></div>
+          <p class="hint" id="audioEmptyHint">Add background music. It starts at the playhead; drag it on the timeline to offset, drag its edges to trim. Ducking lowers music while clips have sound.</p>
+        </section>
+        <div id="audioPanel" hidden>
+          <section class="section">
+            <label><span class="label">Name</span><input class="field" data-bind="audio.name" data-commit="change" /></label>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Starts at (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="audio.start" data-commit="change" /></label>
+              <label><span class="label">Length (s)</span><input class="field mono" type="number" min="0.2" step="0.1" id="audioLenInput" /></label>
+            </div>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Trim in (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="audio.in" data-commit="change" /></label>
+              <label><span class="label">Trim out (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="audio.out" data-commit="change" /></label>
+            </div>
+            <div class="slider-row"><label>Volume</label><input type="range" min="0" max="1.5" step="0.01" data-bind="audio.volume" /><output data-out="audio.volume" data-fmt="pct"></output></div>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Fade in (s)</span><input class="field mono" type="number" min="0" max="20" step="0.1" data-bind="audio.fadeIn" data-commit="change" /></label>
+              <label><span class="label">Fade out (s)</span><input class="field mono" type="number" min="0" max="20" step="0.1" data-bind="audio.fadeOut" data-commit="change" /></label>
+            </div>
+            <label class="check"><input type="checkbox" data-bind="audio.duck" /> Auto-lower (duck) under clip audio</label>
+            <div class="slider-row"><label>Duck to</label><input type="range" min="0" max="1" step="0.01" data-bind="audio.duckLevel" /><output data-out="audio.duckLevel" data-fmt="pct"></output></div>
+            <div class="button-row" style="margin-top:12px"><button class="btn secondary" data-action="audioStartHere" type="button">Start at playhead</button><button class="btn ghost danger" data-action="deleteAudio" type="button">Remove track</button></div>
+          </section>
+        </div>
+      </div>
+
+      <!-- LOOK -->
+      <div class="tab-panel" id="tab-look">
+        <section class="section">
+          <h2 class="sh">Canvas</h2>
+          <span class="label">Aspect ratio</span>
+          <div class="segmented five" data-bind="proj.settings.ratio"><button data-value="original" type="button">Original</button><button data-value="16:9" type="button">YouTube</button><button data-value="9:16" type="button">Shorts</button><button data-value="1:1" type="button">1:1</button><button data-value="4:5" type="button">4:5</button></div>
+          <div class="field-row" style="margin-top:10px">
+            <label><span class="label">Fit</span><select data-bind="proj.settings.fit"><option value="contain">Show full clip</option><option value="cover">Fill &amp; crop</option></select></label>
+            <label><span class="label">Background</span><select data-bind="proj.settings.bg"><option value="black">Black</option><option value="blur">Blurred video</option><option value="white">White</option><option value="color">Custom color</option></select></label>
+          </div>
+          <div class="field-row" style="margin-top:10px">
+            <label><span class="label">Custom color</span><input class="field color" type="color" data-bind="proj.settings.bgColor" /></label>
+            <label><span class="label">Image clip length (s)</span><input class="field mono" type="number" min="0.5" max="60" step="0.5" data-bind="proj.settings.imageDuration" data-commit="change" /></label>
+          </div>
+          <div class="slider-row"><label>End fade</label><input type="range" min="0" max="3" step="0.1" data-bind="proj.settings.endFade" /><output data-out="proj.settings.endFade" data-fmt="s"></output></div>
+        </section>
+        <section class="section">
+          <div class="section-head"><h2>Global color</h2><button class="btn ghost small" data-action="resetGlobalColor" type="button">Reset</button></div>
+          <div class="chips" data-bind="proj.color.preset" data-presets="1"></div>
+          <div class="slider-row"><label>Brightness</label><input type="range" min="-100" max="100" data-bind="proj.color.brightness" /><output data-out="proj.color.brightness"></output></div>
+          <div class="slider-row"><label>Contrast</label><input type="range" min="-100" max="100" data-bind="proj.color.contrast" /><output data-out="proj.color.contrast"></output></div>
+          <div class="slider-row"><label>Saturation</label><input type="range" min="-100" max="100" data-bind="proj.color.saturation" /><output data-out="proj.color.saturation"></output></div>
+          <div class="slider-row"><label>Warmth</label><input type="range" min="-100" max="100" data-bind="proj.color.temperature" /><output data-out="proj.color.temperature"></output></div>
+          <div class="slider-row"><label>Vignette</label><input type="range" min="0" max="100" data-bind="proj.color.vignette" /><output data-out="proj.color.vignette"></output></div>
+        </section>
+        <section class="section">
+          <div class="section-head"><h2>Logo / watermark</h2><label class="btn ghost small" for="logoInput">Choose image</label><input id="logoInput" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" /></div>
+          <div id="logoPanel" hidden>
+            <span class="label">Position</span>
+            <div class="segmented five" data-bind="proj.logo.position"><button data-value="tl" type="button">↖</button><button data-value="tr" type="button">↗</button><button data-value="center" type="button">●</button><button data-value="bl" type="button">↙</button><button data-value="br" type="button">↘</button></div>
+            <div class="slider-row"><label>Size</label><input type="range" min="0.04" max="0.5" step="0.005" data-bind="proj.logo.size" /><output data-out="proj.logo.size" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Opacity</label><input type="range" min="0.05" max="1" step="0.01" data-bind="proj.logo.opacity" /><output data-out="proj.logo.opacity" data-fmt="pct"></output></div>
+            <button class="btn ghost danger small" data-action="removeLogo" type="button" style="margin-top:10px">Remove logo</button>
+          </div>
+          <p class="hint" id="logoHint">A transparent PNG works best. Shown for the whole video.</p>
+        </section>
+      </div>
+
+      <!-- YOUTUBE -->
+      <div class="tab-panel" id="tab-youtube">
+        <section class="section">
+          <h2 class="sh">YouTube details</h2>
+          <label><span class="label">Video title <span class="count" id="titleCount">0/100</span></span><input class="field" data-bind="proj.youtube.title" data-commit="change" maxlength="100" placeholder="Write a clear, searchable title" /></label>
+          <label style="display:block;margin-top:10px"><span class="label">Description</span><textarea data-bind="proj.youtube.description" data-commit="change" maxlength="5000" placeholder="Summary, scripture reference, and viewer prompt…"></textarea></label>
+          <label style="display:block;margin-top:10px"><span class="label">Tags (comma separated) <span class="count" id="tagCount">0/500</span></span><input class="field" data-bind="proj.youtube.tags" data-commit="change" placeholder="faith, devotional, bible study" /></label>
+        </section>
+        <section class="section">
+          <div class="section-head"><h2>Chapters</h2><select class="mini-select" data-bind="proj.youtube.chaptersFrom"><option value="auto">Markers, else clips</option><option value="clips">Clip names</option></select></div>
+          <pre class="chapters mono" id="chaptersOut"></pre>
+          <p class="hint warn" id="chapterWarn"></p>
+          <div class="section-head" style="margin-top:12px"><h2>Markers</h2><button class="btn ghost small" data-action="addMarker" type="button">＋ Marker at playhead (M)</button></div>
+          <div class="item-list" id="markerList"></div>
+        </section>
+        <section class="section">
+          <div class="button-row">
+            <button class="btn primary" id="copyDetails" type="button">Copy title, description &amp; chapters</button>
+            <button class="btn secondary" id="copyTags" type="button">Copy tags</button>
+            <button class="btn secondary" id="thumbBtn2" type="button">Thumbnail maker</button>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <div class="timeline-panel">
+      <div class="tl-toolbar" role="toolbar" aria-label="Timeline tools">
+        <button class="tool" data-action="split" type="button" title="Split at playhead (S)">✂<span>Split</span></button>
+        <button class="tool" data-action="duplicate" type="button" title="Duplicate selected (Ctrl+D)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3.5V3a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 2 3v6a1.5 1.5 0 0 0 1.5 1.5H4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>Duplicate</span></button>
+        <button class="tool" data-action="delete" type="button" title="Delete selected (Del)">🗑<span>Delete</span></button>
+        <i class="sep"></i>
+        <button class="tool" data-action="addText" type="button" title="Add text (T)">T<span>Text</span></button>
+        <button class="tool" data-action="addMarker" type="button" title="Add marker (M)">⚑<span>Marker</span></button>
+        <label class="tool" for="musicInput" title="Add music">♪<span>Music</span></label>
+        <i class="sep"></i>
+        <button class="tool toggle" id="rippleBtn" type="button" title="Ripple: deleting/trimming clips shifts text, music and markers after the edit" aria-pressed="true">⇤<span>Ripple</span></button>
+        <button class="tool toggle" id="snapBtn" type="button" title="Snapping" aria-pressed="true">🧲<span>Snap</span></button>
+        <span class="grow"></span>
+        <button class="tool" id="zoomOut" type="button" title="Zoom out (-)" aria-label="Zoom out">−</button>
+        <input type="range" id="zoomRange" min="0" max="100" value="40" aria-label="Timeline zoom" />
+        <button class="tool" id="zoomIn" type="button" title="Zoom in (+)" aria-label="Zoom in">+</button>
+        <button class="tool" id="zoomFit" type="button" title="Fit timeline">Fit</button>
+      </div>
+      <div class="timeline" id="timeline"></div>
+    </div>
+  </section>
+
+  <section class="publish" aria-labelledby="publishTitle">
+    <div class="publish-copy"><h2 id="publishTitle">Finish the cut</h2><p id="outputNote">Rendered on this device. Nothing is uploaded.</p></div>
+    <div class="export-settings">
+      <label><span class="label">Resolution</span><select data-bind="proj.settings.res" data-num="1"><option value="720">720p</option><option value="1080">1080p</option><option value="2160">4K</option></select></label>
+      <label><span class="label">Frame rate</span><select data-bind="proj.settings.fps" data-num="1"><option value="24">24 fps</option><option value="30">30 fps</option><option value="60">60 fps</option></select></label>
+      <label><span class="label">Quality</span><select data-bind="proj.settings.quality"><option value="medium">Standard</option><option value="high">High</option><option value="max">Maximum</option></select></label>
+      <label><span class="label">Format</span><select data-bind="proj.settings.format"><option value="auto">Auto (MP4 if possible)</option><option value="mp4">MP4</option><option value="webm">WebM</option></select></label>
+    </div>
+    <div class="publish-actions">
+      <button class="btn secondary" id="thumbBtn" type="button" disabled>Thumbnail maker</button>
+      <a class="link-btn" href="https://www.youtube.com/upload" target="_blank" rel="noopener noreferrer">YouTube Studio ↗</a>
+      <button class="btn primary" id="exportBtn" type="button" disabled>Export video</button>
+    </div>
+    <div class="progress" id="progress" aria-live="polite">
+      <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+      <div class="progress-copy"><span id="progressStatus">Preparing export…</span><span id="progressPercent">0%</span></div>
+      <div class="progress-copy"><span id="progressEta">ETA —</span><span><button class="btn ghost small" id="cancelExport" type="button">Cancel</button></span></div>
+    </div>
+    <div class="export-result" id="exportResult" hidden>
+      <p id="exportResultText"></p>
+      <div class="button-row"><a class="btn primary" id="downloadAgain" download>Download again</a><button class="btn secondary" id="shareExport" type="button" hidden>Share / Save to Photos</button></div>
+    </div>
+    <p class="caps hint" id="capsNote"></p>
+  </section>
+</main>
+
+<!-- Projects -->
+<dialog class="sheet" id="projectsDialog" aria-labelledby="projectsTitle">
+  <div class="sheet-head"><h2 id="projectsTitle">Projects</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
+  <div class="button-row"><button class="btn primary" id="newProject" type="button">＋ New project</button><label class="btn secondary" for="importProject">Import project…</label><input id="importProject" type="file" accept=".json,application/json" /></div>
+  <label class="check"><input type="checkbox" id="embedMedia" /> Include media files when exporting a project (larger file, fully portable)</label>
+  <div class="project-list" id="projectList"></div>
+  <p class="hint" id="storageNote"></p>
+</dialog>
+
+<!-- Help -->
+<dialog class="sheet" id="helpDialog" aria-labelledby="helpTitle">
+  <div class="sheet-head"><h2 id="helpTitle">Keyboard shortcuts</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
+  <div class="shortcuts">
+    <div><kbd>Space</kbd><span>Play / pause</span></div>
+    <div><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd><span>Reverse / pause / forward (press again for 2×, 4×)</span></div>
+    <div><kbd>←</kbd> <kbd>→</kbd><span>Step one frame (Shift: 1 second)</span></div>
+    <div><kbd>↑</kbd> <kbd>↓</kbd><span>Previous / next edit point</span></div>
+    <div><kbd>Home</kbd> <kbd>End</kbd><span>Go to start / end</span></div>
+    <div><kbd>S</kbd><span>Split clip at playhead</span></div>
+    <div><kbd>Del</kbd> / <kbd>⌫</kbd><span>Delete selected</span></div>
+    <div><kbd>Ctrl/⌘</kbd>+<kbd>D</kbd><span>Duplicate selected</span></div>
+    <div><kbd>T</kbd><span>Add text at playhead</span></div>
+    <div><kbd>M</kbd><span>Add marker at playhead</span></div>
+    <div><kbd>+</kbd> <kbd>−</kbd> / <kbd>0</kbd><span>Zoom timeline in / out / fit</span></div>
+    <div><kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd><span>Undo</span></div>
+    <div><kbd>Ctrl/⌘</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd><span>Redo</span></div>
+    <div><kbd>Esc</kbd><span>Deselect / close</span></div>
+    <div><kbd>?</kbd><span>This help</span></div>
+  </div>
+  <p class="hint">On phones: tap a timeline item to select it, then drag it or its edges. Drag the time ruler to scrub.</p>
+</dialog>
+
+<!-- Thumbnail maker -->
+<dialog class="sheet wide" id="thumbDialog" aria-labelledby="thumbTitle">
+  <div class="sheet-head"><h2 id="thumbTitle">Thumbnail maker · 1280×720</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
+  <div class="thumb-grid">
+    <canvas id="thumbCanvas" width="1280" height="720"></canvas>
+    <div class="thumb-controls">
+      <div class="slider-row wide"><label>Frame</label><input type="range" id="thumbTime" min="0" max="1" step="0.01" /><output id="thumbTimeOut">00:00</output></div>
+      <button class="btn ghost small" id="thumbUsePlayhead" type="button">Use playhead frame</button>
+      <label style="display:block;margin-top:10px"><span class="label">Headline</span><textarea id="thumbText" rows="2" maxlength="80" placeholder="BIG BOLD WORDS"></textarea></label>
+      <label style="display:block;margin-top:8px"><span class="label">Small line</span><input class="field" id="thumbSub" maxlength="80" placeholder="Episode 3 · Psalm 23" /></label>
+      <div class="field-row" style="margin-top:8px">
+        <label><span class="label">Font</span><select id="thumbFont"></select></label>
+        <label><span class="label">Layout</span><select id="thumbPos"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option><option value="bottom">Bottom band</option></select></label>
+      </div>
+      <div class="field-row" style="margin-top:8px">
+        <label><span class="label">Text color</span><input class="field color" type="color" id="thumbColor" value="#ffffff" /></label>
+        <label><span class="label">Accent</span><input class="field color" type="color" id="thumbAccent" value="#df3f34" /></label>
+      </div>
+      <div class="slider-row wide"><label>Darken</label><input type="range" id="thumbDarken" min="0" max="0.8" step="0.02" value="0.25" /><output id="thumbDarkenOut">25%</output></div>
+      <div class="slider-row wide"><label>Text size</label><input type="range" id="thumbSize" min="60" max="220" step="2" value="128" /><output id="thumbSizeOut">128</output></div>
+      <button class="btn primary" id="thumbSave" type="button" style="margin-top:12px;width:100%">Download JPG</button>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

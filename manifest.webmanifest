@@ -1,0 +1,31 @@
+{
+  "id": "./",
+  "name": "Video Editor — Shape the story",
+  "short_name": "Video Editor",
+  "description": "Edit, trim, title and export YouTube videos and Shorts on your device. Works offline; nothing is uploaded.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#20201e",
+  "theme_color": "#20201e",
+  "categories": ["photo", "productivity", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    { "src": "screenshots/desktop.png", "sizes": "1440x900", "type": "image/png", "form_factor": "wide", "label": "Timeline editor on desktop" },
+    { "src": "screenshots/phone.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Editing on a phone" }
+  ],
+  "share_target": {
+    "action": "./share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": { "files": [ { "name": "media", "accept": ["video/*", "image/*", "audio/*"] } ] }
+  },
+  "launch_handler": { "client_mode": "focus-existing" }
+}
