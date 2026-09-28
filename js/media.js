@@ -73,7 +73,26 @@ async function probeImage(blob) {
 async function probeAudio(blob) {
   const a = document.createElement('audio'); a.preload = 'metadata';
   const url = URL.createObjectURL(blob);
-  try { a.src = url; await once(a, 'loadedmetadata'); let d = a.duration; if (!Number.isFinite(d)) d = 0; return { duration: d }; }
+  try {
+    a.src = url; await once(a, 'loadedmetadata'); let d = a.duration;
+    if (!Number.isFinite(d) || d <= 0) {
+      // MediaRecorder WebM files have no duration header: seek to the end to discover it
+      d = await new Promise((res) => {
+        const done = () => { a.removeEventListener('durationchange', ch); clearTimeout(to); res(Number.isFinite(a.duration) ? a.duration : 0); };
+        const ch = () => { if (Number.isFinite(a.duration)) done(); };
+        const to = setTimeout(done, 3000);
+        a.addEventListener('durationchange', ch);
+        try { a.currentTime = 1e7; } catch { done(); }
+      });
+    }
+    if (!Number.isFinite(d) || d <= 0) {
+      try {
+        const ac = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 44100);
+        const buf = await ac.decodeAudioData(await blob.arrayBuffer()); d = buf.duration;
+      } catch { d = 0; }
+    }
+    return { duration: d };
+  }
   finally { a.removeAttribute('src'); a.load(); URL.revokeObjectURL(url); }
 }
 

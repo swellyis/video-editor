@@ -1,6 +1,6 @@
 // Export: fast path = WebCodecs (via vendored Mediabunny) frame-accurate render, faster than real time.
 // Fallback = real-time canvas + MediaRecorder (MP4 when the browser supports it, else WebM).
-import { layout, activeAt, sourceTime, outputDims } from './model.js';
+import { layout, activeAt, sourceTime, outputDims, overlaysAt, overlaySourceTime } from './model.js';
 import { Compositor, ensureFonts } from './render.js';
 import { Player } from './player.js';
 import { mixAudio } from './audio.js';
@@ -111,7 +111,8 @@ async function exportFast(project, media, { onProgress, signal, format }) {
   await output.start();
 
   // --- frame plan: which clips are visible on each frame and at which source time
-  const plan = new Array(N);
+  const plan = new Array(N), planO = new Array(N);
+  const images = new Map();
   const tsLists = new Map(), lastFrame = new Map();
   for (let k = 0; k < N; k++) {
     const t = (k + 0.001) / fps;
@@ -124,15 +125,23 @@ async function exportFast(project, media, { onProgress, signal, format }) {
       tsLists.get(c.id).push(sourceTime(a.it, t));
       lastFrame.set(c.id, k);
     }
+    const ao = overlaysAt(project, t);
+    planO[k] = ao;
+    for (const o of ao) {
+      if (o.kind !== 'video') continue;
+      if (!tsLists.has(o.id)) tsLists.set(o.id, []);
+      tsLists.get(o.id).push(overlaySourceTime(o, t));
+      lastFrame.set(o.id, k);
+    }
   }
+  for (const o of project.overlays || []) if (o.kind === 'image') { const im = await media.image(o.mediaId).catch(() => null); if (im) images.set(o.mediaId, im); }
   // images & logo
-  const images = new Map();
   for (const it of lay.items) if (it.clip.kind === 'image') { const im = await media.image(it.clip.mediaId).catch(() => null); if (im) images.set(it.clip.mediaId, im); }
   const logo = project.logo ? await media.image(project.logo.mediaId).catch(() => null) : null;
 
   const readers = new Map();
-  const openReader = async (it) => {
-    const c = it.clip, rec = await media.get(c.mediaId);
+  const openReader = async (c) => {
+    const rec = await media.get(c.mediaId);
     if (!rec) return { next: async () => null, close() { } };
     const list = tsLists.get(c.id) || [];
     try {
@@ -184,12 +193,20 @@ async function exportFast(project, media, { onProgress, signal, format }) {
         const c = a.it.clip;
         if (c.kind === 'image') { const im = images.get(c.mediaId); if (im) sources.set(c.id, { img: im.img, w: im.w, h: im.h }); continue; }
         let r = readers.get(c.id);
-        if (!r) { r = await openReader(a.it); readers.set(c.id, r); }
+        if (!r) { r = await openReader(c); readers.set(c.id, r); }
         const f = await r.next();
         if (f) sources.set(c.id, f);
         if (lastFrame.get(c.id) === k) { r.close(); readers.delete(c.id); }
       }
-      comp.render(ctx, W, H, project, lay, (k + 0.001) / fps, (it) => sources.get(it.clip.id) || null, { getLogo: () => logo });
+      for (const o of planO[k]) {
+        if (o.kind === 'image') { const im = images.get(o.mediaId); if (im) sources.set(o.id, { img: im.img, w: im.w, h: im.h }); continue; }
+        let r = readers.get(o.id);
+        if (!r) { r = await openReader(o); readers.set(o.id, r); }
+        const f = await r.next();
+        if (f) sources.set(o.id, f);
+        if (lastFrame.get(o.id) === k) { r.close(); readers.delete(o.id); }
+      }
+      comp.render(ctx, W, H, project, lay, (k + 0.001) / fps, (it) => sources.get(it.clip.id) || null, { getLogo: () => logo, getOverlaySource: (o) => sources.get(o.id) || null });
       await vsrc.add(t, 1 / fps);
       await feedAudio(t + 1);
       if (k % 3 === 0 || k === N - 1) {

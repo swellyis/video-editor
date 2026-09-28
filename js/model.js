@@ -1,7 +1,7 @@
 // Project data model, timeline layout, edit operations, audio envelopes, history.
 import { uid, clamp, deepClone, fmt } from './util.js';
 
-export const SCHEMA = 2;
+export const SCHEMA = 3;
 export const MIN_CLIP = 0.1; // seconds on timeline
 
 export const PRESETS = {
@@ -25,7 +25,8 @@ export const FONTS = {
 export const RATIOS = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5 };
 
 export const defaultColor = () => ({ preset: 'none', brightness: 0, contrast: 0, saturation: 0, temperature: 0, vignette: 0 });
-export const defaultTransform = () => ({ zoom: 1, x: 0, y: 0, rotate: 0, flipH: false, flipV: false, kenBurns: 'none' });
+export const defaultTransform = () => ({ zoom: 1, x: 0, y: 0, rotate: 0, angle: 0, flipH: false, flipV: false, kenBurns: 'none' });
+export const defaultChroma = () => ({ enabled: false, color: '#00ff00', similarity: 0.4, smoothness: 0.15, spill: 0.5 });
 
 export function newProject(name = 'Untitled project') {
   const now = Date.now();
@@ -33,7 +34,7 @@ export function newProject(name = 'Untitled project') {
     schema: SCHEMA, id: uid('prj'), name, created: now, updated: now,
     settings: { ratio: '16:9', res: 1080, fps: 30, quality: 'high', format: 'auto', fit: 'contain', bg: 'black', bgColor: '#000000', imageDuration: 4, endFade: 0 },
     color: defaultColor(),
-    clips: [], texts: [], audio: [], markers: [],
+    clips: [], overlays: [], texts: [], audio: [], markers: [],
     logo: null,
     youtube: { title: '', description: '', tags: '', chaptersFrom: 'auto' },
     thumb: { time: 0, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow' },
@@ -48,8 +49,9 @@ export function migrate(p) {
   out.youtube = Object.assign(newProject().youtube, p.youtube || {});
   out.thumb = Object.assign(newProject().thumb, p.thumb || {});
   out.clips = (p.clips || []).map(c => normalizeClip(c));
-  out.texts = (p.texts || []).map(t => Object.assign(newText(0), t));
+  out.texts = (p.texts || []).map(t => { const b = newText(0); const r = Object.assign(b, t); r.anim = Object.assign(newText(0).anim, t.anim || {}); r.keyframes = t.keyframes || {}; return r; });
   out.audio = (p.audio || []).map(a => Object.assign(newAudio({ id: a.mediaId, duration: a.srcDuration || 1, name: a.name }, 0), a));
+  out.overlays = (p.overlays || []).map(o => normalizeOverlay(o));
   out.markers = p.markers || [];
   out.schema = SCHEMA;
   return out;
@@ -58,9 +60,10 @@ export function migrate(p) {
 export function normalizeClip(c) {
   return Object.assign({
     id: uid('clip'), kind: 'video', mediaId: null, name: 'Clip', srcDuration: 1, width: 0, height: 0, hasAudio: true,
-    in: 0, out: 1, speed: 1, volume: 1, muted: false, fadeIn: 0, fadeOut: 0, fit: 'inherit',
-    transition: { type: 'cut', duration: 0.6 },
+    in: 0, out: 1, speed: 1, volume: 1, muted: false, fadeIn: 0, fadeOut: 0, fit: 'inherit', bg: 'inherit', opacity: 1,
+    transition: { type: 'cut', duration: 0.6 }, keyframes: {},
   }, c, {
+    keyframes: c.keyframes || {},
     color: Object.assign(defaultColor(), c.color || {}),
     transform: Object.assign(defaultTransform(), c.transform || {}),
     transition: Object.assign({ type: 'cut', duration: 0.6 }, c.transition || {}),
@@ -82,13 +85,106 @@ export function newText(start, dur = 4, text = 'Your text here') {
     id: uid('txt'), text, start, end: start + dur, x: 0.5, y: 0.82, size: 0.075,
     color: '#ffffff', bg: '#000000', bgOpacity: 0.62, style: 'clean', font: 'sans', align: 'center',
     fadeIn: 0.3, fadeOut: 0.3, maxWidth: 0.86,
+    scale: 1, rotation: 0, opacity: 1, anim: { in: 'none', out: 'none', inDur: 0.6, outDur: 0.4 }, keyframes: {},
   };
 }
 export function newAudio(media, start = 0) {
   return {
     id: uid('aud'), mediaId: media.id, name: (media.name || 'Music').replace(/\.[^/.]+$/, ''), srcDuration: media.duration,
-    start, in: 0, out: media.duration, volume: 0.6, fadeIn: 1, fadeOut: 2, duck: true, duckLevel: 0.3, loop: false,
+    start, in: 0, out: media.duration, volume: 0.6, fadeIn: 1, fadeOut: 2, duck: true, duckLevel: 0.3, loop: false, voice: false,
   };
+}
+
+
+export function normalizeOverlay(o) {
+  return Object.assign({
+    id: uid('ovl'), kind: 'video', mediaId: null, name: 'Overlay', srcDuration: 1, width: 16, height: 9, hasAudio: false,
+    start: 0, in: 0, out: 1, speed: 1, x: 0.76, y: 0.26, w: 0.36, radius: 0.12, opacity: 1, rotation: 0, scale: 1,
+    border: 0, borderColor: '#ffffff', shadow: true, volume: 1, muted: true, fadeIn: 0.25, fadeOut: 0.25,
+  }, o, { chroma: Object.assign(defaultChroma(), o.chroma || {}), keyframes: o.keyframes || {} });
+}
+export function newOverlay(media, start, settings) {
+  const isImg = media.kind === 'image';
+  const dur = isImg ? (settings?.imageDuration || 4) : media.duration;
+  return normalizeOverlay({
+    kind: isImg ? 'image' : 'video', mediaId: media.id, name: (media.name || 'Overlay').replace(/\.[^/.]+$/, ''),
+    srcDuration: isImg ? 3600 : media.duration, width: media.width, height: media.height, hasAudio: !isImg && media.hasAudio !== false,
+    start, in: 0, out: dur,
+  });
+}
+export const overlayLen = (o) => Math.max(MIN_CLIP, (o.out - o.in) / (o.kind === 'image' ? 1 : (o.speed || 1)));
+export const overlaySourceTime = (o, t) => o.kind === 'image' ? 0 : clamp(o.in + (t - o.start) * (o.speed || 1), o.in, Math.max(o.in, o.out - 0.001));
+export function overlaysAt(project, t) {
+  return (project.overlays || []).filter(o => t >= o.start && t < o.start + overlayLen(o));
+}
+export function overlayGain(o, t) {
+  if (o.kind !== 'video' || o.muted || !o.hasAudio) return 0;
+  const len = overlayLen(o), local = t - o.start;
+  if (local < 0 || local > len) return 0;
+  return o.volume * Math.min(clamp(local / 0.05, 0, 1), clamp((len - local) / 0.05, 0, 1));
+}
+
+// ---------- keyframes ----------
+export const EASES = {
+  linear: (p) => p,
+  easeIn: (p) => p * p * p,
+  easeOut: (p) => 1 - Math.pow(1 - p, 3),
+  easeInOut: (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
+  hold: () => 0,
+};
+export const ANIM_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity'];
+/** base (non-animated) value of a property for an item of a given type */
+export function animBase(type, item, prop) {
+  if (type === 'clip') {
+    const tr = item.transform || {};
+    return prop === 'x' ? tr.x || 0 : prop === 'y' ? tr.y || 0 : prop === 'scale' ? tr.zoom || 1 : prop === 'rotation' ? tr.angle || 0 : item.opacity ?? 1;
+  }
+  const d = { x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }[prop];
+  return item[prop] ?? d;
+}
+export function kfValue(track, local, base) {
+  if (!track || !track.length) return base;
+  if (local <= track[0].t) return track[0].v;
+  const n = track.length;
+  if (local >= track[n - 1].t) return track[n - 1].v;
+  for (let i = 0; i < n - 1; i++) {
+    const a = track[i], b = track[i + 1];
+    if (local >= a.t && local < b.t) {
+      const p = (local - a.t) / Math.max(1e-6, b.t - a.t);
+      return a.v + (b.v - a.v) * (EASES[a.ease] || EASES.linear)(p);
+    }
+  }
+  return base;
+}
+export function animated(type, item, local) {
+  const kf = item.keyframes || {}, out = {};
+  for (const p of ANIM_PROPS) out[p] = kfValue(kf[p], local, animBase(type, item, p));
+  return out;
+}
+export function hasKeyframes(item, prop) {
+  const kf = item && item.keyframes; if (!kf) return false;
+  return prop ? !!(kf[prop] && kf[prop].length) : ANIM_PROPS.some(p => kf[p] && kf[p].length);
+}
+export function setKeyframe(item, prop, local, v, ease) {
+  item.keyframes = item.keyframes || {};
+  const tr = item.keyframes[prop] = item.keyframes[prop] || [];
+  const ex = tr.find(k => Math.abs(k.t - local) < 1 / 120);
+  if (ex) { ex.v = v; if (ease) ex.ease = ease; }
+  else { tr.push({ t: Math.max(0, local), v, ease: ease || (tr.length ? tr[tr.length - 1].ease : 'easeInOut') || 'easeInOut' }); tr.sort((a, b) => a.t - b.t); }
+}
+export function kfTimes(item) {
+  const s = new Set();
+  const kf = item && item.keyframes || {};
+  for (const p of ANIM_PROPS) for (const k of kf[p] || []) s.add(Math.round(k.t * 1000) / 1000);
+  return [...s].sort((a, b) => a - b);
+}
+export function removeKeyframesAt(item, local) {
+  const kf = item.keyframes || {};
+  for (const p of ANIM_PROPS) if (kf[p]) { kf[p] = kf[p].filter(k => Math.abs(k.t - local) > 1 / 120); if (!kf[p].length) delete kf[p]; }
+}
+export function setEaseAt(item, local, ease) {
+  const kf = item.keyframes || {};
+  for (const p of ANIM_PROPS) for (const k of kf[p] || []) if (Math.abs(k.t - local) < 1 / 120) k.ease = ease;
 }
 
 export const clipLen = (c) => Math.max(MIN_CLIP, (c.out - c.in) / (c.kind === 'image' ? 1 : (c.speed || 1)));
@@ -172,11 +268,15 @@ export function clipGain(it, t) {
   return g;
 }
 /** Intervals where clip audio is audible (for ducking). */
-export function speechIntervals(lay) {
+export function speechIntervals(lay, project) {
   const iv = [];
   for (const it of lay.items) {
     const c = it.clip;
     if (c.kind === 'video' && !c.muted && c.hasAudio && c.volume > 0.02) iv.push([it.start, it.end]);
+  }
+  if (project) {
+    for (const o of project.overlays || []) if (o.kind === 'video' && !o.muted && o.hasAudio && o.volume > 0.02) iv.push([o.start, o.start + overlayLen(o)]);
+    for (const a of project.audio || []) if (a.voice && a.volume > 0.02) iv.push([a.start, a.start + audioLen(a)]);
   }
   // merge
   iv.sort((a, b) => a[0] - b[0]);
@@ -241,6 +341,7 @@ export function rippleShift(project, from, delta, { texts = true, audio = true, 
   if (!delta) return;
   if (texts) for (const t of project.texts) if (t.start >= from - 1e-6) { t.start = Math.max(0, t.start + delta); t.end = Math.max(t.start + 0.1, t.end + delta); }
   if (audio) for (const a of project.audio) if (a.start >= from - 1e-6) a.start = Math.max(0, a.start + delta);
+  if (audio) for (const o of project.overlays || []) if (o.start >= from - 1e-6) o.start = Math.max(0, o.start + delta);
   if (markers) for (const m of project.markers) if (m.time >= from - 1e-6) m.time = Math.max(0, m.time + delta);
 }
 

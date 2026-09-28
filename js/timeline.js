@@ -1,5 +1,5 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
-import { layout, clipLen, audioLen, moveClip, rippleShift, MIN_CLIP } from './model.js';
+import { layout, clipLen, audioLen, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes } from './model.js';
 import { clamp, fmt, el } from './util.js';
 
 const HANDLE = 14;
@@ -17,23 +17,25 @@ export class Timeline {
     this.heads = el('div', { class: 'tl-heads' },
       el('div', { class: 'tl-head ruler-head' }, el('span', { text: 'TIME' })),
       el('div', { class: 'tl-head video-head' }, el('span', { text: 'VIDEO' })),
+      el('div', { class: 'tl-head overlay-head' }, el('span', { text: 'PIP' })),
       el('div', { class: 'tl-head text-head' }, el('span', { text: 'TEXT' })),
       el('div', { class: 'tl-head audio-head' }, el('span', { text: 'MUSIC' })));
     this.scroll = el('div', { class: 'tl-scroll', tabindex: '0', 'aria-label': 'Timeline' });
     this.content = el('div', { class: 'tl-content' });
     this.ruler = el('div', { class: 'tl-ruler' });
     this.vTrack = el('div', { class: 'tl-track tl-video' });
+    this.oTrack = el('div', { class: 'tl-track tl-overlay' });
     this.tTrack = el('div', { class: 'tl-track tl-text' });
     this.aTrack = el('div', { class: 'tl-track tl-audio' });
     this.playhead = el('div', { class: 'tl-playhead' }, el('div', { class: 'tl-playhead-knob' }));
     this.insert = el('div', { class: 'tl-insert' });
     this.snapLine = el('div', { class: 'tl-snapline' });
     this.tip = el('div', { class: 'tl-tip' });
-    this.content.append(this.ruler, this.vTrack, this.tTrack, this.aTrack, this.playhead, this.insert, this.snapLine, this.tip);
+    this.content.append(this.ruler, this.vTrack, this.oTrack, this.tTrack, this.aTrack, this.playhead, this.insert, this.snapLine, this.tip);
     this.scroll.append(this.content);
     this.root.append(this.heads, this.scroll);
     this.ruler.addEventListener('pointerdown', e => this.onScrubStart(e));
-    for (const tr of [this.vTrack, this.tTrack, this.aTrack]) tr.addEventListener('pointerdown', e => { if (e.target === tr) this.onEmptyDown(e); });
+    for (const tr of [this.vTrack, this.oTrack, this.tTrack, this.aTrack]) tr.addEventListener('pointerdown', e => { if (e.target === tr) this.onEmptyDown(e); });
     this.scroll.addEventListener('wheel', e => {
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, this.timeAtClient(e.clientX)); }
     }, { passive: false });
@@ -66,6 +68,7 @@ export class Timeline {
     for (const t of p.texts) if (t.id !== exclude) pts.push(t.start, t.end);
     for (const a of p.audio) if (a.id !== exclude) pts.push(a.start, a.start + audioLen(a));
     for (const m of p.markers) if (m.id !== exclude) pts.push(m.time);
+    for (const o of p.overlays || []) if (o.id !== exclude) pts.push(o.start, o.start + overlayLen(o));
     return pts;
   }
   snap(t, exclude, candidates) {
@@ -89,7 +92,7 @@ export class Timeline {
     const p = this.project, lay = layout(p);
     this._gen = (this._gen || 0) + 1;
     const sel = this.app.selection || {};
-    const width = Math.max(this.scroll.clientWidth, this.x(Math.max(lay.total, ...p.audio.map(a => a.start + audioLen(a)), ...p.texts.map(t => t.end))) + 240);
+    const width = Math.max(this.scroll.clientWidth, this.x(Math.max(lay.total, ...p.audio.map(a => a.start + audioLen(a)), ...p.texts.map(t => t.end), ...(p.overlays || []).map(o => o.start + overlayLen(o)))) + 240);
     this.content.style.width = width + 'px';
     // ruler ticks
     const secs = width / this.pps;
@@ -120,7 +123,7 @@ export class Timeline {
       const c = it.clip;
       const n = this._node('c:' + c.id, () => {
         const d = el('div', { class: 'tl-clip' },
-          el('div', { class: 'strip' }), el('div', { class: 'xfade' }),
+          el('div', { class: 'strip' }), el('canvas', { class: 'cwave' }), el('div', { class: 'xfade' }), el('div', { class: 'kfs' }),
           el('div', { class: 'meta' }, el('b'), el('span')),
           el('div', { class: 'badges' }),
           el('div', { class: 'h-l', 'aria-label': 'Trim start' }), el('div', { class: 'h-r', 'aria-label': 'Trim end' }));
@@ -145,13 +148,34 @@ export class Timeline {
       const xf = n.querySelector('.xfade');
       xf.style.width = (it.xIn * this.pps) + 'px'; xf.style.display = it.xIn > 0 ? 'block' : 'none';
       this.renderStrip(n.querySelector('.strip'), c, rec, w);
+      this.renderWave(n.querySelector('.cwave'), c.kind === 'video' && c.hasAudio ? c : null, w, rec, 16, c.speed || 1);
+      this.renderKfs(n, c, it.start, it.len);
+    }
+    // picture-in-picture overlays
+    const ovs = p.overlays || [];
+    const ol = this.lanes(ovs.map(o => ({ id: o.id, s: o.start, e: o.start + overlayLen(o) })));
+    this.oTrack.style.height = Math.max(34, ol.count * 30 + 6) + 'px';
+    this.oTrack.classList.toggle('empty', !ovs.length);
+    for (const o of ovs) {
+      const n = this._node('o:' + o.id, () => {
+        const d = el('div', { class: 'tl-item tl-ovlitem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
+        d.addEventListener('pointerdown', e => this.onItemDown(e, 'overlay', d._id));
+        return d;
+      }, this.oTrack);
+      n._id = o.id; n.dataset.id = o.id;
+      n.style.left = this.x(o.start) + 'px'; n.style.width = Math.max(8, overlayLen(o) * this.pps) + 'px';
+      n.style.top = (3 + ol.lane.get(o.id) * 30) + 'px';
+      n.querySelector('span').textContent = (o.chroma && o.chroma.enabled ? '🟩 ' : '⧉ ') + o.name;
+      n.classList.toggle('sel', sel.type === 'overlay' && sel.id === o.id);
+      n.classList.toggle('offline', !this.app.media.peek(o.mediaId));
+      this.renderKfs(n, o, o.start, overlayLen(o));
     }
     // text lanes
     const tl = this.lanes(p.texts.map(t => ({ id: t.id, s: t.start, e: t.end })));
     this.tTrack.style.height = Math.max(34, tl.count * 26 + 8) + 'px';
     for (const t of p.texts) {
       const n = this._node('t:' + t.id, () => {
-        const d = el('div', { class: 'tl-item tl-textitem' }, el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
+        const d = el('div', { class: 'tl-item tl-textitem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'text', d._id));
         return d;
       }, this.tTrack);
@@ -160,6 +184,8 @@ export class Timeline {
       n.style.top = (4 + tl.lane.get(t.id) * 26) + 'px';
       n.querySelector('span').textContent = (t.text || '(empty)').replace(/\n/g, ' ');
       n.classList.toggle('sel', sel.type === 'text' && sel.id === t.id);
+      n.classList.toggle('animated', !!(t.anim && (t.anim.in !== 'none' || t.anim.out !== 'none')));
+      this.renderKfs(n, t, t.start, t.end - t.start);
     }
     // audio lanes
     const al = this.lanes(p.audio.map(a => ({ id: a.id, s: a.start, e: a.start + audioLen(a) })));
@@ -174,7 +200,8 @@ export class Timeline {
       const w = Math.max(8, audioLen(a) * this.pps);
       n.style.left = this.x(a.start) + 'px'; n.style.width = w + 'px';
       n.style.top = (3 + al.lane.get(a.id) * 38) + 'px';
-      n.querySelector('span').textContent = '♪ ' + a.name + (a.duck ? ' · duck' : '');
+      n.querySelector('span').textContent = (a.voice ? '🎙 ' : '♪ ') + a.name + (a.duck ? ' · duck' : '');
+      n.classList.toggle('voice', !!a.voice);
       n.classList.toggle('sel', sel.type === 'audio' && sel.id === a.id);
       n.classList.toggle('offline', !this.app.media.peek(a.mediaId));
       this.renderWave(n.querySelector('.wave'), a, w);
@@ -212,16 +239,43 @@ export class Timeline {
       strip.appendChild(im);
     }
   }
-  renderWave(cv, a, w) {
-    const rec = this.app.media.peek(a.mediaId);
+  renderKfs(n, item, start, len) {
+    const box = n.querySelector('.kfs'); if (!box) return;
+    const times = kfTimes(item);
+    const wpx = (len || 0) * this.pps;
+    const key = times.join(',') + '|' + this.pps.toFixed(3) + '|' + wpx.toFixed(0);
+    if (box._key === key) return; box._key = key;
+    box.innerHTML = '';
+    for (const lt of times) {
+      const d = el('button', { class: 'kf', type: 'button', title: 'Keyframe at ' + fmt(start + lt) + ' — click to jump', 'aria-label': 'Keyframe ' + fmt(start + lt) });
+      d.style.left = (lt * this.pps) + 'px';
+      d.dataset.t = String(lt);
+      // keep trim handles usable: diamonds sitting on an edge are display-only
+      if (len && (lt * this.pps < 10 || lt * this.pps > wpx - 10)) d.classList.add('edge');
+      d.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });
+      d.addEventListener('click', (e) => { e.stopPropagation(); const it = this._findItem(n._id); if (it) { this.app.select(it.sel); this.app.seek(it.start + lt + 1e-4); } });
+      box.appendChild(d);
+    }
+  }
+  _findItem(id) {
+    const p = this.project, lay = layout(p);
+    const it = lay.items.find(i => i.clip.id === id); if (it) return { sel: { type: 'clip', id }, start: it.start };
+    const t = p.texts.find(x => x.id === id); if (t) return { sel: { type: 'text', id }, start: t.start };
+    const o = (p.overlays || []).find(x => x.id === id); if (o) return { sel: { type: 'overlay', id }, start: o.start };
+    return null;
+  }
+  renderWave(cv, a, w, recIn, Hh = 30, speed = 1) {
+    if (!a) { if (cv._key !== 'none') { cv._key = 'none'; cv.width = 0; cv.style.display = 'none'; } return; }
+    const rec = recIn || this.app.media.peek(a.mediaId);
     const peaks = rec && rec.peaks;
-    const W = Math.min(4000, Math.round(w)), H = 30;
-    const key = [W, a.in, a.out, !!peaks].join('|');
+    const W = Math.min(4000, Math.round(w)), H = Hh;
+    const key = [W, a.in, a.out, !!peaks, a.muted, a.volume].join('|');
     if (cv._key === key) return; cv._key = key;
+    cv.style.display = peaks ? '' : 'none';
     cv.width = W; cv.height = H; cv.style.width = W + 'px';
     const x = cv.getContext('2d'); x.clearRect(0, 0, W, H);
     if (!peaks) return;
-    x.fillStyle = 'rgba(255,255,255,.35)';
+    x.fillStyle = Hh < 30 ? (a.muted ? 'rgba(255,255,255,.25)' : 'rgba(140,220,255,.85)') : 'rgba(255,255,255,.35)';
     const len = a.out - a.in;
     for (let px = 0; px < W; px += 2) {
       const t = a.in + (px / W) * len;
@@ -386,6 +440,31 @@ export class Timeline {
         this.app.liveUpdate({ keepTime: true });
       };
       d.onUp = () => { if (moved) this.app.commit('Edit music'); };
+    } else if (type === 'overlay') {
+      const o = p.overlays.find(x => x.id === id); const or = { s: o.start, i: o.in, out: o.out };
+      const sp = o.kind === 'image' ? 1 : (o.speed || 1);
+      d.onMove = (ev) => {
+        const dt = dtOf(ev);
+        if (!moved && Math.abs(dt * this.pps) < 4) return;
+        moved = true; this.autoScroll(ev);
+        const len0 = (or.out - or.i) / sp;
+        if (handle === 'body') {
+          let s = Math.max(0, or.s + dt);
+          const sn = this.snap(s, id, [0, len0]); if (sn.snapped) { s = Math.max(0, sn.t); this.showSnap(s); }
+          o.start = s; tip('Starts ' + fmt(s), s);
+        } else if (handle === 'l') {
+          const dd = clamp(dt, o.kind === 'image' ? -or.s : -Math.min(or.i / sp, or.s), len0 - MIN_CLIP);
+          if (o.kind === 'image') { o.out = or.out - dd; } else o.in = or.i + dd * sp;
+          o.start = or.s + dd; tip('Starts ' + fmt(o.start), o.start);
+        } else {
+          let end = or.s + len0 + dt; const sn = this.snap(end, id); if (sn.snapped) { end = sn.t; this.showSnap(end); }
+          const len = Math.max(MIN_CLIP, end - or.s);
+          o.out = o.kind === 'image' ? or.i + len : clamp(or.i + len * sp, or.i + MIN_CLIP * sp, o.srcDuration || 1e9);
+          tip('Ends ' + fmt(o.start + overlayLen(o)), o.start + overlayLen(o));
+        }
+        this.app.liveUpdate({ previewAt: handle === 'r' ? o.start + overlayLen(o) - 0.05 : o.start + 0.01, keepTime: handle === 'body' });
+      };
+      d.onUp = () => { if (moved) this.app.commit('Edit overlay'); };
     } else if (type === 'marker') {
       const m = p.markers.find(x => x.id === id); const o = m.time;
       d.onMove = (ev) => {

@@ -27,7 +27,7 @@
       <img src="icons/icon-192.png" alt="" width="40" height="40" />
       <div>
         <h1>Shape the story, frame by frame.</h1>
-        <p><button class="project-btn" id="projectBtn" type="button" aria-haspopup="dialog"><span id="projectName">Untitled project</span> <span aria-hidden="true">▾</span></button> <span class="save-state" id="saveState">Not saved yet</span></p>
+        <p><button class="project-btn" id="projectBtn" type="button" aria-haspopup="dialog"><span id="projectName">Untitled project</span> <span aria-hidden="true">▾</span></button> <button class="project-btn tpl-btn" id="templatesBtn" type="button" aria-haspopup="dialog">✦ Templates</button> <span class="save-state" id="saveState" role="status" aria-live="polite">Not saved yet</span></p>
       </div>
     </div>
     <div class="masthead-actions">
@@ -55,6 +55,19 @@
     <button class="btn primary" id="reloadBtn" type="button">Reload</button>
   </section>
 
+  <section class="onboard" id="onboard" hidden aria-labelledby="onboardTitle">
+    <div>
+      <h2 id="onboardTitle">Welcome — let’s make your first video</h2>
+      <ol>
+        <li><b>Add clips</b> (or start from a <b>template</b> like a Scripture verse card).</li>
+        <li><b>Tap a clip</b> on the timeline to trim, reframe and color it. Drag edges to trim.</li>
+        <li>Add <b>text</b>, <b>music</b>, a <b>voiceover</b> or a picture-in-picture, then <b>Export</b>.</li>
+      </ol>
+      <p class="hint">Everything is saved automatically on this device. Press <kbd>?</kbd> for shortcuts.</p>
+    </div>
+    <div class="button-row"><button class="btn primary" id="onboardTemplates" type="button">✦ Browse templates</button><button class="btn ghost" id="onboardClose" type="button">Got it</button></div>
+  </section>
+
   <section class="editor" aria-label="Video editing workspace">
     <div class="stage-column">
       <div class="stage-bar"><span class="stage-name" id="stageName">No clips yet</span><span class="stage-meta" id="stageMeta">PREVIEW · 00:00 / 00:00</span></div>
@@ -65,7 +78,7 @@
           <p>Add MP4, MOV or WebM clips and JPG/PNG images. Everything stays on this device and is saved automatically.</p>
           <label class="btn primary" for="videoInput">Choose clips &amp; images</label>
           <input id="videoInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,.mov,.mp4,.m4v,.webm" multiple />
-          <small>Or drag files here</small>
+          <small>Or drag files here · <button class="linkish" id="dropTemplates" type="button">start from a template</button></small>
         </div>
         <div class="stage-wrap" id="stageWrap" hidden>
           <canvas id="stage" aria-label="Preview"></canvas>
@@ -86,6 +99,7 @@
         <button class="active" data-tab="clip" type="button" role="tab">Clip</button>
         <button data-tab="text" type="button" role="tab">Text</button>
         <button data-tab="audio" type="button" role="tab">Audio</button>
+        <button data-tab="pip" type="button" role="tab">PiP</button>
         <button data-tab="look" type="button" role="tab">Look</button>
         <button data-tab="youtube" type="button" role="tab">YouTube</button>
       </div>
@@ -146,14 +160,18 @@
             <div class="slider-row"><label>Zoom</label><input type="range" min="1" max="4" step="0.01" data-bind="clip.transform.zoom" /><output data-out="clip.transform.zoom" data-fmt="x"></output></div>
             <div class="slider-row"><label>Pan X</label><input type="range" min="-1" max="1" step="0.01" data-bind="clip.transform.x" /><output data-out="clip.transform.x" data-fmt="n2"></output></div>
             <div class="slider-row"><label>Pan Y</label><input type="range" min="-1" max="1" step="0.01" data-bind="clip.transform.y" /><output data-out="clip.transform.y" data-fmt="n2"></output></div>
+            <div class="slider-row"><label>Rotation</label><input type="range" min="-180" max="180" step="0.5" data-bind="clip.transform.angle" /><output data-out="clip.transform.angle" data-fmt="deg"></output></div>
+            <div class="slider-row"><label>Opacity</label><input type="range" min="0" max="1" step="0.01" data-bind="clip.opacity" /><output data-out="clip.opacity" data-fmt="pct"></output></div>
+            <label style="display:block;margin-top:10px"><span class="label">Background (when the clip doesn’t fill the frame)</span><select data-bind="clip.bg"><option value="inherit">Project default</option><option value="blur">Blurred copy</option><option value="black">Black</option><option value="white">White</option></select></label>
             <div class="button-row" style="margin-top:10px">
               <button class="btn secondary" data-action="rotL" type="button" aria-label="Rotate left">⟲ 90°</button>
               <button class="btn secondary" data-action="rotR" type="button" aria-label="Rotate right">⟳ 90°</button>
               <button class="btn secondary toggle" data-toggle="clip.transform.flipH" type="button">⇋ Flip H</button>
               <button class="btn secondary toggle" data-toggle="clip.transform.flipV" type="button">⇵ Flip V</button>
             </div>
-            <label style="display:block;margin-top:10px"><span class="label">Ken Burns motion</span><select data-bind="clip.transform.kenBurns"><option value="none">None</option><option value="in">Slow zoom in</option><option value="out">Slow zoom out</option><option value="left">Pan left → right</option><option value="right">Pan right → left</option></select></label>
+            <label style="display:block;margin-top:10px"><span class="label">Ken Burns motion (preset)</span><select data-bind="clip.transform.kenBurns"><option value="none">None</option><option value="in">Slow zoom in</option><option value="out">Slow zoom out</option><option value="left">Pan left → right</option><option value="right">Pan right → left</option></select></label>
           </section>
+          <section class="section kf-panel" data-kf="clip"></section>
           <section class="section">
             <div class="section-head"><h2>Clip color</h2><button class="btn ghost small" data-action="resetClipColor" type="button">Reset</button></div>
             <div class="chips" data-bind="clip.color.preset" data-presets="1"></div>
@@ -189,7 +207,21 @@
             <div class="slider-row"><label>Vertical</label><input type="range" min="0" max="1" step="0.005" data-bind="text.y" /><output data-out="text.y" data-fmt="pct"></output></div>
             <div class="slider-row"><label>Size</label><input type="range" min="0.025" max="0.25" step="0.0025" data-bind="text.size" /><output data-out="text.size" data-fmt="size"></output></div>
             <div class="slider-row"><label>Max width</label><input type="range" min="0.3" max="1" step="0.01" data-bind="text.maxWidth" /><output data-out="text.maxWidth" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Scale</label><input type="range" min="0.2" max="3" step="0.01" data-bind="text.scale" /><output data-out="text.scale" data-fmt="x"></output></div>
+            <div class="slider-row"><label>Rotation</label><input type="range" min="-180" max="180" step="0.5" data-bind="text.rotation" /><output data-out="text.rotation" data-fmt="deg"></output></div>
+            <div class="slider-row"><label>Opacity</label><input type="range" min="0" max="1" step="0.01" data-bind="text.opacity" /><output data-out="text.opacity" data-fmt="pct"></output></div>
           </section>
+          <section class="section">
+            <h2 class="sh">Animation</h2>
+            <div class="field-row">
+              <label><span class="label">In</span><select data-bind="text.anim.in" id="animInSelect"></select></label>
+              <label><span class="label">Out</span><select data-bind="text.anim.out" id="animOutSelect"></select></label>
+            </div>
+            <div class="slider-row"><label>In time</label><input type="range" min="0.1" max="4" step="0.05" data-bind="text.anim.inDur" /><output data-out="text.anim.inDur" data-fmt="s"></output></div>
+            <div class="slider-row"><label>Out time</label><input type="range" min="0.1" max="3" step="0.05" data-bind="text.anim.outDur" /><output data-out="text.anim.outDur" data-fmt="s"></output></div>
+            <div class="chips" id="animPresets"><button type="button" data-in="typewriter" data-out="fade">Typewriter</button><button type="button" data-in="slideUp" data-out="slideDown">Slide up</button><button type="button" data-in="pop" data-out="pop">Pop</button><button type="button" data-in="wordByWord" data-out="fade">Word by word</button><button type="button" data-in="none" data-out="none">None</button></div>
+          </section>
+          <section class="section kf-panel" data-kf="text"></section>
           <section class="section">
             <h2 class="sh">Style</h2>
             <div class="segmented four" data-bind="text.style"><button data-value="clean" type="button">Clean</button><button data-value="band" type="button">Band</button><button data-value="box" type="button">Box</button><button data-value="outline" type="button">Outline</button></div>
@@ -213,6 +245,21 @@
 
       <!-- AUDIO -->
       <div class="tab-panel" id="tab-audio">
+        <section class="section vo" id="voSection">
+          <div class="section-head"><h2>Voiceover</h2><span class="mono vo-timer" id="voTimer">00:00.0</span></div>
+          <div class="vo-meter" aria-hidden="true"><div class="vo-level" id="voLevel"></div><div class="vo-peak" id="voPeak"></div></div>
+          <div class="button-row" style="margin-top:10px">
+            <button class="btn primary" id="voRecord" type="button">● Record at playhead</button>
+            <button class="btn danger-solid" id="voStop" type="button" hidden>■ Stop</button>
+          </div>
+          <div class="vo-review" id="voReview" hidden>
+            <audio id="voAudio" controls preload="auto"></audio>
+            <div class="button-row"><button class="btn primary" id="voKeep" type="button">✓ Keep take</button><button class="btn secondary" id="voRetake" type="button">↻ Retake</button><button class="btn ghost danger" id="voDiscard" type="button">Discard</button></div>
+          </div>
+          <label class="check"><input type="checkbox" id="voPlayVideo" checked /> Play the video while recording</label>
+          <label class="check"><input type="checkbox" id="voMute" checked /> Silence timeline audio while recording</label>
+          <p class="hint" id="voHint">Records from your microphone into a new voice track starting at the playhead. Music automatically ducks under your voice.</p>
+        </section>
         <section class="section">
           <div class="section-head"><h2>Music &amp; audio tracks</h2><label class="btn primary small" for="musicInput">＋ Add music</label><input id="musicInput" type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac" multiple /></div>
           <div class="item-list" id="audioList"></div>
@@ -234,10 +281,73 @@
               <label><span class="label">Fade in (s)</span><input class="field mono" type="number" min="0" max="20" step="0.1" data-bind="audio.fadeIn" data-commit="change" /></label>
               <label><span class="label">Fade out (s)</span><input class="field mono" type="number" min="0" max="20" step="0.1" data-bind="audio.fadeOut" data-commit="change" /></label>
             </div>
-            <label class="check"><input type="checkbox" data-bind="audio.duck" /> Auto-lower (duck) under clip audio</label>
+            <label class="check"><input type="checkbox" data-bind="audio.duck" /> Auto-lower (duck) under speech &amp; voiceover</label>
+            <label class="check"><input type="checkbox" data-bind="audio.voice" /> This is a voice track (other music ducks under it)</label>
             <div class="slider-row"><label>Duck to</label><input type="range" min="0" max="1" step="0.01" data-bind="audio.duckLevel" /><output data-out="audio.duckLevel" data-fmt="pct"></output></div>
             <div class="button-row" style="margin-top:12px"><button class="btn secondary" data-action="audioStartHere" type="button">Start at playhead</button><button class="btn ghost danger" data-action="deleteAudio" type="button">Remove track</button></div>
           </section>
+        </div>
+      </div>
+
+      <!-- PIP -->
+      <div class="tab-panel" id="tab-pip">
+        <section class="section">
+          <div class="section-head"><h2>Picture-in-picture</h2><label class="btn primary small" for="overlayInput">＋ Add overlay</label><input id="overlayInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,.mov,.mp4,.m4v,.webm" /></div>
+          <div class="item-list" id="overlayList"></div>
+          <p class="hint" id="overlayEmptyHint">Place a second video or image over the main clip — a face-cam, a Bible page, a logo reveal or a green-screen shot. It starts at the playhead.</p>
+        </section>
+        <div id="overlayPanel" hidden>
+          <div class="offline-banner" id="ovlOfflineBanner" hidden><p><b>Media missing.</b> Relink this overlay:</p><label class="btn secondary" for="ovlRelinkInput">Choose file…</label><input id="ovlRelinkInput" type="file" accept="video/*,image/*" /></div>
+          <section class="section">
+            <label><span class="label">Name</span><input class="field" data-bind="ovl.name" data-commit="change" maxlength="80" /></label>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Starts at (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="ovl.start" data-commit="change" /></label>
+              <label><span class="label">Length (s)</span><input class="field mono" type="number" min="0.2" step="0.1" id="ovlLenInput" /></label>
+            </div>
+            <div class="field-row" style="margin-top:10px" id="ovlTrimRow">
+              <label><span class="label">Trim in (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="ovl.in" data-commit="change" /></label>
+              <label><span class="label">Trim out (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="ovl.out" data-commit="change" /></label>
+            </div>
+            <div class="button-row" style="margin-top:10px"><button class="btn secondary" data-action="ovlStartHere" type="button">Start at playhead</button><button class="btn secondary" data-action="duplicate" type="button">Duplicate</button><button class="btn ghost danger" data-action="deleteOverlay" type="button">Delete</button></div>
+          </section>
+          <section class="section">
+            <h2 class="sh">Position &amp; look</h2>
+            <div class="segmented six" id="ovlPosPresets"><button data-p="tl" type="button">↖</button><button data-p="tr" type="button">↗</button><button data-p="bl" type="button">↙</button><button data-p="br" type="button">↘</button><button data-p="c" type="button">●</button><button data-p="full" type="button">Full</button></div>
+            <div class="slider-row"><label>Horizontal</label><input type="range" min="0" max="1" step="0.005" data-bind="ovl.x" /><output data-out="ovl.x" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Vertical</label><input type="range" min="0" max="1" step="0.005" data-bind="ovl.y" /><output data-out="ovl.y" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Size</label><input type="range" min="0.05" max="1.2" step="0.005" data-bind="ovl.w" /><output data-out="ovl.w" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Scale</label><input type="range" min="0.2" max="3" step="0.01" data-bind="ovl.scale" /><output data-out="ovl.scale" data-fmt="x"></output></div>
+            <div class="slider-row"><label>Rotation</label><input type="range" min="-180" max="180" step="0.5" data-bind="ovl.rotation" /><output data-out="ovl.rotation" data-fmt="deg"></output></div>
+            <div class="slider-row"><label>Opacity</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.opacity" /><output data-out="ovl.opacity" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Corners</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.radius" /><output data-out="ovl.radius" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Border</label><input type="range" min="0" max="0.03" step="0.001" data-bind="ovl.border" /><output data-out="ovl.border" data-fmt="permil"></output></div>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Border color</span><input class="field color" type="color" data-bind="ovl.borderColor" /></label>
+              <label class="check" style="align-self:end"><input type="checkbox" data-bind="ovl.shadow" /> Drop shadow</label>
+            </div>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Fade in (s)</span><input class="field mono" type="number" min="0" max="5" step="0.05" data-bind="ovl.fadeIn" data-commit="change" /></label>
+              <label><span class="label">Fade out (s)</span><input class="field mono" type="number" min="0" max="5" step="0.05" data-bind="ovl.fadeOut" data-commit="change" /></label>
+            </div>
+          </section>
+          <section class="section" id="ovlSoundSection">
+            <h2 class="sh">Sound</h2>
+            <label class="check"><input type="checkbox" data-bind="ovl.muted" /> Mute overlay audio</label>
+            <div class="slider-row"><label>Volume</label><input type="range" min="0" max="2" step="0.05" data-bind="ovl.volume" /><output data-out="ovl.volume" data-fmt="pct"></output></div>
+          </section>
+          <section class="section">
+            <h2 class="sh">Green screen (chroma key)</h2>
+            <label class="check"><input type="checkbox" data-bind="ovl.chroma.enabled" id="chromaEnable" /> Remove background color</label>
+            <div class="field-row" style="margin-top:6px">
+              <label><span class="label">Key color</span><input class="field color" type="color" data-bind="ovl.chroma.color" /></label>
+              <button class="btn secondary" id="chromaPick" type="button" style="align-self:end">⌖ Pick from preview</button>
+            </div>
+            <div class="slider-row"><label>Similarity</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.chroma.similarity" /><output data-out="ovl.chroma.similarity" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Smoothness</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.chroma.smoothness" /><output data-out="ovl.chroma.smoothness" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Spill</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.chroma.spill" /><output data-out="ovl.chroma.spill" data-fmt="pct"></output></div>
+            <p class="hint">Tip: “Full” size + chroma key puts a green-screen subject over your footage. Use “Pick from preview”, then tap the green area.</p>
+          </section>
+          <section class="section kf-panel" data-kf="overlay"></section>
         </div>
       </div>
 
@@ -312,6 +422,7 @@
         <i class="sep"></i>
         <button class="tool" data-action="addText" type="button" title="Add text (T)">T<span>Text</span></button>
         <button class="tool" data-action="addMarker" type="button" title="Add marker (M)">⚑<span>Marker</span></button>
+        <button class="tool" data-action="addKeyframe" type="button" title="Keyframe selected item at playhead (K + Shift)">◆<span>Keyframe</span></button>
         <label class="tool" for="musicInput" title="Add music">♪<span>Music</span></label>
         <i class="sep"></i>
         <button class="tool toggle" id="rippleBtn" type="button" title="Ripple: deleting/trimming clips shifts text, music and markers after the edit" aria-pressed="true">⇤<span>Ripple</span></button>
@@ -361,6 +472,13 @@
   <p class="hint" id="storageNote"></p>
 </dialog>
 
+<!-- Templates -->
+<dialog class="sheet wide" id="templatesDialog" aria-labelledby="templatesTitle">
+  <div class="sheet-head"><h2 id="templatesTitle">Starter templates</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
+  <p class="hint">Ready-made, fully editable starting points for devotionals, sermons and Shorts. Change any text, swap backgrounds for your own footage, re-time on the timeline.</p>
+  <div class="tpl-grid" id="templateGrid"></div>
+</dialog>
+
 <!-- Help -->
 <dialog class="sheet" id="helpDialog" aria-labelledby="helpTitle">
   <div class="sheet-head"><h2 id="helpTitle">Keyboard shortcuts</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
@@ -375,6 +493,8 @@
     <div><kbd>Ctrl/⌘</kbd>+<kbd>D</kbd><span>Duplicate selected</span></div>
     <div><kbd>T</kbd><span>Add text at playhead</span></div>
     <div><kbd>M</kbd><span>Add marker at playhead</span></div>
+    <div><kbd>Shift</kbd>+<kbd>K</kbd><span>Keyframe selected item at playhead</span></div>
+    <div><kbd>R</kbd><span>Start / stop voiceover recording</span></div>
     <div><kbd>+</kbd> <kbd>−</kbd> / <kbd>0</kbd><span>Zoom timeline in / out / fit</span></div>
     <div><kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd><span>Undo</span></div>
     <div><kbd>Ctrl/⌘</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd><span>Redo</span></div>

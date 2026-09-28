@@ -1,10 +1,10 @@
 /* Video Editor service worker: offline app shell (versioned cache) + share target inbox. */
-const VERSION = 'vb05bf6304d';
+const VERSION = 'vb09fdb0ba0';
 const CACHE = 'video-editor-shell-' + VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css', './css/fonts.css',
-  './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/render.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/exporter.js',
+  './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/render.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/exporter.js', './js/templates.js',
   './vendor/mediabunny.min.mjs',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-192.png', './icons/maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png',
   './fonts/ibm-plex-sans-latin-400-normal.woff2', './fonts/ibm-plex-sans-latin-500-normal.woff2', './fonts/ibm-plex-sans-latin-600-normal.woff2', './fonts/ibm-plex-sans-latin-700-normal.woff2',

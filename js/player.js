@@ -1,5 +1,5 @@
 // Real-time preview engine: plays the whole sequence across clips with a shared clock.
-import { layout, sourceTime, clipGain, musicGain, speechIntervals, audioLen } from './model.js';
+import { layout, sourceTime, clipGain, musicGain, speechIntervals, audioLen, overlayLen, overlaySourceTime, overlayGain } from './model.js';
 import { clamp } from './util.js';
 
 const POOL_MAX = 8;
@@ -19,10 +19,10 @@ export class Player {
   get total() { return this.lay.total; }
   invalidate() {
     const p = this.getProject();
-    this.lay = layout(p); this.speech = speechIntervals(this.lay);
-    const live = new Set(p.clips.map(c => c.id)), liveA = new Set(p.audio.map(a => a.id));
+    this.lay = layout(p); this.speech = speechIntervals(this.lay, p);
+    const live = new Set([...p.clips.map(c => c.id), ...(p.overlays || []).map(o => o.id)]), liveA = new Set(p.audio.map(a => a.id));
     for (const [id, v] of this.videos) {
-      const c = p.clips.find(x => x.id === id);
+      const c = p.clips.find(x => x.id === id) || (p.overlays || []).find(x => x.id === id);
       if (!live.has(id) || (c && c.mediaId !== v.mediaId)) this._dropVideo(id);
     }
     for (const id of [...this.audios.keys()]) if (!liveA.has(id)) this._dropAudio(id);
@@ -52,11 +52,11 @@ export class Player {
     } catch (e) { console.warn('Could not route media audio', e); }
   }
   _setGain(entry, v) {
-    v = Math.max(0, v);
+    v = this.muteAll ? 0 : Math.max(0, v);
     if (entry.gain) {
       const now = this.ac.currentTime;
       if (Math.abs(entry.gain.gain.value - v) > 0.001) entry.gain.gain.setTargetAtTime(v, now, 0.02);
-    } else if (this.audioEnabled && this.ac) {
+    } else if (this.audioEnabled && this.ac && !this.muteAll) {
       entry.el.muted = v <= 0.001; entry.el.volume = clamp(v, 0, 1);
     } else entry.el.muted = true;
   }
@@ -137,6 +137,27 @@ export class Player {
       }
       this._setGain(v, active && fwd && this.rate === 1 ? clipGain(it, t) : 0);
     }
+    for (const o of p.overlays || []) {
+      const len = overlayLen(o);
+      const active = t >= o.start && t < o.start + len;
+      const pre = !active && fwd && o.start > t && o.start - t < 1.5;
+      if (!active && !pre) continue;
+      if (o.kind === 'image') { if (!this.media.imageSync(o.mediaId)) this.media.image(o.mediaId).then(() => this.requestRender()).catch(() => { }); continue; }
+      const v = this._getVideo(o); if (!v) continue;
+      needed.add(o.id); this.lastUse.set(o.id, now);
+      const el = v.el, desired = active ? overlaySourceTime(o, t) : o.in;
+      if (active && fwd) {
+        const pr = clamp((o.speed || 1) * this.rate, 0.0625, 16);
+        if (Math.abs(el.playbackRate - pr) > 1e-3) el.playbackRate = pr;
+        if (el.paused) { if (Math.abs(el.currentTime - desired) > 0.04) el.currentTime = desired; el.play().catch(() => { }); }
+        else if (Math.abs(el.currentTime - desired) > 0.3 && !el.seeking) el.currentTime = desired;
+        if (el.readyState < 3 || el.seeking) ready = false;
+      } else {
+        if (!el.paused) el.pause();
+        if (Math.abs(el.currentTime - desired) > 0.015 && !el.seeking) el.currentTime = desired;
+      }
+      this._setGain(v, active && fwd && this.rate === 1 ? overlayGain(o, t) : 0);
+    }
     for (const [id, v] of this.videos) {
       if (needed.has(id)) continue;
       if (!v.el.paused) v.el.pause();
@@ -174,6 +195,12 @@ export class Player {
     if (!v || !v.el.videoWidth || (v.el.readyState < 2 && !v.el._hasFrame)) return null;
     return { img: v.el, w: v.el.videoWidth, h: v.el.videoHeight };
   };
+  getOverlaySource = (o) => {
+    if (o.kind === 'image') { const im = this.media.imageSync(o.mediaId); return im ? { img: im.img, w: im.w, h: im.h } : null; }
+    const v = this.videos.get(o.id);
+    if (!v || !v.el.videoWidth || (v.el.readyState < 2 && !v.el._hasFrame)) return null;
+    return { img: v.el, w: v.el.videoWidth, h: v.el.videoHeight };
+  };
   getLogo = () => {
     const p = this.getProject();
     if (!p.logo) return null;
@@ -190,7 +217,7 @@ export class Player {
   render() {
     const p = this.getProject();
     const W = this.canvas.width, H = this.canvas.height;
-    const r = this.comp.render(this.ctx, W, H, p, this.lay, this.t, this.getSource, { getLogo: this.getLogo });
+    const r = this.comp.render(this.ctx, W, H, p, this.lay, this.t, this.getSource, { getLogo: this.getLogo, getOverlaySource: this.getOverlaySource });
     this.lastBoxes = r.boxes;
     return r;
   }

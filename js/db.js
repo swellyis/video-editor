@@ -71,6 +71,7 @@ export function mediaIdsOf(p) {
   const ids = new Set();
   (p.clips || []).forEach(c => c.mediaId && ids.add(c.mediaId));
   (p.audio || []).forEach(a => a.mediaId && ids.add(a.mediaId));
+  (p.overlays || []).forEach(o => o.mediaId && ids.add(o.mediaId));
   if (p.logo && p.logo.mediaId) ids.add(p.logo.mediaId);
   return ids;
 }

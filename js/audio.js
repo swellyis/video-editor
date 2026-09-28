@@ -1,5 +1,5 @@
 // Offline audio mixing for export: clip audio (with speed, fades, transitions) + music (with ducking).
-import { clipGain, musicGain, speechIntervals, audioLen } from './model.js';
+import { clipGain, musicGain, speechIntervals, audioLen, overlayLen, overlayGain } from './model.js';
 import { loadMediabunny } from './media.js';
 
 const decoded = new Map();
@@ -89,10 +89,11 @@ export async function mixAudio(project, lay, media, { sampleRate = 48000, onStat
   const total = lay.total;
   const hasClipAudio = lay.items.some(it => it.clip.kind === 'video' && it.clip.hasAudio && !it.clip.muted && it.clip.volume > 0);
   const music = project.audio.filter(a => a.volume > 0 && a.start < total);
-  if (!hasClipAudio && !music.length) return null;
+  const ovs = (project.overlays || []).filter(o => o.kind === 'video' && o.hasAudio && !o.muted && o.volume > 0 && o.start < total);
+  if (!hasClipAudio && !music.length && !ovs.length) return null;
   const len = Math.max(1, Math.ceil(total * sampleRate));
   const ctx = new OfflineAudioContext(2, len, sampleRate);
-  const speech = speechIntervals(lay);
+  const speech = speechIntervals(lay, project);
   let n = 0;
   for (const it of lay.items) {
     const c = it.clip;
@@ -126,6 +127,26 @@ export async function mixAudio(project, lay, media, { sampleRate = 48000, onStat
     src.connect(g).connect(ctx.destination);
     applyEnvelope(g.gain, a.start, a.start + l, (t) => musicGain(a, t, speech, total));
     src.start(a.start, a.in, l);
+  }
+  for (const o of ovs) {
+    onStatus && onStatus('Decoding overlay audio…');
+    const buf = await decodeMedia(media, o.mediaId);
+    if (!buf) continue;
+    const sr = buf.sampleRate;
+    const a0 = Math.floor(o.in * sr), a1 = Math.min(buf.length, Math.ceil(o.out * sr));
+    if (a1 <= a0) continue;
+    let chans = [];
+    for (let ch = 0; ch < Math.min(2, buf.numberOfChannels); ch++) chans.push(buf.getChannelData(ch).subarray(a0, a1));
+    if (Math.abs((o.speed || 1) - 1) > 1e-3) chans = timeStretch(chans, sr, o.speed);
+    const seg = ctx.createBuffer(chans.length, chans[0].length, sr);
+    chans.forEach((d, i) => seg.copyToChannel(d, i));
+    const end = Math.min(total, o.start + overlayLen(o));
+    if (end <= o.start) continue;
+    const src = ctx.createBufferSource(); src.buffer = seg;
+    const g = ctx.createGain();
+    src.connect(g).connect(ctx.destination);
+    applyEnvelope(g.gain, o.start, end, (t) => overlayGain(o, t));
+    src.start(o.start, 0); src.stop(end);
   }
   onStatus && onStatus('Mixing audio…');
   return await ctx.startRendering();
