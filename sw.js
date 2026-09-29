@@ -1,10 +1,10 @@
 /* Video Editor service worker: offline app shell (versioned cache) + share target inbox. */
-const VERSION = 'v454b530b26';
+const VERSION = 'v4b57286be8';
 const CACHE = 'video-editor-shell-' + VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css', './css/fonts.css',
-  './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/render.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/exporter.js', './js/templates.js', './js/install.js', './js/install-early.js', './js/build.js',
+  './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/render.js', './js/blur.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/exporter.js', './js/templates.js', './js/install.js', './js/install-early.js', './js/build.js',
   './js/heic-worker.js',
   './vendor/mediabunny.min.mjs', './vendor/gifuct.min.mjs', './vendor/libheif/libheif.js', './vendor/libheif/libheif.wasm',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-192.png', './icons/maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png',

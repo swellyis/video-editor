@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="ve-build" content="v454b530b26" />
+  <meta name="ve-build" content="v4b57286be8" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
@@ -98,6 +98,12 @@
         </div>
         <div class="stage-wrap" id="stageWrap" hidden>
           <canvas id="stage" aria-label="Preview"></canvas>
+          <div class="blur-layer" id="blurLayer" hidden>
+            <div class="blur-box" id="blurBox" tabindex="0" role="group" aria-label="Blur region on the preview. Drag to move, drag the handles to resize. Arrow keys nudge, Alt plus arrows resize.">
+              <span class="bh" data-h="-1,-1"></span><span class="bh" data-h="0,-1"></span><span class="bh" data-h="1,-1"></span><span class="bh" data-h="-1,0"></span><span class="bh" data-h="1,0"></span><span class="bh" data-h="-1,1"></span><span class="bh" data-h="0,1"></span><span class="bh" data-h="1,1"></span>
+              <span class="blur-tag" id="blurTag">Blur</span>
+            </div>
+          </div>
         </div>
       </div>
       <div class="transport">
@@ -187,6 +193,26 @@
             <label style="display:block;margin-top:10px"><span class="label">Ken Burns motion (preset)</span><select data-bind="clip.transform.kenBurns"><option value="none">None</option><option value="in">Slow zoom in</option><option value="out">Slow zoom out</option><option value="left">Pan left → right</option><option value="right">Pan right → left</option></select></label>
           </section>
           <section class="section kf-panel" data-kf="clip"></section>
+          <section class="section" id="clipBlurSection">
+            <div class="section-head"><h2>Blur background</h2></div>
+            <button type="button" class="tog-btn" data-toggle="clip.blur.enabled" aria-pressed="false"><span class="tg-sw" aria-hidden="true"></span><span class="tg-l">Blur this clip</span></button>
+            <div id="clipBlurBody" hidden>
+              <span class="label" style="margin-top:10px">Effect</span>
+              <div class="segmented " data-bind="clip.blur.mode"><button data-value="blur" type="button">Blur</button><button data-value="pixelate" type="button">Pixelate</button></div>
+              <div class="slider-row"><label>Strength</label><input type="range" min="0" max="1" step="0.01" data-bind="clip.blur.strength" /><output data-out="clip.blur.strength" data-fmt="pct"></output></div>
+              <button type="button" class="tog-btn" data-toggle="clip.blur.keep" aria-pressed="false"><span class="tg-sw" aria-hidden="true"></span><span class="tg-l">Keep a sharp subject</span></button>
+              <div id="clipBlurKeep" hidden>
+                <span class="label" style="margin-top:10px">Sharp area shape</span>
+                <div class="segmented " data-bind="clip.blur.shape"><button data-value="rect" type="button">Box</button><button data-value="ellipse" type="button">Ellipse</button></div>
+                <div class="slider-row"><label>Soft edge</label><input type="range" min="0" max="1" step="0.01" data-bind="clip.blur.feather" /><output data-out="clip.blur.feather" data-fmt="pct"></output></div>
+                <div class="slider-row"><label>Horizontal</label><input type="range" min="0" max="1" step="0.005" data-bind="clip.blur.x" /><output data-out="clip.blur.x" data-fmt="pct"></output></div>
+                <div class="slider-row"><label>Vertical</label><input type="range" min="0" max="1" step="0.005" data-bind="clip.blur.y" /><output data-out="clip.blur.y" data-fmt="pct"></output></div>
+                <div class="slider-row"><label>Width</label><input type="range" min="0.05" max="1.5" step="0.005" data-bind="clip.blur.w" /><output data-out="clip.blur.w" data-fmt="pct"></output></div>
+                <div class="slider-row"><label>Height</label><input type="range" min="0.05" max="1.5" step="0.005" data-bind="clip.blur.h" /><output data-out="clip.blur.h" data-fmt="pct"></output></div>
+                <p class="hint" style="margin-top:6px">Drag the sharp area on the preview to place it over the subject.</p>
+              </div>
+            </div>
+          </section>
           <section class="section">
             <div class="section-head"><h2>Clip color</h2><button class="btn ghost small" data-action="resetClipColor" type="button">Reset</button></div>
             <div class="chips" data-bind="clip.color.preset" data-presets="1"></div>
@@ -376,6 +402,43 @@
 
       <!-- LOOK -->
       <div class="tab-panel" id="tab-look">
+        <section class="section" id="blurSection">
+          <div class="section-head"><h2>Blur / Privacy</h2><button class="btn primary" data-action="addBlur" type="button">＋ Blur region</button></div>
+          <div class="item-list" id="blurList"></div>
+          <p class="hint" id="blurEmptyHint">Hide a face, a screen or a license plate, or blur the background. Tap ＋ Blur region, then drag the box on the preview and pull its handles to resize. It has its own timing and track. To follow a moving subject, add keyframes.</p>
+        </section>
+        <div id="blurPanel" hidden>
+          <section class="section">
+            <span class="label">Shape</span>
+            <div class="segmented " data-bind="blur.shape"><button data-value="rect" type="button">Box</button><button data-value="ellipse" type="button">Ellipse</button></div>
+            <span class="label" style="margin-top:10px">Effect</span>
+            <div class="segmented " data-bind="blur.mode"><button data-value="blur" type="button">Blur</button><button data-value="pixelate" type="button">Pixelate</button></div>
+            <button type="button" class="tog-btn" data-toggle="blur.invert" aria-pressed="false"><span class="tg-sw" aria-hidden="true"></span><span class="tg-l">Blur everything outside the shape</span></button>
+            <p class="hint" style="margin-top:6px">Background blur / spotlight: the shape stays sharp and the rest of the picture is blurred.</p>
+            <div class="slider-row"><label>Strength</label><input type="range" min="0" max="1" step="0.01" data-bind="blur.strength" /><output data-out="blur.strength" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Soft edge</label><input type="range" min="0" max="1" step="0.01" data-bind="blur.feather" /><output data-out="blur.feather" data-fmt="pct"></output></div>
+            <div id="blurRadiusRow"><div class="slider-row"><label>Corners</label><input type="range" min="0" max="1" step="0.01" data-bind="blur.radius" /><output data-out="blur.radius" data-fmt="pct"></output></div></div>
+            <div class="slider-row"><label>Fade in</label><input type="range" min="0" max="3" step="0.05" data-bind="blur.fadeIn" /><output data-out="blur.fadeIn" data-fmt="s"></output></div>
+            <div class="slider-row"><label>Fade out</label><input type="range" min="0" max="3" step="0.05" data-bind="blur.fadeOut" /><output data-out="blur.fadeOut" data-fmt="s"></output></div>
+          </section>
+          <section class="section">
+            <h2 class="sh">Position &amp; size</h2>
+            <div class="slider-row"><label>Horizontal</label><input type="range" min="0" max="1" step="0.005" data-bind="blur.x" /><output data-out="blur.x" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Vertical</label><input type="range" min="0" max="1" step="0.005" data-bind="blur.y" /><output data-out="blur.y" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Width</label><input type="range" min="0.03" max="1.5" step="0.005" data-bind="blur.w" /><output data-out="blur.w" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Height</label><input type="range" min="0.03" max="1.5" step="0.005" data-bind="blur.h" /><output data-out="blur.h" data-fmt="pct"></output></div>
+          </section>
+          <section class="section kf-panel" data-kf="blur"></section>
+          <section class="section">
+            <h2 class="sh">Timing</h2>
+            <div class="field-row">
+              <label><span class="label">Start (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="blur.start" data-commit="change" /></label>
+              <label><span class="label">End (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="blur.end" data-commit="change" /></label>
+            </div>
+            <div class="button-row" style="margin-top:8px"><button class="btn secondary" data-action="blurStartHere" type="button">Start at playhead</button><button class="btn secondary" data-action="blurEndHere" type="button">End at playhead</button></div>
+            <div class="button-row" style="margin-top:8px"><button class="btn secondary" data-action="duplicate" type="button">Duplicate</button><button class="btn ghost danger" data-action="deleteBlur" type="button">Delete</button></div>
+          </section>
+        </div>
         <section class="section">
           <h2 class="sh">Canvas</h2>
           <span class="label">Aspect ratio</span>

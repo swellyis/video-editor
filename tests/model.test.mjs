@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { newProject, migrate, layout, splitItem, newAudio, clipGain, musicGain, speechIntervals, rebaseKeyframes, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen, thumbFormat, THUMB_FORMATS } from '../js/model.js';
+import { newProject, migrate, layout, splitItem, newBlur, blurAt, animated, setKeyframe, defaultClipBlur, newAudio, clipGain, musicGain, speechIntervals, rebaseKeyframes, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen, thumbFormat, THUMB_FORMATS } from '../js/model.js';
 import { safeName, tarBlob, isTar, readTar, dataURLToBlob, fmt } from '../js/util.js';
 
 const clip = (id, out, extra = {}) => normalizeClip({ id, mediaId: 'm_' + id, name: id, kind: 'video', srcDuration: 60, in: 0, out, ...extra });
@@ -125,4 +125,26 @@ test('mute: muted clips/tracks are silent, do not duck, survive split, and old p
   const m = migrate(old); assert.equal(m.clips[0].muted, false); assert.equal(m.audio[0].muted, false);
   const bad = migrate({ clips: [{ id: 'c', mediaId: 'x', in: 0, out: 2, muted: 'yes' }], audio: [{ id: 'a', mediaId: 'y', srcDuration: 5, muted: 1 }] });
   assert.equal(bad.clips[0].muted, false); assert.equal(bad.audio[0].muted, false);
+});
+
+test('blur regions: defaults, timing + fades, keyframed motion, split, ripple, migration and damaged input', () => {
+  const p = proj(clip('a', 10)); assert.deepEqual(p.blurs, []);
+  const b = newBlur(2, 4); Object.assign(b, { x: 0.2, w: 0.2, fadeIn: 1, fadeOut: 1 }); p.blurs.push(b);
+  assert.equal(blurAt(b, 1.9), null); assert.equal(blurAt(b, 6), null);
+  assert.ok(Math.abs(blurAt(b, 2.5).amount - 0.5) < 1e-9); assert.equal(blurAt(b, 4).amount, 1); assert.ok(blurAt(b, 5.5).amount < 0.6);
+  setKeyframe(b, 'x', 0, 0.2, 'linear'); setKeyframe(b, 'x', 4, 0.8, 'linear');
+  assert.ok(Math.abs(animated('blur', b, 2).x - 0.5) < 1e-9); assert.ok(Math.abs(blurAt(b, 4).x - 0.5) < 1e-9);
+  assert.equal(animated('blur', b, 1).scale, undefined, 'blur regions animate position and size only');
+  const r = splitItem(p, { type: 'blur', id: b.id }, 4);
+  assert.ok(r && !r.fail && p.blurs.length === 2 && Math.abs(p.blurs[0].end - 4) < 1e-9 && Math.abs(p.blurs[1].start - 4) < 1e-9);
+  assert.ok(Math.abs(animated('blur', p.blurs[1], 0).x - 0.5) < 1e-6, 'second half continues from the interpolated position');
+  assert.ok(splitItem(p, { type: 'blur', id: p.blurs[0].id }, 2.001).fail, 'cannot split at the very edge');
+  const old = migrate({ schema: 5, clips: [{ id: 'c', mediaId: 'x', in: 0, out: 2 }] });
+  assert.deepEqual(old.blurs, []); assert.deepEqual(old.clips[0].blur, defaultClipBlur()); assert.equal(old.clips[0].blur.enabled, false);
+  const bad = migrate({ blurs: [null, 'x', { shape: 'star', mode: 'zap', x: 99, w: 0, strength: 9, invert: 'yes', start: -3, end: -9, keyframes: { x: [{ t: 'z', v: 1 }, { t: 1, v: 1e9 }] } }, ...Array.from({ length: 300 }, () => ({}))],
+    clips: [{ id: 'c', mediaId: 'x', in: 0, out: 2, blur: { enabled: 'yes', strength: 7, mode: 'evil' } }] });
+  const q = bad.blurs[0]; assert.ok(bad.blurs.length <= 200);
+  assert.equal(q.shape, 'rect'); assert.equal(q.mode, 'blur'); assert.equal(q.invert, false); assert.ok(q.x <= 1.5 && q.w >= 0.01 && q.strength === 1 && q.end > q.start && q.start >= 0);
+  assert.deepEqual(q.keyframes.x.map(k => k.v), [1.5]);
+  assert.equal(bad.clips[0].blur.enabled, false); assert.equal(bad.clips[0].blur.strength, 1); assert.equal(bad.clips[0].blur.mode, 'blur');
 });

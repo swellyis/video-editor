@@ -8,7 +8,7 @@ import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, ANIM_PROPS, normalizeClip,
-  splitItem, audioSpan, rebaseKeyframes, overlaysAt, overlaySourceTime, thumbFormat,
+  splitItem, audioSpan, rebaseKeyframes, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur,
 } from './model.js';
 import { Compositor, drawLogo, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
@@ -120,12 +120,13 @@ app.seek = (t) => { player.setTime(t); };
 app.select = (sel, opts = {}) => {
   app.selection = sel;
   if (sel) {
-    const tab = { clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip' }[sel.type];
+    const tab = { clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip', blur: 'look' }[sel.type];
     if (tab) showTab(tab);
     if (opts.seekInto) {
       const t = player.t;
       if (sel.type === 'clip') { const it = layout(app.project).items.find(i => i.clip.id === sel.id); if (it && (t < it.start || t >= it.end)) player.setTime(it.start + 0.001); }
       if (sel.type === 'text') { const x = app.project.texts.find(i => i.id === sel.id); if (x && (t < x.start || t >= x.end)) player.setTime(x.start + 0.01); }
+      if (sel.type === 'blur') { const x = (app.project.blurs || []).find(i => i.id === sel.id); if (x && (t < x.start || t >= x.end)) player.setTime(x.start + 0.01); }
       if (sel.type === 'marker') { const m = app.project.markers.find(i => i.id === sel.id); if (m) player.setTime(m.time); }
       if (sel.type === 'overlay') { const o = app.project.overlays.find(i => i.id === sel.id); if (o && (t < o.start || t >= o.start + overlayLen(o))) player.setTime(o.start + 0.01); }
     }
@@ -142,15 +143,16 @@ function selected(type) {
   if (s.type === 'audio') return p.audio.find(c => c.id === s.id) || null;
   if (s.type === 'marker') return p.markers.find(c => c.id === s.id) || null;
   if (s.type === 'overlay') return (p.overlays || []).find(c => c.id === s.id) || null;
+  if (s.type === 'blur') return (p.blurs || []).find(c => c.id === s.id) || null;
   return null;
 }
 /** Selected animatable item with its timeline start/length and the playhead's local time. */
 function kfTarget(type) {
-  const s = app.selection; if (!s || !['clip', 'text', 'overlay'].includes(s.type) || (type && s.type !== type)) return null;
+  const s = app.selection; if (!s || !['clip', 'text', 'overlay', 'blur'].includes(s.type) || (type && s.type !== type)) return null;
   const item = selected(s.type); if (!item) return null;
   let start, len;
   if (s.type === 'clip') { const it = layout(app.project).items.find(i => i.clip.id === item.id); if (!it) return null; start = it.start; len = it.len; }
-  else if (s.type === 'text') { start = item.start; len = item.end - item.start; }
+  else if (s.type === 'text' || s.type === 'blur') { start = item.start; len = item.end - item.start; }
   else { start = item.start; len = overlayLen(item); }
   const raw = player.t - start;
   return { type: s.type, item, start, len, raw, local: clamp(raw, 0, len), inside: raw >= -1e-4 && raw <= len + 1e-4 };
@@ -159,8 +161,9 @@ const KF_PATHS = {
   'clip.transform.x': 'x', 'clip.transform.y': 'y', 'clip.transform.zoom': 'scale', 'clip.transform.angle': 'rotation', 'clip.opacity': 'opacity',
   'text.x': 'x', 'text.y': 'y', 'text.scale': 'scale', 'text.rotation': 'rotation', 'text.opacity': 'opacity',
   'ovl.x': 'x', 'ovl.y': 'y', 'ovl.scale': 'scale', 'ovl.rotation': 'rotation', 'ovl.opacity': 'opacity',
+  'blur.x': 'x', 'blur.y': 'y', 'blur.w': 'w', 'blur.h': 'h',
 };
-const typeOfRoot = (path) => ({ clip: 'clip', text: 'text', ovl: 'overlay' })[path.split('.')[0]];
+const typeOfRoot = (path) => ({ clip: 'clip', text: 'text', ovl: 'overlay', blur: 'blur' })[path.split('.')[0]];
 
 // ---------------------------------------------------------------- rendering
 function renderAll() {
@@ -179,13 +182,14 @@ function renderAll() {
 }
 function syncHeads() {
   qs('.text-head').style.height = timeline.tTrack.offsetHeight + 'px';
+  qs('.blur-head').style.height = timeline.bTrack.offsetHeight + 'px';
   qs('.overlay-head').style.height = timeline.oTrack.offsetHeight + 'px';
   qs('.audio-head').style.height = timeline.aTrack.offsetHeight + 'px';
 }
 function sizeStage() {
   const has = app.project.clips.length > 0;
   $('dropzone').hidden = has; $('stageWrap').hidden = !has;
-  if (!has) return;
+  if (!has) { $('blurLayer').hidden = true; return; }
   const { width: W, height: H } = outputDims(app.project);
   const shell = $('dropTarget');
   const cs = getComputedStyle(shell);
@@ -194,6 +198,7 @@ function sizeStage() {
   let cw = availW, ch = cw * H / W;
   if (ch > maxH) { ch = maxH; cw = ch * W / H; }
   stage.style.width = Math.floor(cw) + 'px'; stage.style.height = Math.floor(ch) + 'px';
+  syncBlurBox();
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const pw = Math.min(W, Math.round(cw * dpr)), ph = Math.round(pw * H / W);
   if (stage.width !== pw || stage.height !== ph) { stage.width = pw; stage.height = ph; }
@@ -218,6 +223,7 @@ function onTime(t, force) {
   const name = it ? (it.index + 1) + ' / ' + lay.items.length + ' · ' + it.clip.name : (app.project.clips.length ? '' : 'No clips yet');
   if (name !== lastStageName) { $('stageName').textContent = name; lastStageName = name; }
   timeline.updatePlayhead(t, player.playing);
+  if (app.selection && (app.selection.type === 'blur' || app.selection.type === 'clip')) syncBlurBox();
   if (!player.playing && app.selection) refreshAnimated();
   if (voice && voice.state === 'rec') voice.tick();
 }
@@ -225,7 +231,7 @@ function onTime(t, force) {
 // ---------------------------------------------------------------- data binding
 function resolve(path) {
   const [root, ...rest] = path.split('.');
-  let obj = root === 'proj' ? app.project : root === 'clip' ? selected('clip') : root === 'text' ? selected('text') : root === 'audio' ? selected('audio') : root === 'ovl' ? selected('overlay') : null;
+  let obj = root === 'proj' ? app.project : root === 'clip' ? selected('clip') : root === 'text' ? selected('text') : root === 'audio' ? selected('audio') : root === 'ovl' ? selected('overlay') : root === 'blur' ? selected('blur') : null;
   if (!obj) return null;
   for (let i = 0; i < rest.length - 1; i++) { obj = obj[rest[i]]; if (obj == null) return null; }
   return { obj, key: rest[rest.length - 1] };
@@ -268,6 +274,7 @@ function afterSet(path, obj, old, before) {
   }
   if (path === 'ovl.in' || path === 'ovl.out') { const mx = obj.kind === 'image' ? 3600 : (obj.srcDuration || 1e9); obj.in = clamp(obj.in, 0, mx - MIN_CLIP); obj.out = clamp(obj.out, obj.in + MIN_CLIP, mx); }
   if (path === 'ovl.start') obj.start = Math.max(0, obj.start);
+  if (path.startsWith('blur.') || path.startsWith('clip.blur.')) { if (path === 'blur.start' || path === 'blur.end') { obj.start = Math.max(0, obj.start); if (obj.end < obj.start + 0.1) obj.end = obj.start + 0.1; } if (path.startsWith('blur.')) cleanBlur(obj); else cleanClipBlur(obj); }
   if (path === 'ovl.speed') obj.speed = clamp(Number(obj.speed) || 1, 0.25, 4);
   if (path === 'text.anim.in' || path === 'text.anim.out') { const t = selected('text'); const d = t.end - t.start; if (t.anim.inDur + t.anim.outDur > d) { t.anim.inDur = Math.min(t.anim.inDur, d * 0.6); t.anim.outDur = Math.min(t.anim.outDur, d * 0.35); } }
   if (path === 'proj.settings.ratio' || path === 'proj.settings.res') sizeStage();
@@ -345,6 +352,7 @@ function fillInspector() {
     else inp.value = v;
   }
   for (const t of qsa('[data-toggle]')) t.classList.toggle('on', !!getVal(t.dataset.toggle));
+  for (const t of qsa('.tog-btn[data-toggle]')) t.setAttribute('aria-pressed', getVal(t.dataset.toggle) ? 'true' : 'false');
   for (const t of qsa('.mute-btn[data-toggle]')) {
     const m = !!getVal(t.dataset.toggle);
     t.setAttribute('aria-pressed', m ? 'true' : 'false');
@@ -376,7 +384,12 @@ function fillInspector() {
   }
   const t = selected('text');
   const o = selected('overlay');
+  const bl = selected('blur');
   stage.classList.toggle('text-edit', !!t || !!o);
+  $('blurPanel').hidden = !bl; $('blurEmptyHint').hidden = (p.blurs || []).length > 0;
+  if (bl) $('blurRadiusRow').hidden = bl.shape === 'ellipse';
+  const cbl = c && c.blur; $('clipBlurBody').hidden = !(cbl && cbl.enabled); $('clipBlurKeep').hidden = !(cbl && cbl.enabled && cbl.keep);
+  syncBlurBox();
   $('overlayPanel').hidden = !o; $('overlayEmptyHint').hidden = (p.overlays || []).length > 0;
   if (o) {
     if (document.activeElement !== $('ovlLenInput')) $('ovlLenInput').value = overlayLen(o).toFixed(2);
@@ -398,7 +411,7 @@ function fillInspector() {
   // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
   // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
   const st = app.selection && selected(app.selection.type) ? app.selection.type : null;
-  const kfOk = st === 'clip' || st === 'text' || st === 'overlay';
+  const kfOk = st === 'clip' || st === 'text' || st === 'overlay' || st === 'blur';
   const setState = (sel, ok, tipOk, tipNo) => qsa(sel).forEach(b => { b.disabled = false; b.setAttribute('aria-disabled', ok ? 'false' : 'true'); b.classList.toggle('is-off', !ok); b.title = ok ? tipOk : tipNo; });
   setState('.tl-toolbar [data-action=duplicate]', !!st, 'Duplicate selected (Ctrl+D)', TOOL_HINT.duplicate.none);
   setState('.tl-toolbar [data-action=delete]', !!st, 'Delete selected (Del)', TOOL_HINT.delete.none);
@@ -424,6 +437,9 @@ function renderLists(light) {
   const texts = [...p.texts].sort((a, b) => a.start - b.start).map(t => ({ t, key: [t.id, fmt(t.start), t.text, isSel('text', t.id)] }));
   renderList('textList', texts, ({ t }) => { const txt = (t.text || '(empty)').replace(/\n/g, ' '); return listItem(isSel('text', t.id), `Text at ${fmt(t.start)}: ${txt}`, () => app.select({ type: 'text', id: t.id }, { seekInto: true }),
     el('span', { class: 't', text: fmt(t.start) }), el('span', { class: 'grow', text: txt })); });
+  const blrs = [...(p.blurs || [])].sort((a, b) => a.start - b.start).map(b => ({ b, key: [b.id, b.mode, b.invert, b.shape, fmt(b.start), fmt(b.end), isSel('blur', b.id)] }));
+  renderList('blurList', blrs, ({ b }) => listItem(isSel('blur', b.id), `${b.invert ? 'Focus' : b.mode === 'pixelate' ? 'Pixelate' : 'Blur'} region at ${fmt(b.start)}`, () => app.select({ type: 'blur', id: b.id }, { seekInto: true }),
+    el('span', { class: 'item-ico' }, icon('blur')), el('span', { class: 'grow', text: (b.invert ? 'Focus (blur outside)' : b.mode === 'pixelate' ? 'Pixelate' : 'Blur') + ' · ' + (b.shape === 'ellipse' ? 'ellipse' : 'box') }), el('span', { class: 't', text: fmt(b.start) + ' · ' + fmt(b.end - b.start) })));
   const auds = p.audio.map(a => ({ a, span: audioSpan(a, total), key: [a.id, a.name, a.voice, a.loop, fmt(a.start), fmt(audioSpan(a, total)), isSel('audio', a.id)] }));
   renderList('audioList', auds, ({ a, span }) => listItem(isSel('audio', a.id), `${a.voice ? 'Voice' : 'Music'} track ${a.name}${a.loop ? ', looped' : ''}, ${fmt(a.start)}`, () => app.select({ type: 'audio', id: a.id }),
     el('span', { text: a.voice ? '🎙' : '♪' }), el('span', { class: 'grow', text: a.name + (a.loop ? ' (loop)' : '') }), el('span', { class: 't', text: fmt(a.start) + ' · ' + fmt(span) })));
@@ -480,7 +496,7 @@ const actions = {
     const r = splitItem(app.project, s, player.t);
     if (!r || r.fail) return toast(r ? r.reason : 'Nothing to split here.');
     app.selection = { type: r.type, id: r.item.id };
-    const what = { clip: 'Clip', text: 'Text', audio: 'Audio', overlay: 'Overlay' }[r.type];
+    const what = { clip: 'Clip', text: 'Text', audio: 'Audio', overlay: 'Overlay', blur: 'Blur region' }[r.type];
     app.commit('Split'); toast(what + ' split at ' + fmtPrecise(player.t, app.project.settings.fps));
   },
   duplicate() {
@@ -490,13 +506,14 @@ const actions = {
     else if (s.type === 'text') { const b = deepClone(item); b.id = uid('txt'); b.start = item.end; b.end = item.end + (item.end - item.start); app.project.texts.push(b); app.selection = { type: 'text', id: b.id }; }
     else if (s.type === 'audio') { const b = deepClone(item); b.id = uid('aud'); b.start = item.start + audioSpan(item, layout(app.project).total); app.project.audio.push(b); app.selection = { type: 'audio', id: b.id }; }
     else if (s.type === 'overlay') { const b = deepClone(item); b.id = uid('ovl'); b.start = item.start + overlayLen(item); app.project.overlays.push(b); app.selection = { type: 'overlay', id: b.id }; }
+    else if (s.type === 'blur') { const b = deepClone(item); b.id = uid('blr'); b.start = item.end; b.end = item.end + (item.end - item.start); app.project.blurs.push(b); app.selection = { type: 'blur', id: b.id }; }
     else if (s.type === 'marker') {
       // a copy of the marker at the playhead (or a second later when the playhead is already on it)
       const total = layout(app.project).total, here = Math.abs(player.t - item.time) > 0.05 ? player.t : Math.min(total, item.time + 1);
       const b = { ...deepClone(item), id: uid('mk'), time: here, name: 'Marker ' + (app.project.markers.length + 1) };
       app.project.markers.push(b); app.selection = { type: 'marker', id: b.id };
     } else return toast(TOOL_HINT.duplicate.none);
-    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', marker: 'Marker' }[s.type];
+    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', marker: 'Marker' }[s.type];
     app.commit('Duplicate'); toast(what + ' duplicated.');
   },
   delete() {
@@ -508,8 +525,9 @@ const actions = {
     else if (s.type === 'audio') p.audio = p.audio.filter(t => t.id !== s.id);
     else if (s.type === 'marker') p.markers = p.markers.filter(t => t.id !== s.id);
     else if (s.type === 'overlay') p.overlays = p.overlays.filter(t => t.id !== s.id);
+    else if (s.type === 'blur') p.blurs = p.blurs.filter(t => t.id !== s.id);
     else return toast(TOOL_HINT.delete.none);
-    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', marker: 'Marker' }[s.type];
+    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', marker: 'Marker' }[s.type];
     app.selection = null; app.commit('Delete'); toast(what + ' deleted. Undo (Ctrl+Z) brings it back.');
   },
   moveLeft() { const c = selected('clip'); if (!c) return; const i = app.project.clips.indexOf(c); if (i > 0) { moveClip(app.project, i, i - 1); app.commit('Move clip'); } },
@@ -542,6 +560,18 @@ const actions = {
   removeLogo() { app.project.logo = null; app.commit('Remove logo'); },
   deleteOverlay() { const o = selected('overlay'); if (!o) return; app.project.overlays = app.project.overlays.filter(x => x !== o); app.selection = null; app.commit('Delete overlay'); },
   ovlStartHere() { const o = selected('overlay'); if (!o) return; o.start = Math.max(0, player.t); app.commit('Move overlay'); },
+  addBlur() {
+    const p = app.project, total = layout(p).total;
+    if (!p.clips.length) return toast('Add a video clip first, then add a blur region over it.');
+    const start = clamp(player.t, 0, Math.max(0, total - 0.5));
+    const b = newBlur(start, Math.min(4, Math.max(0.5, total - start)));
+    p.blurs = p.blurs || []; p.blurs.push(b); app.selection = { type: 'blur', id: b.id };
+    app.commit('Add blur region'); showTab('look');
+    toast('Blur region added. Drag it on the preview and pull the handles to resize. Turn on “Blur everything outside” for a background blur.', 4200);
+  },
+  deleteBlur() { const b = selected('blur'); if (!b) return; app.project.blurs = app.project.blurs.filter(x => x !== b); app.selection = null; app.commit('Delete blur region'); },
+  blurStartHere() { const b = selected('blur'); if (!b) return; const len = b.end - b.start; b.start = Math.max(0, player.t); if (b.end <= b.start + 0.1) b.end = b.start + len; app.commit('Blur start'); },
+  blurEndHere() { const b = selected('blur'); if (!b) return; if (player.t > b.start + 0.1) { b.end = player.t; app.commit('Blur end'); } else toast('Playhead must be after the blur region start.'); },
   addKeyframe() {
     let k = kfTarget();
     if (!k) { const t = app.selection && selected(app.selection.type) ? app.selection.type : 'none'; return toast(TOOL_HINT.addKeyframe[t] || TOOL_HINT.addKeyframe.none, 4500); }
@@ -551,9 +581,9 @@ const actions = {
       k = kfTarget(); if (!k || !k.inside) return toast('Could not place a keyframe on this item. Tap the timeline above it, then tap Keyframe.', 4500);
     }
     const vals = animated(k.type, k.item, k.local);
-    for (const pr of ANIM_PROPS) setKeyframe(k.item, pr, k.local, vals[pr]);
+    for (const pr of animPropsOf(k.type)) setKeyframe(k.item, pr, k.local, vals[pr]);
     app.commit('Add keyframe');
-    toast('◆ Keyframe at ' + fmtPrecise(player.t, app.project.settings.fps) + (moved ? ' (playhead moved onto the item)' : '') + ' — move to another time and change position, scale, rotation or opacity.', 3500);
+    toast('◆ Keyframe at ' + fmtPrecise(player.t, app.project.settings.fps) + (moved ? ' (playhead moved onto the item)' : '') + (k.type === 'blur' ? ' — move to another time and drag the box or change its size so it follows the subject.' : ' — move to another time and change position, scale, rotation or opacity.'), 3500);
   },
   kfPrev() { const k = kfTarget(); if (!k) return; const ts = kfTimes(k.item).filter(x => x < k.raw - 1e-3); if (ts.length) { player.pause(); player.setTime(k.start + ts[ts.length - 1] + 1e-4); } },
   kfNext() { const k = kfTarget(); if (!k) return; const ts = kfTimes(k.item).filter(x => x > k.raw + 1e-3); if (ts.length) { player.pause(); player.setTime(k.start + ts[0] + 1e-4); } },
@@ -589,7 +619,7 @@ function renderKfPanels() {
           el('span', { class: 'grow' }), sel,
           el('button', { type: 'button', text: '✕', 'aria-label': 'Delete keyframe', onclick: () => { const kk = kfTarget(type); if (!kk) return; removeKeyframesAt(kk.item, lt); app.commit('Delete keyframe'); } })));
       });
-      const hint = el('p', { class: 'hint', text: times.length ? 'Position, scale, rotation and opacity are animated. Move the playhead and drag a slider (or the item on the preview) to set another keyframe. Easing applies from a keyframe to the next.' : 'Animate position, scale, rotation and opacity: add a keyframe, move the playhead, then change a value.' });
+      const hint = el('p', { class: 'hint', text: times.length ? (type === 'blur' ? 'Position and size are animated. Move the playhead to where the subject has moved, then drag the box (or its handles) on the preview to set another keyframe. Easing applies from a keyframe to the next.' : 'Position, scale, rotation and opacity are animated. Move the playhead and drag a slider (or the item on the preview) to set another keyframe. Easing applies from a keyframe to the next.') : (type === 'blur' ? 'Animate the box: add a keyframe, move the playhead, then drag the box or its handles so it follows the face or object.' : 'Animate position, scale, rotation and opacity: add a keyframe, move the playhead, then change a value.') });
       panel.replaceChildren(head, btns, list, hint);
     }
     for (const row of panel.querySelectorAll('.kf-row')) row.classList.toggle('selected', Math.abs(parseFloat(row.dataset.lt) - k.raw) < 1 / 60);
@@ -921,6 +951,7 @@ function editPoints() {
   const p = app.project, lay = layout(p), s = new Set([0, lay.total]);
   lay.items.forEach(i => { s.add(i.start); s.add(i.end); });
   p.texts.forEach(t => { s.add(t.start); s.add(t.end); }); p.markers.forEach(m => s.add(m.time));
+  (p.blurs || []).forEach(b => { s.add(b.start); s.add(b.end); });
   (p.overlays || []).forEach(o => { s.add(o.start); s.add(o.start + overlayLen(o)); });
   const k = kfTarget(); if (k) kfTimes(k.item).forEach(lt => s.add(k.start + lt));
   return [...s].sort((a, b) => a - b);
@@ -1079,6 +1110,93 @@ for (const [k, v] of Object.entries(FONTS)) { $('fontSelect').append(el('option'
     drag = null; stage.classList.remove('grab');
   };
   stage.addEventListener('pointerup', end); stage.addEventListener('pointercancel', end);
+})();
+
+
+// ---------------------------------------------------------------- blur box on the preview (drag to move, handles to resize)
+const blurBox = $('blurBox');
+/** What the on-preview box edits right now: the selected blur region, or the sharp area of the selected clip's background blur. */
+function blurTarget() {
+  const b = selected('blur');
+  if (b) {
+    const len = b.end - b.start, raw = player.t - b.start, local = clamp(raw, 0, len), A = animated('blur', b, local);
+    return { kind: 'blur', item: b, start: b.start, len, local, inside: raw >= -1e-4 && raw <= len + 1e-4, x: A.x, y: A.y, w: A.w, h: A.h, shape: b.shape, invert: b.invert, label: b.invert ? 'Sharp area' : b.mode === 'pixelate' ? 'Pixelate' : 'Blur' };
+  }
+  const c = selected('clip');
+  if (c && c.blur && c.blur.enabled && c.blur.keep) {
+    const cb = c.blur;
+    return { kind: 'clip', item: c, x: cb.x, y: cb.y, w: cb.w, h: cb.h, shape: cb.shape, invert: true, inside: true, label: 'Sharp area' };
+  }
+  return null;
+}
+function syncBlurBox() {
+  const T = app.project.clips.length && !$('stageWrap').hidden ? blurTarget() : null;
+  const blurLayer = $('blurLayer');
+  blurLayer.hidden = !T;
+  if (!T) return;
+  blurLayer.style.left = stage.offsetLeft + 'px'; blurLayer.style.top = stage.offsetTop + 'px';
+  blurLayer.style.width = stage.offsetWidth + 'px'; blurLayer.style.height = stage.offsetHeight + 'px';
+  const st = blurBox.style;
+  st.left = ((T.x - T.w / 2) * 100) + '%'; st.top = ((T.y - T.h / 2) * 100) + '%'; st.width = (T.w * 100) + '%'; st.height = (T.h * 100) + '%';
+  blurBox.classList.toggle('ellipse', T.shape === 'ellipse'); blurBox.classList.toggle('invert', !!T.invert);
+  blurBox.style.opacity = T.inside ? '' : '0.55';
+  const tag = $('blurTag'); if (tag.textContent !== T.label) tag.textContent = T.label;
+}
+(() => {
+  let d = null, refresh = false;
+  const MIN = 0.03;
+  const apply = (T, x, y, w, h) => {
+    x = clamp(x, -0.5, 1.5); y = clamp(y, -0.5, 1.5); w = clamp(w, MIN, 3); h = clamp(h, MIN, 3);
+    if (T.kind === 'blur') {
+      const it = T.item;
+      for (const [k, v] of [['x', x], ['y', y], ['w', w], ['h', h]]) { if (hasKeyframes(it, k)) setKeyframe(it, k, T.local, v); else it[k] = v; }
+    } else Object.assign(T.item.blur, { x, y, w, h });
+  };
+  const soon = () => { if (refresh) return; refresh = true; requestAnimationFrame(() => { refresh = false; syncBlurBox(); fillInspector(); }); };
+  blurBox.addEventListener('pointerdown', (e) => {
+    const T = blurTarget(); if (!T) return;
+    e.preventDefault(); e.stopPropagation();
+    if (player.playing) player.pause();
+    if (T.kind === 'blur' && !T.inside) { player.setTime(T.start + clamp(player.t - T.start, 0.01, Math.max(0.01, T.len - 0.01))); }
+    const T2 = blurTarget(), h = e.target.closest('.bh');
+    const r = stage.getBoundingClientRect();
+    d = { T: T2, hd: h ? h.dataset.h.split(',').map(Number) : null, x0: e.clientX, y0: e.clientY, w: r.width, h: r.height, o: { x: T2.x, y: T2.y, w: T2.w, h: T2.h }, moved: false, id: e.pointerId };
+    try { blurBox.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    blurBox.focus({ preventScroll: true });
+  });
+  blurBox.addEventListener('pointermove', (e) => {
+    if (!d || e.pointerId !== d.id) return;
+    const dx = (e.clientX - d.x0) / d.w, dy = (e.clientY - d.y0) / d.h, o = d.o;
+    if (Math.abs(dx) + Math.abs(dy) > 0.003) d.moved = true;
+    if (!d.moved) return;
+    let { x, y, w, h } = o;
+    if (!d.hd) {
+      x = o.x + dx; y = o.y + dy;
+      if (Math.abs(x - 0.5) < 0.012) x = 0.5; if (Math.abs(y - 0.5) < 0.012) y = 0.5; // snap to the center lines
+    } else {
+      const [hx, hy] = d.hd;
+      if (hx) { let a = o.x - o.w / 2, b = o.x + o.w / 2; if (hx > 0) b += dx; else a += dx; if (b - a < MIN) { if (hx > 0) b = a + MIN; else a = b - MIN; } x = (a + b) / 2; w = b - a; }
+      if (hy) { let a = o.y - o.h / 2, b = o.y + o.h / 2; if (hy > 0) b += dy; else a += dy; if (b - a < MIN) { if (hy > 0) b = a + MIN; else a = b - MIN; } y = (a + b) / 2; h = b - a; }
+    }
+    apply(d.T, x, y, w, h);
+    d.T = { ...d.T, x, y, w, h };
+    player.requestRender(); syncBlurBox(); soon();
+  });
+  const end = (e) => {
+    if (!d || e.pointerId !== d.id) return;
+    const wasMoved = d.moved, hd = d.hd, kind = d.T.kind; d = null;
+    if (wasMoved) app.commit(hd ? 'Resize blur region' : 'Move blur region');
+    void kind;
+  };
+  blurBox.addEventListener('pointerup', end); blurBox.addEventListener('pointercancel', end);
+  blurBox.addEventListener('keydown', (e) => {
+    const T = blurTarget(); if (!T || !e.key.startsWith('Arrow')) return;
+    e.preventDefault(); e.stopPropagation();
+    if (T.kind === 'blur' && !T.inside) return;
+    const step = e.shiftKey ? 0.02 : 0.005, dx = e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0, dy = e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0;
+    if (e.altKey) apply(T, T.x, T.y, T.w + dx * 2, T.h + dy * 2); else apply(T, T.x + dx, T.y + dy, T.w, T.h);
+    app.commit('Adjust blur region'); blurBox.focus({ preventScroll: true });
+  });
 })();
 
 // ---------------------------------------------------------------- projects
@@ -1270,6 +1388,7 @@ async function thumbFrame(t, F) {
   for (const c of p.clips) { c.fit = 'inherit'; c.bg = 'inherit'; }
   if (!P.pip) p.overlays = [];
   for (const o of p.overlays) { o.fadeIn = 0; o.fadeOut = 0; } // a thumbnail shows overlays fully visible, not mid-fade
+  for (const b of p.blurs || []) { b.fadeIn = 0; b.fadeOut = 0; } // ...and blur / privacy regions at full strength
   const lay = layout(p);
   const it = clipAt(lay, t);
   const c = document.createElement('canvas'); c.width = F.width; c.height = F.height;

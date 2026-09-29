@@ -1,6 +1,7 @@
 // Frame compositor shared by preview, thumbnail maker and export.
-import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasKeyframes, overlaysAt, EASES } from './model.js';
+import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasKeyframes, overlaysAt, EASES, blurAt } from './model.js';
 import { clamp } from './util.js';
+import { BlurFX } from './blur.js';
 
 const VERT = `attribute vec2 p;varying vec2 uv;void main(){uv=vec2((p.x+1.0)*0.5,1.0-(p.y+1.0)*0.5);gl_Position=vec4(p,0.0,1.0);}`;
 const FRAG = `precision mediump float;varying vec2 uv;uniform sampler2D tex;
@@ -292,6 +293,9 @@ export function drawLogo(ctx, W, H, L, lg) {
   ctx.globalAlpha = 1;
 }
 
+let blurFX = null; // one WebGL context shared by every compositor (preview, thumbnails, export)
+const sharedBlurFX = () => blurFX || (blurFX = new BlurFX());
+export function blurEngine() { return sharedBlurFX(); }
 export class Compositor {
   constructor() {
     this.layer = document.createElement('canvas');
@@ -300,6 +304,7 @@ export class Compositor {
     this.filterOK = canvasFilterSupported();
   }
   _gl() { if (!this.gl) this.gl = new ColorGL(); return this.gl.ok ? this.gl : null; }
+  _fx() { return sharedBlurFX(); }
   _key() { if (!this.key) this.key = new KeyGL(); return this.key.ok ? this.key : null; }
 
   drawOverlay(ctx, W, H, o, src, local) {
@@ -445,6 +450,12 @@ export class Compositor {
         }
       }
     }
+    // Blur > whole-clip blur (Clip tab): the clip's picture, under overlays / text / logo
+    let nBlur = 0;
+    for (const { it, alpha, black } of act) {
+      const cb = it.clip.blur;
+      if (cb && cb.enabled && nBlur < 12 && alpha * black > 0.002) { this._fx().apply(ctx, W, H, { shape: cb.shape, mode: cb.mode, radius: cb.radius, strength: cb.strength, feather: cb.feather, invert: !!cb.keep, x: cb.x, y: cb.y, w: cb.w, h: cb.h, amount: alpha * black, full: !cb.keep }); nBlur++; }
+    }
     ctx.globalAlpha = 1;
     const boxes = [];
     // picture-in-picture overlays
@@ -452,6 +463,13 @@ export class Compositor {
       const src = opts.getOverlaySource ? opts.getOverlaySource(o) : null;
       if (!src || !src.w) { missing++; continue; }
       boxes.push(this.drawOverlay(ctx, W, H, o, src, t - o.start));
+    }
+    ctx.globalAlpha = 1;
+    // Blur / Privacy regions: over the picture and overlays, under text and logo
+    for (const b of project.blurs || []) {
+      if (nBlur >= 12) break;
+      const reg = blurAt(b, t); if (!reg) continue;
+      this._fx().apply(ctx, W, H, reg); nBlur++;
     }
     ctx.globalAlpha = 1;
     // texts

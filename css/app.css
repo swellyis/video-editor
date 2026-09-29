@@ -122,7 +122,7 @@ html[data-installed] .install-btn,html[data-installed] .install-help,html[data-i
 .tl-item .mute-badge,.tl-audioitem .mute-badge{width:13px;height:13px;vertical-align:-2px}
 .tl-audioitem.muted .wave{opacity:.35}
 .ruler-head{height:26px;border-bottom:1px solid #2e2e2b}
-.video-head{height:68px}.overlay-head{flex:0 0 auto}.text-head{flex:0 0 auto}.audio-head{flex:0 0 auto}
+.blur-head{flex:0 0 auto}.video-head{height:68px}.overlay-head{flex:0 0 auto}.text-head{flex:0 0 auto}.audio-head{flex:0 0 auto}
 .tl-scroll{flex:1;overflow-x:auto;overflow-y:hidden;position:relative;scrollbar-color:#555 #242422;touch-action:pan-x;-webkit-overflow-scrolling:touch;outline:none}
 .tl-content{position:relative;min-width:100%}
 .tl-ruler{height:26px;position:relative;border-bottom:1px solid #2e2e2b;cursor:ew-resize;touch-action:none;background:#1d1d1b}
@@ -138,6 +138,10 @@ html[data-installed] .install-btn,html[data-installed] .install-help,html[data-i
 .tl-video{height:68px;background:repeating-linear-gradient(90deg,transparent 0 40px,rgba(255,255,255,.012) 40px 80px)}
 .tl-video.empty::after{content:"Your clips appear here — drag to reorder, drag edges to trim";position:absolute;left:14px;top:24px;font-size:11px;color:#6d6d67;pointer-events:none;white-space:nowrap}
 .tl-text{min-height:34px}
+.tl-blur{min-height:44px}
+.tl-blurritem{height:26px;background:#2d6b8f;color:#fff}
+.tl-blurritem.animated span::after{content:" ✦";opacity:.8}
+.tl-blur.empty::after{content:"Blur / privacy regions (Look tab)";position:absolute;left:14px;top:14px;font-size:10px;color:#5f5f59;pointer-events:none;white-space:nowrap}
 .tl-overlay{min-height:34px}
 .tl-overlay.empty::after{content:"Picture-in-picture overlays (PiP tab)";position:absolute;left:14px;top:10px;font-size:10px;color:#5f5f59;pointer-events:none;white-space:nowrap}
 .tl-ovlitem{height:26px;background:#7a4a1c;color:#fff}
@@ -203,7 +207,13 @@ textarea{min-height:88px;resize:vertical;line-height:1.4}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .check{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:12px;color:var(--ink);cursor:pointer}
 .check input{accent-color:var(--accent);width:17px;height:17px}
-.mute-btn{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;margin-top:10px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;text-align:left;touch-action:manipulation}
+.mute-btn,.tog-btn{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;margin-top:10px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;text-align:left;touch-action:manipulation}
+.tog-btn .tg-sw{position:relative;width:38px;height:22px;border-radius:12px;background:var(--surface-3);border:1px solid var(--line);flex:none;transition:background .15s}
+.tog-btn .tg-sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s}
+.tog-btn[aria-pressed=true] .tg-sw{background:var(--accent);border-color:var(--accent)}
+.tog-btn[aria-pressed=true] .tg-sw::after{transform:translateX(16px)}
+.tog-btn[aria-pressed=true]{border-color:var(--accent)}
+.tog-btn .tg-l{text-align:left;line-height:1.25}
 .mute-btn .ico{width:18px;height:18px;flex:none}
 .mute-btn .spk-off{display:none}
 .mute-btn[aria-pressed=true]{background:color-mix(in srgb,var(--accent) 18%,var(--surface-2));border-color:var(--accent)}
@@ -416,3 +426,26 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .tl-scroll:focus-visible{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 70%,transparent)}
 .tl-clip:focus-visible,.tl-item:focus-visible{outline:2px solid #fff;outline-offset:1px;z-index:60}
 .list .item:focus-visible,[role=button].item:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 48%,transparent);outline-offset:1px}
+
+/* ---- Blur / Privacy: on-preview box with handles ---- */
+.blur-layer{position:absolute;pointer-events:none;z-index:4}
+.blur-layer[hidden]{display:none}
+.blur-box{position:absolute;pointer-events:auto;touch-action:none;cursor:move;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.7),inset 0 0 0 1px rgba(0,0,0,.45);outline:none;background:rgba(45,107,143,.10)}
+.blur-box.ellipse{border-radius:50%}
+.blur-box:focus-visible{box-shadow:0 0 0 3px var(--accent)}
+.blur-box.invert{background:transparent;border-style:dashed}
+.blur-box .bh{position:absolute;width:44px;height:44px;margin:-22px 0 0 -22px;touch-action:none}
+.blur-box .bh::after{content:"";position:absolute;left:50%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;background:#fff;border:2px solid #2d6b8f;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.blur-box .bh[data-h="-1,-1"]{left:0;top:0;cursor:nwse-resize}.blur-box .bh[data-h="1,1"]{left:100%;top:100%;cursor:nwse-resize}
+.blur-box .bh[data-h="1,-1"]{left:100%;top:0;cursor:nesw-resize}.blur-box .bh[data-h="-1,1"]{left:0;top:100%;cursor:nesw-resize}
+.blur-box .bh[data-h="0,-1"]{left:50%;top:0;cursor:ns-resize}.blur-box .bh[data-h="0,1"]{left:50%;top:100%;cursor:ns-resize}
+.blur-box .bh[data-h="-1,0"]{left:0;top:50%;cursor:ew-resize}.blur-box .bh[data-h="1,0"]{left:100%;top:50%;cursor:ew-resize}
+.blur-tag{position:absolute;left:6px;top:6px;font:600 10px "IBM Plex Mono",monospace;color:#fff;background:rgba(45,107,143,.92);padding:2px 6px;border-radius:4px;pointer-events:none;white-space:nowrap}
+@media (pointer:coarse){.blur-box .bh::after{width:18px;height:18px;margin:-9px 0 0 -9px}}
+#blurPanel .segmented button,#clipBlurSection .segmented button{min-height:40px}
+#blurPanel input[type=range],#clipBlurSection input[type=range]{height:40px}
+/* keyframe panels: touch-sized controls */
+.kf-panel .btn.small{min-height:40px}
+.kf-list .item{min-height:44px}
+.kf-list .item.kf-row button,.kf-list .item.kf-row button:last-child{min-height:40px;min-width:40px}
+.kf-list .kf-row .mini-select{min-height:40px}

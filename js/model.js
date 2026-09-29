@@ -34,7 +34,7 @@ export function newProject(name = 'Untitled project') {
     schema: SCHEMA, id: uid('prj'), name, created: now, updated: now,
     settings: { ratio: '16:9', res: 1080, fps: 30, quality: 'high', format: 'auto', fit: 'contain', bg: 'black', bgColor: '#000000', imageDuration: 4, endFade: 0 },
     color: defaultColor(),
-    clips: [], overlays: [], texts: [], audio: [], markers: [],
+    clips: [], overlays: [], texts: [], blurs: [], audio: [], markers: [],
     logo: null,
     thumb: { time: null, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow', format: 'auto', fit: 'cover', type: 'jpg', pip: true, logo: true },
   };
@@ -50,6 +50,7 @@ export function migrate(p) {
   out.texts = (p.texts || []).map(t => { const b = newText(0); const r = Object.assign(b, t); r.anim = Object.assign(newText(0).anim, t.anim || {}); r.keyframes = t.keyframes || {}; return r; });
   out.audio = (p.audio || []).map(a => Object.assign(newAudio({ id: a.mediaId, duration: a.srcDuration || 1, name: a.name }, 0), a));
   out.overlays = (p.overlays || []).map(o => normalizeOverlay(o));
+  out.blurs = (Array.isArray(p.blurs) ? p.blurs : []).filter(b => b && typeof b === 'object').slice(0, 200).map(b => normalizeBlur(b));
   out.markers = (Array.isArray(p.markers) ? p.markers : []).filter(m => m && typeof m === 'object').map(m => ({ ...m, time: num(m.time, 0, 1e6, 0) }));
   if ((p.schema || 0) < 5 && out.thumb.time === 0) out.thumb.time = null; // before v5, 0 meant "not chosen yet"
   sanitizeProject(out);
@@ -80,6 +81,7 @@ export function sanitizeProject(p) {
     c.fadeIn = num(c.fadeIn, 0, 60, 0); c.fadeOut = num(c.fadeOut, 0, 60, 0);
     c.transition.duration = num(c.transition.duration, 0, 10, 0.6);
     c.transform.zoom = num(c.transform.zoom, 0.05, 20, 1);
+    cleanClipBlur(c.blur);
   }
   for (const o of p.overlays) {
     o.muted = o.muted !== false; o.speed = num(o.speed, 0.25, 4, 1); o.volume = num(o.volume, 0, 2, 1); o.opacity = num(o.opacity, 0, 1, 1);
@@ -91,6 +93,7 @@ export function sanitizeProject(p) {
     t.start = num(t.start, 0, 1e6, 0); t.end = num(t.end, t.start + 0.05, 1e6, t.start + 4);
     if (typeof t.text !== 'string') t.text = String(t.text ?? '');
   }
+  for (const b of p.blurs || []) cleanBlur(b);
   for (const a of p.audio) {
     a.muted = a.muted === true; a.volume = num(a.volume, 0, 2, 0.6); a.duckLevel = num(a.duckLevel, 0, 1, 0.3); a.start = num(a.start, 0, 1e6, 0);
     a.in = num(a.in, 0, 1e6, 0); a.out = num(a.out, a.in + 0.01, 1e6, a.in + 1); a.loopLen = num(a.loopLen, 0, 1e6, 0); a.phase = num(a.phase, 0, 1e6, 0);
@@ -98,6 +101,56 @@ export function sanitizeProject(p) {
   }
   if (p.logo) { const L = p.logo; L.size = num(L.size, 0.01, 1, 0.14); L.opacity = num(L.opacity, 0, 1, 0.85); L.margin = num(L.margin, 0, 0.5, 0.035); L.position = oneOf(L.position, ['tl', 'tr', 'bl', 'br', 'center'], 'tr'); }
   return p;
+}
+
+
+// ---------- blur / privacy regions ----------
+export const BLUR_SHAPES = ['rect', 'ellipse'], BLUR_MODES = ['blur', 'pixelate'];
+/** Whole-clip blur (Clip tab): blur the entire clip, optionally keeping a sharp subject region. */
+export const defaultClipBlur = () => ({ enabled: false, mode: 'blur', strength: 0.6, keep: false, shape: 'ellipse', x: 0.5, y: 0.5, w: 0.5, h: 0.62, radius: 0.3, feather: 0.35 });
+export function newBlur(start, dur = 4) {
+  return {
+    id: uid('blr'), shape: 'rect', mode: 'blur', x: 0.5, y: 0.5, w: 0.3, h: 0.3, radius: 0.15, strength: 0.7, feather: 0.1, invert: false,
+    start, end: start + dur, fadeIn: 0.2, fadeOut: 0.2, keyframes: {},
+  };
+}
+export function normalizeBlur(b) {
+  const r = Object.assign(newBlur(0), b, { keyframes: b.keyframes && typeof b.keyframes === 'object' ? b.keyframes : {} });
+  if (!r.id || typeof r.id !== 'string') r.id = uid('blr');
+  return cleanBlur(r);
+}
+const BLUR_KF = ['x', 'y', 'w', 'h'];
+export function cleanBlur(b) {
+  b.shape = oneOf(b.shape, BLUR_SHAPES, 'rect'); b.mode = oneOf(b.mode, BLUR_MODES, 'blur');
+  b.x = num(b.x, -0.5, 1.5, 0.5); b.y = num(b.y, -0.5, 1.5, 0.5); b.w = num(b.w, 0.01, 3, 0.3); b.h = num(b.h, 0.01, 3, 0.3);
+  b.radius = num(b.radius, 0, 1, 0.15); b.strength = num(b.strength, 0, 1, 0.7); b.feather = num(b.feather, 0, 1, 0.1);
+  b.invert = b.invert === true; b.start = num(b.start, 0, 1e6, 0); b.end = num(b.end, b.start + 0.05, 1e6, b.start + 4);
+  b.fadeIn = num(b.fadeIn, 0, 60, 0); b.fadeOut = num(b.fadeOut, 0, 60, 0);
+  const kf = {};
+  for (const prop of BLUR_KF) {
+    const tr = b.keyframes && Array.isArray(b.keyframes[prop]) ? b.keyframes[prop] : null; if (!tr) continue;
+    const keys = tr.filter(k => k && Number.isFinite(+k.t) && Number.isFinite(+k.v)).slice(0, 500).map(k => {
+      const o = { t: Math.max(0, +k.t), v: prop === 'x' || prop === 'y' ? clamp(+k.v, -0.5, 1.5) : clamp(+k.v, 0.01, 3), ease: oneOf(k.ease, ['linear', 'easeIn', 'easeOut', 'easeInOut', 'hold'], 'linear') };
+      if (Number.isFinite(+k.e0) && Number.isFinite(+k.e1)) { o.e0 = clamp(+k.e0, 0, 1); o.e1 = clamp(+k.e1, 0, 1); }
+      return o;
+    }).sort((a, c) => a.t - c.t);
+    if (keys.length) kf[prop] = keys;
+  }
+  b.keyframes = kf;
+  return b;
+}
+export function cleanClipBlur(b) {
+  b.enabled = b.enabled === true; b.keep = b.keep === true; b.mode = oneOf(b.mode, BLUR_MODES, 'blur'); b.shape = oneOf(b.shape, BLUR_SHAPES, 'ellipse');
+  b.strength = num(b.strength, 0, 1, 0.6); b.x = num(b.x, -0.5, 1.5, 0.5); b.y = num(b.y, -0.5, 1.5, 0.5); b.w = num(b.w, 0.02, 3, 0.5); b.h = num(b.h, 0.02, 3, 0.62);
+  b.radius = num(b.radius, 0, 1, 0.3); b.feather = num(b.feather, 0, 1, 0.35);
+  return b;
+}
+/** Region geometry and fade amount (0..1) of a blur item at sequence time t (null when it isn't active). */
+export function blurAt(b, t) {
+  if (t < b.start || t >= b.end) return null;
+  const local = t - b.start, len = b.end - b.start, A = animated('blur', b, local);
+  const amount = Math.min(b.fadeIn > 0 ? local / b.fadeIn : 1, b.fadeOut > 0 ? (len - local) / b.fadeOut : 1);
+  return { shape: b.shape, mode: b.mode, radius: b.radius, strength: b.strength, feather: b.feather, invert: b.invert, x: A.x, y: A.y, w: A.w, h: A.h, amount: clamp(amount, 0, 1) };
 }
 
 export function normalizeClip(c) {
@@ -110,6 +163,7 @@ export function normalizeClip(c) {
     color: Object.assign(defaultColor(), c.color || {}),
     transform: Object.assign(defaultTransform(), c.transform || {}),
     transition: Object.assign({ type: 'cut', duration: 0.6 }, c.transition || {}),
+    blur: Object.assign(defaultClipBlur(), c.blur && typeof c.blur === 'object' ? c.blur : {}),
   });
 }
 
@@ -180,7 +234,9 @@ export const EASES = {
   easeInOut: (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
   hold: () => 0,
 };
-export const ANIM_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity'];
+export const ANIM_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity', 'w', 'h'];
+/** The properties a given item type can animate (blur regions animate position and size). */
+export const animPropsOf = (type) => (type === 'blur' ? ['x', 'y', 'w', 'h'] : ['x', 'y', 'scale', 'rotation', 'opacity']);
 /** Eased progress 0..1 of the segment starting at key `a`. A key may carry an ease window [e0, e1] (set when a
  *  segment is cut by a split or trim) so each piece continues exactly along the original curve. */
 export function easeFrac(a, p) {
@@ -245,7 +301,7 @@ export function animBase(type, item, prop) {
     const tr = item.transform || {};
     return prop === 'x' ? tr.x || 0 : prop === 'y' ? tr.y || 0 : prop === 'scale' ? tr.zoom || 1 : prop === 'rotation' ? tr.angle || 0 : item.opacity ?? 1;
   }
-  const d = { x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }[prop];
+  const d = { x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1, w: 0.3, h: 0.3 }[prop];
   return item[prop] ?? d;
 }
 export function kfValue(track, local, base) {
@@ -264,7 +320,7 @@ export function kfValue(track, local, base) {
 }
 export function animated(type, item, local) {
   const kf = item.keyframes || {}, out = {};
-  for (const p of ANIM_PROPS) out[p] = kfValue(kf[p], local, animBase(type, item, p));
+  for (const p of animPropsOf(type)) out[p] = kfValue(kf[p], local, animBase(type, item, p));
   return out;
 }
 export function hasKeyframes(item, prop) {
@@ -493,6 +549,7 @@ export function outputDims(project, overrideRes) {
 // ---------- edit operations (mutate project, return info) ----------
 export function rippleShift(project, from, delta, { texts = true, audio = true, markers = true } = {}) {
   if (!delta) return;
+  if (texts) for (const b of project.blurs || []) if (b.start >= from - 1e-6) { b.start = Math.max(0, b.start + delta); b.end = Math.max(b.start + 0.1, b.end + delta); }
   if (texts) for (const t of project.texts) if (t.start >= from - 1e-6) { t.start = Math.max(0, t.start + delta); t.end = Math.max(t.start + 0.1, t.end + delta); }
   if (audio) for (const a of project.audio) if (a.start >= from - 1e-6) a.start = Math.max(0, a.start + delta);
   if (audio) for (const o of project.overlays || []) if (o.start >= from - 1e-6) o.start = Math.max(0, o.start + delta);
@@ -554,6 +611,17 @@ export function splitItem(project, sel, t) {
     project.texts.push(b);
     return { type: 'text', item: b };
   }
+  if (sel.type === 'blur') {
+    const a = (project.blurs || []).find(x => x.id === sel.id); if (!a) return fail('Nothing to split.');
+    const u = t - a.start;
+    if (u < MIN_CLIP || a.end - t < MIN_CLIP) return fail('Move the playhead inside the selected blur region (not at its edge) to split it.');
+    const b = deepClone(a); b.id = uid('blr');
+    const kf = a.keyframes || {};
+    a.keyframes = rebaseKeyframes(kf, 0, u); b.keyframes = rebaseKeyframes(kf, u);
+    a.end = t; b.start = t; a.fadeOut = 0; b.fadeIn = 0;
+    project.blurs.splice(project.blurs.indexOf(a) + 1, 0, b);
+    return { type: 'blur', item: b };
+  }
   if (sel.type === 'audio') {
     const a = project.audio.find(x => x.id === sel.id); if (!a) return fail('Nothing to split.');
     const total = layout(project).total, span = audioSpan(a, total), u = t - a.start;
@@ -585,7 +653,7 @@ export function splitItem(project, sel, t) {
     project.overlays.splice(project.overlays.indexOf(o) + 1, 0, b);
     return { type: 'overlay', item: b };
   }
-  return fail('Markers can’t be split. Select a clip, text, overlay or audio track.');
+  return fail('Markers can’t be split. Select a clip, text, overlay, blur region or audio track.');
 }
 
 export function removeClip(project, id, ripple) {
