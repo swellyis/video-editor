@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="ve-build" content="v1573cc3754" />
+  <meta name="ve-build" content="v0a93e13e5e" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
@@ -204,7 +204,7 @@
         <section class="section">
           <div class="section-head"><h2>Text layers</h2><button class="btn primary small" data-action="addText" type="button">＋ Text at playhead</button></div>
           <div class="item-list" id="textList"></div>
-          <p class="hint" id="textEmptyHint">Add titles, lower thirds, or a key verse. Each layer has its own timing, position and style. Drag text on the preview to move it.</p>
+          <p class="hint" id="textEmptyHint">Tap ＋ Text at playhead above (or press T) to add titles, lower thirds, or a key verse. Each layer has its own timing, position and style. Drag text on the preview to move it.</p>
         </section>
         <div id="textPanel" hidden>
           <section class="section">
@@ -420,7 +420,6 @@
         <button class="tool" data-action="delete" type="button" title="Delete selected (Del)">🗑<span>Delete</span></button>
         <button class="tool" data-action="addKeyframe" type="button" title="Keyframe the selected clip, text or overlay at the playhead (Shift+K)">◆<span>Keyframe</span></button>
         <i class="sep"></i>
-        <button class="tool" data-action="addText" type="button" title="Add text (T)">T<span>Text</span></button>
         <button class="tool" data-action="addMarker" type="button" title="Add marker (M)">⚑<span>Marker</span></button>
         <i class="sep"></i>
         <button class="tool toggle" id="rippleBtn" type="button" title="Ripple: deleting/trimming clips shifts text, music and markers after the edit" aria-pressed="true">⇤<span>Ripple</span></button>
