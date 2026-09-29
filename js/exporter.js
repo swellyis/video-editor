@@ -42,6 +42,24 @@ export async function capabilities(project) {
   return caps;
 }
 
+/**
+ * Which container/engine an export with this format setting will most likely produce, from capabilities():
+ * 'auto' = MP4 when this browser can make it quickly, otherwise fast WebM, otherwise whatever MediaRecorder offers.
+ * Returns { ext: 'mp4'|'webm', engine: 'fast'|'realtime'|null, reason? } (engine null = cannot export that format).
+ */
+export function planFormat(caps, format = 'auto') {
+  const fastAudio = (c) => (c === 'mp4' ? caps.aac || caps.opus : caps.opus) !== false;
+  if (caps && caps.webcodecs) {
+    if (format !== 'webm' && caps.fastMp4 && fastAudio('mp4')) return { ext: 'mp4', engine: 'fast' };
+    if (format !== 'mp4' && caps.fastWebm && fastAudio('webm')) return { ext: 'webm', engine: 'fast' };
+  }
+  const rec = (caps && caps.recorder) || [];
+  const mp4 = rec.some(t => t.includes('mp4')), webm = rec.some(t => t.includes('webm'));
+  if (format === 'mp4') return mp4 ? { ext: 'mp4', engine: 'realtime' } : { ext: 'mp4', engine: null, reason: 'This browser can’t make MP4 files. Choose Auto or WebM.' };
+  if (format === 'webm') return webm ? { ext: 'webm', engine: 'realtime' } : mp4 ? { ext: 'mp4', engine: 'realtime' } : { ext: 'webm', engine: null };
+  return mp4 ? { ext: 'mp4', engine: 'realtime' } : webm ? { ext: 'webm', engine: 'realtime' } : { ext: 'mp4', engine: null };
+}
+
 // ---------- output sinks: stream the encoded file to disk instead of assembling it in memory ----------
 const OPFS_PREFIX = 'export-';
 export const canStreamToOPFS = () => !!(navigator.storage && navigator.storage.getDirectory && window.FileSystemFileHandle && 'createWritable' in FileSystemFileHandle.prototype);
@@ -107,7 +125,7 @@ class ElementReader {
 }
 
 /** Fast frame-accurate export. Throws on unsupported configurations so the caller can fall back. */
-async function exportFast(project, media, { onProgress, signal, format, sink, onWarn }) {
+async function exportFast(project, media, { onProgress, signal, format, openSink, onWarn }) {
   const mb = await loadMediabunny();
   const lay = layout(project);
   const { width: W, height: H } = outputDims(project);
@@ -118,24 +136,29 @@ async function exportFast(project, media, { onProgress, signal, format, sink, on
   const progress = makeProgress(onProgress);
   const check = () => { if (signal && signal.aborted) throw new ExportCancelled(); };
 
-  let container = format === 'webm' ? 'webm' : 'mp4';
-  let vcodec = null;
-  if (container === 'mp4' && await mb.canEncodeVideo('avc', { width: W, height: H, bitrate })) vcodec = 'avc';
-  if (!vcodec) {
-    if (format === 'mp4') throw new Error('This browser cannot encode H.264 with WebCodecs');
-    container = 'webm';
-    for (const c of ['vp9', 'vp8']) if (await mb.canEncodeVideo(c, { width: W, height: H, bitrate })) { vcodec = c; break; }
-  }
-  if (!vcodec) throw new Error('No WebCodecs video encoder available');
-
-  progress(0, 'Preparing…');
+  // format: 'mp4' (only MP4), 'webm' (only WebM) or 'auto' (MP4 if this browser can encode H.264, else VP9/VP8 WebM)
   const withAudio = hasAudio(project, lay);
-  let acodec = null;
-  if (withAudio) {
-    const cand = container === 'mp4' ? ['aac', 'opus'] : ['opus', 'vorbis'];
-    for (const c of cand) if (await mb.canEncodeAudio(c, { numberOfChannels: 2, sampleRate: 48000, bitrate: 192000 })) { acodec = c; break; }
-    if (!acodec) throw new Error('No WebCodecs audio encoder available');
+  const pickAudio = async (container) => {
+    if (!withAudio) return '';
+    for (const c of container === 'mp4' ? ['aac', 'opus'] : ['opus', 'vorbis']) if (await mb.canEncodeAudio(c, { numberOfChannels: 2, sampleRate: 48000, bitrate: 192000 })) return c;
+    return null;
+  };
+  let container = null, vcodec = null, acodec = null;
+  if (format !== 'webm' && await mb.canEncodeVideo('avc', { width: W, height: H, bitrate })) {
+    const a = await pickAudio('mp4'); if (a !== null) { container = 'mp4'; vcodec = 'avc'; acodec = a; }
   }
+  if (!container && format === 'mp4') throw new Error('This browser cannot encode MP4 (H.264) with WebCodecs');
+  if (!container) {
+    for (const c of ['vp9', 'vp8']) if (await mb.canEncodeVideo(c, { width: W, height: H, bitrate })) { vcodec = c; break; }
+    if (!vcodec) throw new Error('No WebCodecs video encoder available');
+    acodec = await pickAudio('webm');
+    if (acodec === null) throw new Error('No WebCodecs audio encoder available');
+    container = 'webm';
+  }
+  acodec = acodec || null;
+  progress(0, 'Preparing…');
+  // open the output only now that the container is known (a picked file gets the right extension)
+  const sink = openSink ? await openSink(container) : null;
 
   await ensureFonts();
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
@@ -285,7 +308,7 @@ async function exportFast(project, media, { onProgress, signal, format, sink, on
 }
 
 /** Real-time fallback using MediaRecorder. */
-async function exportRealtime(project, media, { onProgress, signal, format, sink, onWarn }) {
+async function exportRealtime(project, media, { onProgress, signal, format, openSink, onWarn }) {
   if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) throw new Error('This browser cannot record video (no MediaRecorder).');
   const lay = layout(project);
   const { width: W, height: H } = outputDims(project);
@@ -296,6 +319,7 @@ async function exportRealtime(project, media, { onProgress, signal, format, sink
   if (format === 'webm') types = types.filter(t => t.includes('webm')).concat(types.filter(t => !t.includes('webm')));
   if (format === 'mp4' && !types.some(t => t.includes('mp4'))) throw new Error('MP4 recording is not supported in this browser — choose WebM.');
   const mime = types[0] || '';
+  const sink = openSink ? await openSink(extFor(mime || 'video/webm')) : null;
   progress(0, 'Preparing audio…');
   const withAudio = hasAudio(project, lay);
   const chunks = withAudio ? mixChunks(project, lay, media, { onWarn }) : null;
@@ -375,15 +399,17 @@ async function exportRealtime(project, media, { onProgress, signal, format, sink
  */
 export async function runExport(project, media, options = {}) {
   const engine = options.engine || 'auto';
-  // options.makeSink(ext) -> sink (see createSink); called once per attempt so a failed attempt's partial file is discarded
-  const attempt = async (fn, ext) => {
-    const sink = options.makeSink ? await options.makeSink(ext) : null;
-    try { return await fn(project, media, { ...options, sink }); }
+  // options.makeSink(ext) -> sink (see createSink). Each engine opens it once it knows the container, once per attempt,
+  // so a failed attempt's partial file is discarded.
+  const format = ['mp4', 'webm'].includes(options.format) ? options.format : 'auto';
+  const attempt = async (fn) => {
+    let sink = null;
+    const openSink = async (ext) => (sink = options.makeSink ? await options.makeSink(ext) : null);
+    try { return await fn(project, media, { ...options, format, openSink }); }
     catch (e) { if (sink) await sink.abort(); throw e; }
   };
-  const ext = options.format === 'webm' ? 'webm' : 'mp4';
   if (engine !== 'realtime' && typeof VideoEncoder !== 'undefined') {
-    try { return await attempt(exportFast, ext); }
+    try { return await attempt(exportFast); }
     catch (e) {
       if (e instanceof ExportCancelled) throw e;
       if (engine === 'fast') throw e;
@@ -391,5 +417,5 @@ export async function runExport(project, media, options = {}) {
       options.onFallback && options.onFallback(e.message);
     }
   }
-  return attempt(exportRealtime, ext);
+  return attempt(exportRealtime);
 }

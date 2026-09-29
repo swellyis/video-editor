@@ -30,8 +30,18 @@ export function fmtBytes(b) {
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
   return b.toFixed(i ? 1 : 0) + ' ' + u[i];
 }
-export function safeName(n) {
-  return (n || 'video').replace(/\.[^/.]+$/, '').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'video';
+/**
+ * File-name-safe version of a title: keeps letters and digits in any script (Día, 사랑), dots inside the name
+ * ("Romans 8.28"), '_' and '-'; everything else (spaces, / \\ : * ? " < > | and control chars) becomes '-'.
+ * Titles are not file names, so nothing after a dot is treated as an extension.
+ */
+export function safeName(n, fallback = 'video') {
+  const s = String(n == null ? '' : n).normalize('NFC').trim()
+    .replace(/[^\p{L}\p{M}\p{N}._-]+/gu, '-').replace(/-{2,}/g, '-').replace(/\.{2,}/g, '.')
+    .replace(/^[-.]+|[-.]+$/g, '');
+  let out = Array.from(s).slice(0, 80).join('').replace(/[-.]+$/g, '');
+  if (/^(con|prn|aux|nul|com\d|lpt\d)$/i.test(out)) out = '_' + out; // reserved device names on Windows
+  return out || fallback;
 }
 export function stripExt(n) { return (n || '').replace(/\.[^/.]+$/, ''); }
 
@@ -51,6 +61,7 @@ export function download(blob, name) {
 export function debounce(fn, ms) {
   let t; const d = (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
   d.flush = (...a) => { clearTimeout(t); fn(...a); };
+  d.cancel = () => clearTimeout(t);
   return d;
 }
 export function el(tag, attrs = {}, ...kids) {
@@ -67,13 +78,68 @@ export function el(tag, attrs = {}, ...kids) {
   for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(String(k)));
   return e;
 }
-export function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 export const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 export const isMac = () => /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
 export function blobToDataURL(blob) {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
 }
-export async function dataURLToBlob(url) { return (await fetch(url)).blob(); }
+/** Decode a base64 data: URL without fetch() (never touches the network, works under a strict CSP). */
+export function dataURLToBlob(url) {
+  const m = /^data:([\w.+/-]*)(;[\w=.+-]+)*?(;base64)?,/i.exec(String(url || ''));
+  if (!m || !m[3]) throw new Error('Not an embedded (base64) media file');
+  const bin = atob(url.slice(m[0].length));
+  const CH = 1 << 20, parts = [];
+  for (let i = 0; i < bin.length; i += CH) {
+    const n = Math.min(CH, bin.length - i), u = new Uint8Array(n);
+    for (let j = 0; j < n; j++) u[j] = bin.charCodeAt(i + j);
+    parts.push(u);
+  }
+  return new Blob(parts, { type: m[1] || 'application/octet-stream' });
+}
+
+// ---------- tar (ustar) container: project file with raw media, assembled from Blob parts (no copies in memory) ----------
+const te = new TextEncoder(), td = new TextDecoder();
+function tarHeader(name, size, mtime = Date.now()) {
+  const h = new Uint8Array(512);
+  const put = (str, off, len) => { const b = te.encode(str); h.set(b.subarray(0, len), off); };
+  const oct = (v, len) => v.toString(8).padStart(len - 1, '0') + '\0';
+  put(name, 0, 100); put(oct(0o644, 8), 100, 8); put(oct(0, 8), 108, 8); put(oct(0, 8), 116, 8);
+  put(oct(size, 12), 124, 12); put(oct(Math.floor(mtime / 1000), 12), 136, 12);
+  h.fill(32, 148, 156); h[156] = 48; // typeflag '0' (file); checksum field = spaces while summing
+  put('ustar\0', 257, 6); put('00', 263, 2);
+  let sum = 0; for (const b of h) sum += b;
+  put(sum.toString(8).padStart(6, '0') + '\0 ', 148, 8);
+  return h;
+}
+/** Build a tar Blob from [{ name, data: Blob|string }]. Media Blobs are referenced, not read. */
+export function tarBlob(entries) {
+  const parts = [];
+  for (const e of entries) {
+    const data = typeof e.data === 'string' ? new Blob([e.data]) : e.data;
+    parts.push(tarHeader(e.name, data.size), data);
+    const pad = (512 - (data.size % 512)) % 512; if (pad) parts.push(new Uint8Array(pad));
+  }
+  parts.push(new Uint8Array(1024));
+  return new Blob(parts, { type: 'application/x-tar' });
+}
+export async function isTar(blob) {
+  if (blob.size < 1024) return false;
+  return td.decode(new Uint8Array(await blob.slice(257, 262).arrayBuffer())) === 'ustar';
+}
+/** Read a tar Blob: returns Map name -> Blob slice (no copies). */
+export async function readTar(blob) {
+  const out = new Map(); let off = 0;
+  while (off + 512 <= blob.size) {
+    const h = new Uint8Array(await blob.slice(off, off + 512).arrayBuffer());
+    if (h.every(b => b === 0)) break;
+    const str = (a, b) => td.decode(h.subarray(a, b)).replace(/\0.*$/s, '');
+    const name = str(0, 100), size = parseInt(str(124, 136).trim() || '0', 8);
+    if (!Number.isFinite(size) || size < 0) throw new Error('Damaged project file');
+    out.set(name, blob.slice(off + 512, off + 512 + size));
+    off += 512 + Math.ceil(size / 512) * 512;
+  }
+  return out;
+}
 export function nextFrame() { return new Promise(r => requestAnimationFrame(() => r())); }
 export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 

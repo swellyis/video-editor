@@ -374,3 +374,7 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .tl-audioitem .seams{position:absolute;inset:0;pointer-events:none}
 .tl-audioitem .seams i{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed rgba(255,255,255,.55)}
 #saveToDiskRow{margin:10px 0 0}
+/* keyboard focus: timeline, timeline items and side-panel list rows */
+.tl-scroll:focus-visible{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 70%,transparent)}
+.tl-clip:focus-visible,.tl-item:focus-visible{outline:2px solid #fff;outline-offset:1px;z-index:60}
+.list .item:focus-visible,[role=button].item:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 48%,transparent);outline-offset:1px}

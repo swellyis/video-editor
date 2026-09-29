@@ -23,11 +23,13 @@ class SourceReader {
       const mb = await loadMediabunny();
       this.input = new mb.Input({ source: new mb.BlobSource(this.blob), formats: mb.ALL_FORMATS });
       const track = await this.input.getPrimaryAudioTrack();
-      if (!track || !(await track.canDecode())) throw new Error('no decodable audio track');
+      if (!track) { const e = new Error('no audio track'); e.noAudio = true; throw e; }
+      if (!(await track.canDecode())) throw new Error('no decodable audio track');
       this.sink = new mb.AudioBufferSink(track);
       this.sr = track.sampleRate; this.ch = Math.min(2, track.numberOfChannels || 1);
     } catch (e) {
       this.input && this.input.dispose && this.input.dispose(); this.input = null;
+      if (e.noAudio) throw e; // a file without an audio track is simply silent
       this.whole = await decodeWhole(this.blob); // throws for large files
       this.sr = this.whole.sampleRate; this.ch = Math.min(2, this.whole.numberOfChannels);
     }
@@ -215,7 +217,7 @@ export function audioSegments(project, lay) {
     let t = a.start, src = a.in + ((a.phase || 0) % L);
     for (let n = 0; t < end - 1e-4 && n < 100000; n++) {
       const passEnd = Math.min(end, t + (a.in + L - src));
-      segs.push({ kind: 'music', mediaId: a.mediaId, name: a.name, t0: t, t1: passEnd, srcIn: src, speed: 1, gain, loopPass: n });
+      segs.push({ kind: 'music', mediaId: a.mediaId, name: a.name, t0: t, t1: passEnd, srcIn: src, speed: 1, gain, loopPass: n, share: 'loop:' + a.id });
       t = passEnd; src = a.in;
     }
   }
@@ -232,25 +234,34 @@ export async function* mixChunks(project, lay, media, { sampleRate = 48000, chun
   const segs = audioSegments(project, lay).sort((a, b) => a.t0 - b.t0);
   const totalLen = Math.max(1, Math.ceil(total * sampleRate));
   const M = 0.05; // resampler context margin
-  const open = new Map(); // seg -> { reader, stretcher } (per segment)
+  // Readers are opened per segment, except that all passes of a looped track share one reader (reading from the
+  // loop start again just restarts its decoder), so a 3 s loop under an hour of video opens one decoder, not 1200.
+  const keyOf = (s) => s.share || s;
+  const lastEnd = new Map(); for (const s of segs) lastEnd.set(keyOf(s), Math.max(lastEnd.get(keyOf(s)) || 0, s.t1));
+  const open = new Map(); // key -> { reader }
+  const stretchers = new Map(); // seg -> Stretcher (speed-changed clips)
   const failed = new Set();
   const openSeg = async (s) => {
-    if (open.has(s)) return open.get(s);
-    const rec = await media.get(s.mediaId);
-    let st = null;
-    if (rec && !failed.has(s.mediaId)) {
-      try {
-        const reader = await new SourceReader(rec.blob, rec.name).open();
-        st = { reader };
-        if (Math.abs(s.speed - 1) > 1e-3) st.stretch = new Stretcher(reader, Math.round(s.srcIn * reader.sr), reader.sr, s.speed);
-      } catch (e) {
-        failed.add(s.mediaId);
-        console.info('Audio of', rec.name, 'skipped:', e.message);
-        onWarn && onWarn(`Couldn’t decode the audio of “${rec.name}” (${e.message}); it will be silent in the export.`);
+    const key = keyOf(s);
+    if (!open.has(key)) {
+      const rec = await media.get(s.mediaId);
+      let st = null;
+      if (rec && !failed.has(s.mediaId)) {
+        try { st = { reader: await new SourceReader(rec.blob, rec.name).open() }; }
+        catch (e) {
+          failed.add(s.mediaId);
+          if (e.noAudio) console.info('No audio track in', rec.name);
+          else {
+            console.info('Audio of', rec.name, 'skipped:', e.message);
+            onWarn && onWarn(`Couldn’t decode the audio of “${rec.name}” (${e.message}); it will be silent in the export.`);
+          }
+        }
       }
+      open.set(key, st);
     }
-    open.set(s, st);
-    return st;
+    const st = open.get(key); if (!st) return null;
+    if (Math.abs(s.speed - 1) > 1e-3 && !stretchers.has(s)) stretchers.set(s, new Stretcher(st.reader, Math.round(s.srcIn * st.reader.sr), st.reader.sr, s.speed));
+    return { reader: st.reader, stretch: stretchers.get(s) };
   };
   for (let s0 = 0; s0 < totalLen; s0 += Math.round(chunkSec * sampleRate)) {
     const n = Math.min(Math.round(chunkSec * sampleRate), totalLen - s0);
@@ -280,8 +291,9 @@ export async function* mixChunks(project, lay, media, { sampleRate = 48000, chun
     }
     onStatus && onStatus(T1 / total);
     const out = await ctx.startRendering();
-    // release readers of segments that are finished
-    for (const [s, st] of open) if (s.t1 < T1 - M) { st && st.reader.close(); open.delete(s); }
+    // release readers whose segments (all loop passes) are finished
+    for (const [key, st] of open) if (lastEnd.get(key) < T1 - M) { st && st.reader.close(); open.delete(key); }
+    for (const s of stretchers.keys()) if (s.t1 < T1 - M) stretchers.delete(s);
     yield out;
   }
   for (const st of open.values()) st && st.reader.close();

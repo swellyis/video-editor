@@ -1,0 +1,16 @@
+{
+  "name": "video-editor-pro",
+  "private": true,
+  "type": "module",
+  "description": "Browser video editor (static site, no build step). These scripts are for development only.",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "node --test tests/",
+    "predeploy": "npm run lint && npm test && python3 bump-version.py"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "eslint": "^10.11.0",
+    "globals": "^17.0.0"
+  }
+}

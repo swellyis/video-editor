@@ -154,16 +154,29 @@ export async function computePeaks(blob, rate = 20) {
 // ---------- HEIC (iPhone photos) ----------
 export const isHeic = (file) => /image\/hei[cf]/i.test(file.type || '') || /\.hei[cf]$/i.test(file.name || '');
 let heicWorker = null, heicSeq = 0;
+const heicPending = new Map(); // id -> { resolve, reject, timer }
+const HEIC_TIMEOUT = 60000;
+function heicFailAll(msg) {
+  for (const [, p] of heicPending) { clearTimeout(p.timer); p.reject(new Error(msg)); }
+  heicPending.clear();
+  if (heicWorker) { try { heicWorker.terminate(); } catch { } heicWorker = null; } // next attempt starts a fresh worker
+}
 function heicDecodeWasm(buffer) {
-  if (!heicWorker) heicWorker = new Worker(new URL('./heic-worker.js', import.meta.url));
+  if (!heicWorker) {
+    const w = heicWorker = new Worker(new URL('./heic-worker.js', import.meta.url));
+    w.addEventListener('message', (e) => {
+      const p = heicPending.get(e.data && e.data.id); if (!p) return;
+      heicPending.delete(e.data.id); clearTimeout(p.timer);
+      e.data.error ? p.reject(new Error(e.data.error)) : p.resolve(e.data);
+    });
+    // script/wasm failed to load (offline without cache, CSP) or the worker crashed (out of memory)
+    w.addEventListener('error', (e) => { e.preventDefault && e.preventDefault(); if (heicWorker === w) heicFailAll('The HEIC decoder could not start' + (e.message ? ' (' + e.message + ')' : '')); });
+    w.addEventListener('messageerror', () => { if (heicWorker === w) heicFailAll('The HEIC decoder returned unreadable data'); });
+  }
   const id = ++heicSeq;
   return new Promise((resolve, reject) => {
-    const on = (e) => {
-      if (e.data.id !== id) return;
-      heicWorker.removeEventListener('message', on);
-      e.data.error ? reject(new Error(e.data.error)) : resolve(e.data);
-    };
-    heicWorker.addEventListener('message', on);
+    const timer = setTimeout(() => { if (heicPending.has(id)) heicFailAll('Converting the HEIC photo took too long'); }, HEIC_TIMEOUT);
+    heicPending.set(id, { resolve, reject, timer });
     heicWorker.postMessage({ id, buffer }, [buffer]);
   });
 }
@@ -247,6 +260,7 @@ export async function decodeGif(blob) {
   }
   return { frames, total: t, w, h, via: 'gifuct' };
 }
+function closeGif(g) { if (g && g.frames) for (const f of g.frames) try { f.img.close(); } catch { } }
 /** Frame of a decoded GIF at time t (seconds, loops forever). */
 export function gifFrameAt(g, t) {
   const fr = g.frames;
@@ -265,8 +279,27 @@ export function kindOf(file) {
   return null;
 }
 
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+/**
+ * Whitelist and validate media metadata coming from an imported project file (untrusted): no remote URLs can end up
+ * in <img src>/CSS/fetch, numbers are finite, thumbnails must be inline JPEG/PNG/WebP data. Unknown fields are dropped.
+ */
+export function sanitizeMediaMeta(m) {
+  if (!m || typeof m.id !== 'string' || !/^[\w-]{1,80}$/.test(m.id)) throw new Error('Bad media id in project file');
+  const out = { id: m.id, kind: ['video', 'image', 'audio'].includes(m.kind) ? m.kind : 'video' };
+  out.name = typeof m.name === 'string' ? m.name.slice(0, 200) : out.kind;
+  if (typeof m.type === 'string' && /^(video|audio|image)\/[\w.+-]{1,60}$/i.test(m.type)) out.type = m.type;
+  for (const k of ['size', 'duration', 'width', 'height', 'frameCount']) if (isNum(m[k]) && m[k] >= 0 && m[k] < 1e13) out[k] = m[k];
+  for (const k of ['hasAudio', 'animated', 'gifStill']) if (typeof m[k] === 'boolean') out[k] = m[k];
+  if (Array.isArray(m.strip) && m.strip.length <= 400 && m.strip.every(u => typeof u === 'string' && u.length < 400000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u))) out.strip = m.strip;
+  // waveform peaks are regenerated locally (openProject fills missing peaks)
+  return out;
+}
+/** Is this an embedded media data: URL we accept (base64, media MIME type only)? */
+export const isMediaDataURL = (u) => typeof u === 'string' && /^data:(video|audio|image)\/[\w.+-]+;base64,/i.test(u);
+
 export class MediaLibrary {
-  constructor() { this.recs = new Map(); this.urls = new Map(); this.images = new Map(); this.gifs = new Map(); this.listeners = new Set(); }
+  constructor() { this.recs = new Map(); this.urls = new Map(); this.images = new Map(); this.gifs = new Map(); this.listeners = new Set(); this.pending = new Set(); }
   onChange(fn) { this.listeners.add(fn); }
   _emit(id) { this.listeners.forEach(f => f(id)); }
 
@@ -297,7 +330,11 @@ export class MediaLibrary {
       return { img, w: img.naturalWidth, h: img.naturalHeight };
     })();
     this.images.set(id, p);
-    try { const r = await p; this.images.set(id, r); return r; } catch (e) { this.images.delete(id); throw e; }
+    try {
+      const r = await p;
+      if (this.images.get(id) !== p) { r.img.src = ''; return null; } // forgotten while decoding
+      this.images.set(id, r); return r;
+    } catch (e) { if (this.images.get(id) === p) this.images.delete(id); throw e; }
   }
   imageSync(id) { const v = this.images.get(id); return v && !(v instanceof Promise) ? v : null; }
   /** Is this media an animated image (GIF with more than one frame)? */
@@ -309,7 +346,9 @@ export class MediaLibrary {
     if (!rec) return null;
     const p = decodeGif(rec.blob).catch((e) => { console.warn('GIF decode failed', e); return null; });
     this.gifs.set(id, p);
-    const g = await p; this.gifs.set(id, g);
+    const g = await p;
+    if (this.gifs.get(id) !== p) { closeGif(g); return null; } // forgotten (project closed) while decoding
+    this.gifs.set(id, g);
     return g;
   }
   gifSync(id) { const v = this.gifs.get(id); return v && !(v instanceof Promise) ? v : null; }
@@ -334,6 +373,8 @@ export class MediaLibrary {
     if (!kind) throw new Error('Unsupported file: ' + file.name);
     if (kind === 'image' && isHeic(file)) file = await heicToJpeg(file);
     const id = uid('med');
+    this.pending.add(id); // visible to cross-tab gc until the caller has added it to the project
+    setTimeout(() => this.pending.delete(id), 120000);
     let meta;
     if (kind === 'video') meta = await probeVideo(file);
     else if (kind === 'image') meta = await probeImage(file);
@@ -376,16 +417,28 @@ export class MediaLibrary {
     const peaks = await computePeaks(rec.blob);
     if (peaks) { rec.peaks = peaks; await db.updateMediaMeta(id, { peaks }); this._emit(id); }
   }
+  /** Drop everything cached for a media id: object URL, decoded image, GIF frame bitmaps, the record itself. */
   forget(id) {
     const u = this.urls.get(id); if (u) URL.revokeObjectURL(u);
+    const im = this.images.get(id); if (im && !(im instanceof Promise) && im.img) im.img.src = '';
     this.urls.delete(id); this.images.delete(id); this.recs.delete(id);
-    const g = this.gifs.get(id); if (g && g.frames) for (const f of g.frames) try { f.img.close(); } catch { }
+    const g = this.gifs.get(id); if (g && !(g instanceof Promise)) closeGif(g);
     this.gifs.delete(id);
   }
-  /** Import a data-url embedded media record (from project JSON). */
+  /** Keep only the given media ids in memory (called when switching, creating or deleting projects). */
+  retain(keepIds) {
+    const keep = new Set(keepIds), ids = new Set([...this.recs.keys(), ...this.urls.keys(), ...this.images.keys(), ...this.gifs.keys()]);
+    let n = 0;
+    for (const id of ids) if (!keep.has(id)) { this.forget(id); n++; }
+    return n;
+  }
+  /** What is cached right now (for diagnostics and tests). */
+  stats() { return { recs: this.recs.size, urls: this.urls.size, images: this.images.size, gifs: this.gifs.size }; }
+  /** Import an embedded media record from a project file (metadata is sanitized; blob is the raw media). */
   async importEmbedded(m, blob) {
-    const rec = { ...m, blob, created: Date.now() };
-    delete rec.data;
+    const rec = { ...sanitizeMediaMeta(m), blob, created: Date.now() };
+    if (!rec.type && blob.type) rec.type = blob.type;
+    if (rec.type && !blob.type) rec.blob = new Blob([blob], { type: rec.type }); // cheap: references the same bytes
     await db.putMedia(rec);
     this.recs.set(rec.id, (await db.getMedia(rec.id)) || rec);
     return rec;

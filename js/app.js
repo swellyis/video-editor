@@ -1,18 +1,18 @@
 // Video Editor Pro — main controller
-import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, isMac, deepClone, blobToDataURL, dataURLToBlob, uid } from './util.js';
-import { db, mediaIdsOf } from './db.js';
-import { media, kindOf, isHeic } from './media.js';
+import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar } from './util.js';
+import { db, mediaIdsOf, setKeepProvider } from './db.js';
+import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
-  newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, splitAt, removeClip, duplicateClip,
+  newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, chapters, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
-  newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, ANIM_PROPS, EASES, normalizeClip,
+  newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, ANIM_PROPS, normalizeClip,
   splitItem, audioSpan, rebaseKeyframes,
 } from './model.js';
-import { Compositor, ensureFonts, drawText, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
+import { Compositor, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { Timeline } from './timeline.js';
-import { runExport, capabilities, ExportCancelled, createSink, canStreamToOPFS, cleanupExports, bitrateFor } from './exporter.js';
+import { runExport, capabilities, planFormat, ExportCancelled, createSink, canStreamToOPFS, cleanupExports, bitrateFor } from './exporter.js';
 
 const app = {
   project: newProject(),
@@ -22,8 +22,12 @@ const app = {
   media,
   history: new History(),
 };
-window.__app = app; // handy for debugging & automated tests
-let voice = { busy: false, state: 'idle', toggle() { }, tick() { } }; // replaced by the voiceover recorder below
+// Debug/test handle: only on local development hosts or with ?debug in the URL (not exposed on the public site).
+if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has('debug')) window.__app = app;
+let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
+
+// media this tab still needs, reported to other tabs before they garbage-collect stored media
+setKeepProvider(() => [...mediaIdsOf(app.project), ...app.history.mediaIds(), ...media.recs.keys(), ...media.pending]);
 
 const compositor = new Compositor();
 const stage = $('stage');
@@ -315,19 +319,19 @@ function fillInspector() {
   const c = selected('clip');
   $('clipPanel').hidden = !c; $('clipEmptyHint').hidden = !!c;
   if (c) {
-    const lay = layout(p), it = lay.items.find(i => i.clip.id === c.id);
+    const lay = layout(p), it = lay.items.find(i => i.clip.id === c.id) || { index: p.clips.indexOf(c), len: clipLen(c) };
     $('clipTitle').textContent = (c.kind === 'image' ? 'Image ' : 'Clip ') + (it.index + 1) + ' of ' + lay.items.length;
     $('clipLenLabel').textContent = fmt(it.len) + ' on timeline';
     const isImg = c.kind === 'image';
     $('trimBlock').hidden = isImg; $('imageDurBlock').hidden = !isImg; $('speedSection').hidden = isImg;
     if (isImg) { $('imageDur').value = c.out - c.in; $('imageDurOut').textContent = (c.out - c.in).toFixed(1) + 's'; }
     else {
-      const d = c.srcDuration;
+      const d = c.srcDuration > 0 ? c.srcDuration : Math.max(c.out, 0.01); // media with an unknown duration
       for (const r of [$('startRange'), $('endRange')]) { r.max = d; r.step = Math.max(0.01, d / 1000); }
       $('startRange').value = c.in; $('endRange').value = c.out;
       if (document.activeElement !== $('clipIn')) $('clipIn').value = c.in.toFixed(2);
       if (document.activeElement !== $('clipOut')) $('clipOut').value = c.out.toFixed(2);
-      $('rangeFill').style.marginLeft = (c.in / d * 100) + '%'; $('rangeFill').style.width = ((c.out - c.in) / d * 100) + '%';
+      $('rangeFill').style.marginLeft = clamp(c.in / d * 100, 0, 100) + '%'; $('rangeFill').style.width = clamp((c.out - c.in) / d * 100, 0, 100) + '%';
     }
     $('offlineBanner').hidden = media.has(c.mediaId);
     const idx = it.index;
@@ -369,24 +373,32 @@ function renderChapters() {
   $('chaptersOut').textContent = ch.text || '—';
   $('chapterWarn').textContent = ch.warnings.join(' ');
 }
+// Side-panel lists: rebuilt only when what they show changed (they're refreshed on every slider input event).
+const listKeys = {};
+const listItem = (selectedNow, label, onPick, ...kids) => el('div', {
+  class: 'item' + (selectedNow ? ' selected' : ''), role: 'button', tabindex: '0', 'aria-pressed': selectedNow ? 'true' : 'false', 'aria-label': label,
+  onclick: onPick, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(); } },
+}, ...kids);
+function renderList(id, rows, build) {
+  const key = JSON.stringify(rows.map(r => r.key));
+  if (listKeys[id] === key) return;
+  listKeys[id] = key;
+  const box = $(id), focusedIdx = [...box.children].indexOf(document.activeElement);
+  box.replaceChildren(...rows.map(build));
+  if (focusedIdx >= 0 && box.children[focusedIdx]) box.children[focusedIdx].focus();
+}
 function renderLists(light) {
-  const p = app.project, sel = app.selection || {};
-  // text list
-  const tl = $('textList'); tl.replaceChildren();
-  [...p.texts].sort((a, b) => a.start - b.start).forEach(t => {
-    tl.append(el('div', { class: 'item' + (sel.type === 'text' && sel.id === t.id ? ' selected' : ''), onclick: () => app.select({ type: 'text', id: t.id }, { seekInto: true }) },
-      el('span', { class: 't', text: fmt(t.start) }), el('span', { class: 'grow', text: (t.text || '(empty)').replace(/\n/g, ' ') })));
-  });
-  const al = $('audioList'); al.replaceChildren();
-  p.audio.forEach(a => {
-    al.append(el('div', { class: 'item' + (sel.type === 'audio' && sel.id === a.id ? ' selected' : ''), onclick: () => app.select({ type: 'audio', id: a.id }) },
-      el('span', { text: a.voice ? '🎙' : '♪' }), el('span', { class: 'grow', text: a.name + (a.loop ? ' (loop)' : '') }), el('span', { class: 't', text: fmt(a.start) + ' · ' + fmt(audioSpan(a, layout(p).total)) })));
-  });
-  const ol = $('overlayList'); ol.replaceChildren();
-  (p.overlays || []).forEach(o => {
-    ol.append(el('div', { class: 'item' + (sel.type === 'overlay' && sel.id === o.id ? ' selected' : ''), onclick: () => app.select({ type: 'overlay', id: o.id }, { seekInto: true }) },
-      el('span', { class: 'item-ico', title: o.chroma && o.chroma.enabled ? 'Green screen' : 'Picture-in-picture' }, icon(o.chroma && o.chroma.enabled ? 'key' : 'pip')), el('span', { class: 'grow', text: o.name }), el('span', { class: 't', text: fmt(o.start) + ' · ' + fmt(overlayLen(o)) })));
-  });
+  const p = app.project, sel = app.selection || {}, total = layout(p).total;
+  const isSel = (type, id) => sel.type === type && sel.id === id;
+  const texts = [...p.texts].sort((a, b) => a.start - b.start).map(t => ({ t, key: [t.id, fmt(t.start), t.text, isSel('text', t.id)] }));
+  renderList('textList', texts, ({ t }) => { const txt = (t.text || '(empty)').replace(/\n/g, ' '); return listItem(isSel('text', t.id), `Text at ${fmt(t.start)}: ${txt}`, () => app.select({ type: 'text', id: t.id }, { seekInto: true }),
+    el('span', { class: 't', text: fmt(t.start) }), el('span', { class: 'grow', text: txt })); });
+  const auds = p.audio.map(a => ({ a, span: audioSpan(a, total), key: [a.id, a.name, a.voice, a.loop, fmt(a.start), fmt(audioSpan(a, total)), isSel('audio', a.id)] }));
+  renderList('audioList', auds, ({ a, span }) => listItem(isSel('audio', a.id), `${a.voice ? 'Voice' : 'Music'} track ${a.name}${a.loop ? ', looped' : ''}, ${fmt(a.start)}`, () => app.select({ type: 'audio', id: a.id }),
+    el('span', { text: a.voice ? '🎙' : '♪' }), el('span', { class: 'grow', text: a.name + (a.loop ? ' (loop)' : '') }), el('span', { class: 't', text: fmt(a.start) + ' · ' + fmt(span) })));
+  const ovs = (p.overlays || []).map(o => ({ o, key: [o.id, o.name, !!(o.chroma && o.chroma.enabled), fmt(o.start), fmt(overlayLen(o)), isSel('overlay', o.id)] }));
+  renderList('overlayList', ovs, ({ o }) => { const keyed = o.chroma && o.chroma.enabled; return listItem(isSel('overlay', o.id), `Overlay ${o.name}, ${fmt(o.start)}`, () => app.select({ type: 'overlay', id: o.id }, { seekInto: true }),
+    el('span', { class: 'item-ico', title: keyed ? 'Green screen' : 'Picture-in-picture' }, icon(keyed ? 'key' : 'pip')), el('span', { class: 'grow', text: o.name }), el('span', { class: 't', text: fmt(o.start) + ' · ' + fmt(overlayLen(o)) })); });
   if (light) return;
   const ml = $('markerList'); ml.replaceChildren();
   [...p.markers].sort((a, b) => a.time - b.time).forEach(m => {
@@ -595,7 +607,12 @@ async function importOverlay(f) {
 }
 app.importOverlay = importOverlay;
 $('overlayInput').onchange = e => { const f = e.target.files[0]; e.target.value = ''; importOverlay(f); };
-$('ovlRelinkInput').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; const o = selected('overlay'); if (!f || !o) return; await media.replaceMedia(o.mediaId, f); renderAll(); toast('Media relinked.'); };
+$('ovlRelinkInput').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; const o = selected('overlay'); if (!f || !o) return;
+  try { await media.replaceMedia(o.mediaId, f); }
+  catch (err) { console.warn(err); return toast('Could not read ' + f.name + ': ' + (err.message || err), 5000); }
+  renderAll(); toast('Media relinked.');
+};
 $('ovlLenInput').addEventListener('change', () => {
   const o = selected('overlay'); if (!o) return; const l = parseFloat($('ovlLenInput').value); if (!(l > 0)) return;
   const sp = o.kind === 'image' ? 1 : (o.speed || 1);
@@ -638,7 +655,8 @@ function pickColorAt(x, y) {
 voice = (() => {
   const V = { state: 'idle', busy: false, stream: null, rec: null, chunks: [], blob: null, url: null, t0: 0, startedAt: 0, dur: 0, ac: null, an: null, raf: 0, peak: 0, takes: 0 };
   const ui = () => {
-    const recd = V.state === 'rec' || V.state === 'arming';
+    const recd = V.state === 'rec' || V.state === 'arming' || V.state === 'countdown';
+    $('voStop').textContent = V.state === 'rec' ? '■ Stop' : '✕ Cancel';
     $('voRecord').hidden = recd; $('voStop').hidden = !recd;
     $('voRecord').disabled = V.state === 'review';
     $('voReview').hidden = V.state !== 'review';
@@ -669,32 +687,45 @@ voice = (() => {
     player.muteAll = false;
   };
   const mimeFor = () => ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/ogg;codecs=opus'].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+  const IDLE_HINT = 'Records from your microphone into a new voice track starting at the playhead. Music automatically ducks under your voice.';
+  const mkRecorder = (mime) => { try { return new MediaRecorder(V.stream, mime ? { mimeType: mime, audioBitsPerSecond: 128000 } : undefined); } catch (e) { if (!mime) throw e; return new MediaRecorder(V.stream); } };
   async function start() {
     if (V.state !== 'idle') return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) return toast('This browser cannot record audio.');
     showTab('audio');
-    V.state = 'arming'; ui();
+    V.state = 'arming'; V.cancelArm = false; ui();
+    let stream;
     try {
-      V.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     } catch (e) {
-      V.state = 'idle'; ui();
+      if (V.state === 'arming') { V.state = 'idle'; ui(); }
+      if (V.cancelArm) return;
       return toast(e.name === 'NotAllowedError' ? 'Microphone permission was denied. Allow it in the browser’s site settings.' : 'No microphone available: ' + (e.message || e.name), 5000);
     }
+    if (V.cancelArm || V.state !== 'arming') { stream.getTracks().forEach(t => t.stop()); return; } // cancelled while the permission prompt was open
+    V.stream = stream;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       V.ac = new AC(); const src = V.ac.createMediaStreamSource(V.stream);
       V.an = V.ac.createAnalyser(); V.an.fftSize = 1024; src.connect(V.an);
     } catch { }
-    const mime = mimeFor();
-    V.rec = new MediaRecorder(V.stream, mime ? { mimeType: mime, audioBitsPerSecond: 128000 } : undefined);
-    V.chunks = [];
-    V.rec.ondataavailable = (e) => { if (e.data && e.data.size) V.chunks.push(e.data); };
-    V.stopped = new Promise(r => V.rec.addEventListener('stop', r, { once: true }));
-    player.pause();
-    V.t0 = player.t >= player.total - 0.05 && player.total > 0 ? 0 : player.t;
-    player.setTime(V.t0);
-    player.muteAll = $('voMute').checked;
-    V.rec.start(250);
+    try {
+      // recorder creation/start can throw (unsupported mime/bitrate, device lost): never leave the mic on
+      V.rec = mkRecorder(mimeFor());
+      V.chunks = [];
+      V.rec.ondataavailable = (e) => { if (e.data && e.data.size) V.chunks.push(e.data); };
+      V.stopped = new Promise(r => V.rec.addEventListener('stop', r, { once: true }));
+      player.pause();
+      V.t0 = player.t >= player.total - 0.05 && player.total > 0 ? 0 : player.t;
+      player.setTime(V.t0);
+      player.muteAll = $('voMute').checked;
+      V.rec.start(250);
+    } catch (e) {
+      console.warn('Voiceover recorder failed', e);
+      release(); V.rec = null; V.state = 'idle'; ui();
+      $('voHint').textContent = IDLE_HINT;
+      return toast('Recording could not start: ' + (e.message || e.name), 5000);
+    }
     V.startedAt = performance.now();
     V.state = 'rec'; ui();
     if ($('voPlayVideo').checked && app.project.clips.length) player.play(1);
@@ -702,6 +733,8 @@ voice = (() => {
     $('voHint').textContent = 'Recording… press Stop (or R) when you’re done.';
   }
   async function stop() {
+    if (V.state === 'countdown') return cancelCountdown();
+    if (V.state === 'arming') { V.cancelArm = true; release(); V.state = 'idle'; ui(); $('voHint').textContent = IDLE_HINT; return; }
     if (V.state !== 'rec') return;
     V.dur = (performance.now() - V.startedAt) / 1000;
     V.rec.stop(); await V.stopped;
@@ -739,14 +772,40 @@ voice = (() => {
     V.blob = null; V.chunks = [];
     V.state = 'idle'; ui();
     $('voTimer').textContent = '00:00.0';
-    $('voHint').textContent = 'Records from your microphone into a new voice track starting at the playhead. Music automatically ducks under your voice.';
+    $('voHint').textContent = IDLE_HINT;
     if (!silent) toast('Take discarded');
   }
   async function retake() { const t0 = V.t0; discard(true); player.setTime(t0); await start(); }
   $('voRecord').onclick = start; $('voStop').onclick = stop;
   $('voKeep').onclick = keep; $('voRetake').onclick = retake; $('voDiscard').onclick = () => discard();
   V.start = start; V.stop = stop; V.keep = keep; V.retake = retake; V.discard = discard;
-  V.toggle = () => { if (V.state === 'idle') start(); else if (V.state === 'rec') stop(); };
+  V.toggle = () => { if (V.state === 'idle') start(); else if (V.state === 'rec' || V.state === 'arming') stop(); };
+  // Keyboard R: a visible 3-2-1 countdown first (so a stray key press never opens the mic), R/Esc/Cancel aborts it.
+  const COUNT = 3;
+  function countdown() {
+    if (V.state !== 'idle') return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) return toast('This browser cannot record audio.');
+    showTab('audio');
+    V.state = 'countdown'; ui();
+    let n = COUNT;
+    const tick = () => {
+      if (V.state !== 'countdown') return;
+      if (n <= 0) { V.state = 'idle'; ui(); start(); return; }
+      $('voTimer').textContent = String(n);
+      $('voHint').textContent = `Recording starts in ${n}… press R or Esc to cancel.`;
+      toast(`Recording in ${n}… (R or Esc cancels)`, 1100);
+      n--; V.cdTimer = setTimeout(tick, 1000);
+    };
+    tick();
+  }
+  function cancelCountdown() {
+    if (V.state !== 'countdown') return;
+    clearTimeout(V.cdTimer); V.state = 'idle'; ui();
+    $('voTimer').textContent = '00:00.0'; $('voHint').textContent = IDLE_HINT;
+    toast('Recording cancelled');
+  }
+  V.keyR = () => { if (V.state === 'idle') countdown(); else if (V.state === 'countdown') cancelCountdown(); else if (V.state === 'rec' || V.state === 'arming') stop(); };
+  V.cancelCountdown = cancelCountdown; V.countdownSec = COUNT;
   V.tick = () => { };
   ui();
   return V;
@@ -808,7 +867,8 @@ $('logoInput').onchange = async e => {
 $('relinkInput').onchange = async e => {
   const f = e.target.files[0]; e.target.value = '';
   const c = selected('clip'); if (!f || !c) return;
-  await media.replaceMedia(c.mediaId, f);
+  try { await media.replaceMedia(c.mediaId, f); }
+  catch (err) { console.warn(err); return toast('Could not read ' + f.name + ': ' + (err.message || err), 5000); }
   renderAll(); toast('Media relinked.');
 };
 const dropT = document.body;
@@ -832,14 +892,27 @@ function editPoints() {
   const k = kfTarget(); if (k) kfTimes(k.item).forEach(lt => s.add(k.start + lt));
   return [...s].sort((a, b) => a - b);
 }
+// Keys a focused control uses itself (slider steps, checkbox/button activation, select navigation).
+const CONTROL_KEYS = new Set([' ', 'Spacebar', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
+/** 'text' = typing (no shortcuts), 'control' = a focused control (its own keys win), 'global' = shortcuts apply. */
+function keyContext(t) {
+  if (!t || !t.closest) return 'global';
+  if (t.isContentEditable) return 'text';
+  const tag = t.tagName;
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return 'text';
+  if (tag === 'INPUT') return ['range', 'checkbox', 'radio', 'color', 'button', 'submit', 'reset', 'file'].includes(t.type) ? 'control' : 'text';
+  if (t.closest('button, a[href], summary, [role=button], [role=tab], [role=slider], [role=switch], [role=checkbox], [role=option], [role=menuitem]')) return 'control';
+  return 'global';
+}
 document.addEventListener('keydown', (e) => {
-  const tag = (e.target.tagName || '').toLowerCase();
-  const typing = ['input', 'textarea', 'select'].includes(tag) && !(e.target.type === 'range' || e.target.type === 'checkbox') || e.target.isContentEditable;
+  const ctx = keyContext(e.target);
+  const typing = ctx === 'text';
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); redo(); return; }
   if (typing) { if (e.key === 'Escape') e.target.blur(); return; }
   if (qs('dialog[open]')) return;
+  if (ctx === 'control' && CONTROL_KEYS.has(e.key)) return; // e.g. arrows move the focused slider, Space presses the focused button
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); actions.duplicate(); return; }
   if (mod || e.altKey) return;
   const k = e.key;
@@ -856,20 +929,21 @@ document.addEventListener('keydown', (e) => {
     case 'ArrowDown': { handled(); const pts = editPoints().filter(x => x > player.t + 1e-3); player.pause(); player.setTime(pts.length ? pts[0] : player.total); break; }
     case 'Home': handled(); player.setTime(0); break;
     case 'End': handled(); player.setTime(player.total); break;
-    case 's': case 'S': actions.split(); break;
+    case 's': case 'S': if (!e.repeat) actions.split(); break;
     case 'Delete': case 'Backspace': handled(); actions.delete(); break;
-    case 't': case 'T': actions.addText(); break;
-    case 'm': case 'M': actions.addMarker(); break;
-    case 'r': case 'R': handled(); voice.toggle(); break;
+    case 't': case 'T': if (!e.repeat) actions.addText(); break;
+    case 'm': case 'M': if (!e.repeat) actions.addMarker(); break;
+    // R never starts recording instantly: it arms a 3-second countdown (R or Esc cancels); R again stops a recording
+    case 'r': case 'R': handled(); if (!e.repeat) voice.keyR(); break;
     case '+': case '=': timeline.zoomBy(1.4); break;
     case '-': case '_': timeline.zoomBy(1 / 1.4); break;
     case '0': timeline.autoFit = true; timeline.fit(); app.onZoom(timeline.pps); break;
     case '?': openDialog('helpDialog'); break;
-    case 'Escape': app.select(null); break;
+    case 'Escape': if (voice.state === 'countdown') voice.cancelCountdown(); else app.select(null); break;
   }
 });
 function undo() { if (voice.busy) return; const s = app.history.undo(); if (!s) return; app.project = migrate(s); renderAll(); scheduleSave(); toast('Undo'); }
-function redo() { const s = app.history.redo(); if (!s) return; app.project = migrate(s); renderAll(); scheduleSave(); toast('Redo'); }
+function redo() { if (voice.busy) return; const s = app.history.redo(); if (!s) return; app.project = migrate(s); renderAll(); scheduleSave(); toast('Redo'); }
 app.undo = undo; app.redo = redo;
 $('undoBtn').onclick = undo; $('redoBtn').onclick = redo;
 
@@ -885,10 +959,46 @@ $('snapBtn').onclick = () => { app.snapEnabled = !app.snapEnabled; $('snapBtn').
 
 // tabs
 function showTab(name) {
-  qsa('.tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === name));
+  qsa('.tabs button').forEach(x => { const on = x.dataset.tab === name; x.classList.toggle('active', on); x.setAttribute('aria-selected', on ? 'true' : 'false'); x.tabIndex = on ? 0 : -1; });
   qsa('.tab-panel').forEach(x => x.classList.toggle('active', x.id === 'tab-' + name));
 }
-qsa('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+// ARIA tabs: tab <-> panel wiring, roving focus with arrow keys / Home / End
+(() => {
+  const tabs = qsa('.tabs button');
+  const list = tabs[0] && tabs[0].parentElement; if (list) { list.setAttribute('role', 'tablist'); list.setAttribute('aria-label', 'Inspector'); }
+  for (const b of tabs) {
+    const panel = $('tab-' + b.dataset.tab);
+    if (!b.id) b.id = 'tabbtn-' + b.dataset.tab;
+    b.setAttribute('role', 'tab');
+    if (panel) { b.setAttribute('aria-controls', panel.id); panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', b.id); }
+    b.onclick = () => showTab(b.dataset.tab);
+    b.addEventListener('keydown', (e) => {
+      const i = tabs.indexOf(b); let j = null;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') j = (i + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') j = (i - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') j = 0; else if (e.key === 'End') j = tabs.length - 1;
+      if (j == null) return;
+      e.preventDefault(); e.stopPropagation(); showTab(tabs[j].dataset.tab); tabs[j].focus();
+    });
+  }
+  const cur = tabs.find(b => b.classList.contains('active')) || tabs[0]; if (cur) showTab(cur.dataset.tab);
+})();
+// Sliders: every range input gets an accessible name (its row label) and announces the formatted value shown next to it.
+(() => {
+  let n = 0;
+  for (const inp of qsa('input[type=range]')) {
+    const row = inp.closest('.slider-row, label');
+    const lab = row && row.matches('.slider-row') ? row.querySelector('label') : null, out = row && row.querySelector('output');
+    if (!inp.id) inp.id = 'rng-' + (inp.dataset.bind || 'slider').replace(/[^\w-]+/g, '-') + '-' + (++n);
+    if (lab && !lab.htmlFor) lab.htmlFor = inp.id;
+    if (!inp.labels?.length && !inp.getAttribute('aria-label') && !inp.getAttribute('aria-labelledby')) inp.setAttribute('aria-label', (row && row.textContent.trim()) || inp.title || 'Slider');
+    if (out) {
+      out.setAttribute('for', inp.id);
+      const sync = () => { const t = out.textContent.trim(); if (t) inp.setAttribute('aria-valuetext', t); else inp.removeAttribute('aria-valuetext'); };
+      new MutationObserver(sync).observe(out, { childList: true, characterData: true, subtree: true }); sync();
+    }
+  }
+})();
 
 // preset chips + fonts
 for (const box of qsa('[data-presets]')) for (const [k, v] of Object.entries(PRESETS)) box.append(el('button', { type: 'button', 'data-value': k, text: v.label }));
@@ -939,11 +1049,25 @@ for (const [k, v] of Object.entries(FONTS)) { $('fontSelect').append(el('option'
 })();
 
 // ---------------------------------------------------------------- projects
+/** Free memory held for media the open project no longer uses (object URLs, decoded images, GIF frames). */
+function releaseUnusedMedia() {
+  const keep = new Set([...mediaIdsOf(app.project), ...app.history.mediaIds()]);
+  media.retain(keep);
+  if (thumb.v) { thumb.v.removeAttribute('src'); thumb.v.load(); delete thumb.v.dataset.url; }
+  thumbBg = null;
+}
+async function flushPendingSave() {
+  clearTimeout(retryTimer);
+  if (app.rev !== app.savedRev || saveInFlight) { debouncedSave.cancel && debouncedSave.cancel(); await saveNow(); }
+}
 async function openProject(id) {
+  if (app.ready) await flushPendingSave(); // don't lose the current project's unsaved edits
   const p = await db.getProject(id);
   if (!p) return false;
   player.pause();
   app.project = migrate(p);
+  app.history.reset(app.project);
+  releaseUnusedMedia();
   await media.preload(mediaIdsOf(app.project));
   // waveforms for media imported before peaks existed (or whose peak pass was interrupted)
   for (const x of [...app.project.clips, ...app.project.audio, ...app.project.overlays]) {
@@ -951,7 +1075,6 @@ async function openProject(id) {
     if (rec && rec.kind !== 'image' && rec.hasAudio !== false && !rec.peaks) media.fillPeaks(x.mediaId).catch(() => { });
   }
   app.selection = null;
-  app.history.reset(app.project);
   player.t = 0;
   timeline.autoFit = true;
   await db.kvSet('lastProject', id);
@@ -962,11 +1085,14 @@ async function openProject(id) {
   return true;
 }
 async function createProject(name) {
+  if (app.ready) await flushPendingSave();
   player.pause();
   app.project = newProject(name || 'Untitled project');
   app.selection = null; app.history.reset(app.project);
+  releaseUnusedMedia();
   await saveNow();
   renderAll(); player.setTime(0);
+  refreshCaps();
 }
 app.openProject = openProject;
 async function renderProjectList() {
@@ -992,6 +1118,7 @@ async function renderProjectList() {
             await db.deleteProject(p.id);
             if (p.id === app.project.id) { const rest = await db.listProjects(); if (rest.length) await openProject(rest[0].id); else await createProject(); }
             await db.gc(app.history.mediaIds());
+            releaseUnusedMedia();
             renderProjectList(); toast('Project deleted');
           } }))));
     list.append(card);
@@ -1003,37 +1130,56 @@ async function renderProjectList() {
   }
 }
 $('projectBtn').onclick = () => { renderProjectList(); openDialog('projectsDialog'); };
-$('newProject').onclick = async () => { const n = prompt('Name your new project', 'Untitled project'); if (n === null) return; await saveNow(); await createProject(n || 'Untitled project'); closeDialog('projectsDialog'); toast('New project created'); };
+$('newProject').onclick = async () => { const n = prompt('Name your new project', 'Untitled project'); if (n === null) return; await createProject(n || 'Untitled project'); closeDialog('projectsDialog'); toast('New project created'); };
+/**
+ * Project file. With media: a .vedit file (tar) holding project.json plus every media file as raw bytes. It's assembled
+ * from Blob parts that reference the stored media, so nothing is base64-encoded or copied into one giant string.
+ * Without media: a small .vedit.json. Old .vedit.json files with base64 media still import.
+ */
 async function exportProjectFile(id) {
+  if (id === app.project.id) await flushPendingSave();
   const p = id === app.project.id ? JSON.parse(JSON.stringify(app.project)) : await db.getProject(id);
   const embed = $('embedMedia').checked;
-  const mediaOut = [];
+  const mediaOut = [], files = [];
   for (const mid of mediaIdsOf(p)) {
     const m = await media.get(mid); if (!m) continue;
-    const { blob, peaks, ...meta } = m;
-    if (embed) meta.data = await blobToDataURL(blob);
+    const { blob, peaks, ...meta } = m; // waveform peaks are rebuilt on import
+    if (embed && blob) { meta.file = 'media/' + mid; files.push({ name: meta.file, data: blob }); }
     mediaOut.push(meta);
   }
-  const data = { app: 'video-editor-pro', format: 1, exported: new Date().toISOString(), project: p, media: mediaOut };
-  download(new Blob([JSON.stringify(data)], { type: 'application/json' }), safeName(p.name) + (embed ? '-with-media' : '') + '.vedit.json');
+  const data = { app: 'video-editor-pro', format: embed ? 2 : 1, exported: new Date().toISOString(), project: p, media: mediaOut };
+  const base = safeName(p.name, 'project');
+  if (embed) download(tarBlob([{ name: 'project.json', data: JSON.stringify(data) }, ...files]), base + '-with-media.vedit');
+  else download(new Blob([JSON.stringify(data)], { type: 'application/json' }), base + '.vedit.json');
   toast(embed ? 'Project exported with media' : 'Project exported (media stays on this device)');
 }
 app.exportProjectFile = exportProjectFile;
 async function importProjectFile(file) {
   try {
-    const data = JSON.parse(await file.text());
+    let data, entries = null;
+    if (await isTar(file)) {
+      entries = await readTar(file);
+      const pj = entries.get('project.json'); if (!pj) throw new Error('Not a project file');
+      data = JSON.parse(await pj.text());
+    } else data = JSON.parse(await file.text()); // .vedit.json (format 1, media optionally base64)
     const src = data.project || data;
     if (!src || !Array.isArray(src.clips)) throw new Error('Not a project file');
-    let missing = 0;
-    for (const m of data.media || []) {
-      if (m.data) { if (!(await media.get(m.id))) await media.importEmbedded(m, await dataURLToBlob(m.data)); }
-      else if (!(await media.get(m.id))) missing++;
+    let missing = 0, skipped = 0;
+    for (const m of Array.isArray(data.media) ? data.media : []) {
+      if (!m || typeof m.id !== 'string') continue;
+      if (await media.get(m.id)) continue;
+      let blob = null;
+      if (entries && typeof m.file === 'string') blob = entries.get(m.file) || null;
+      else if (m.data) { if (isMediaDataURL(m.data)) blob = dataURLToBlob(m.data); else skipped++; } // never fetch() arbitrary URLs
+      if (blob) { try { await media.importEmbedded(m, blob); } catch (e) { console.warn(e); missing++; } }
+      else missing++;
     }
     const p = migrate(src);
-    p.id = uid('prj'); p.name = (src.name || 'Imported') + (data.project ? '' : ''); p.updated = Date.now();
+    p.id = uid('prj'); p.name = String(src.name || 'Imported').slice(0, 200); p.updated = Date.now();
     await db.saveProject(p);
     await openProject(p.id);
     closeDialog('projectsDialog');
+    if (skipped) console.warn(skipped + ' embedded media entries were not valid media data and were ignored');
     toast(missing ? `Imported. ${missing} media file(s) need relinking (select the red clips).` : 'Project imported');
   } catch (e) { console.warn(e); toast('Import failed: ' + e.message); }
 }
@@ -1043,7 +1189,14 @@ $('importProject').onchange = e => { const f = e.target.files[0]; e.target.value
 // dialogs
 function openDialog(id) { const d = $(id); if (!d.open) d.showModal(); }
 function closeDialog(id) { const d = $(id); if (d.open) d.close(); }
-qsa('dialog').forEach(d => { d.addEventListener('click', e => { if (e.target === d || e.target.closest('[data-close]')) d.close(); }); });
+// close on a real backdrop click only (a click in the dialog's own padding also targets the <dialog> element)
+qsa('dialog').forEach(d => { d.addEventListener('click', e => {
+  if (e.target.closest('[data-close]')) return d.close();
+  if (e.target !== d) return;
+  const r = d.getBoundingClientRect();
+  const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  if (!inside || (e.clientX === 0 && e.clientY === 0 && e.detail === 0)) d.close();
+}); });
 $('helpBtn').onclick = () => openDialog('helpDialog');
 
 // theme
@@ -1082,12 +1235,21 @@ async function thumbFrame(t) {
   const c = document.createElement('canvas'); c.width = 1280; c.height = 720;
   if (!it) return c;
   let src = null;
-  if (it.clip.kind === 'image') { const im = await media.image(it.clip.mediaId); src = { img: im.img, w: im.w, h: im.h }; }
-  else {
+  if (it.clip.kind === 'image') {
+    const im = await media.image(it.clip.mediaId).catch(() => null);
+    if (!im) return c; // missing or undecodable image: plain background
+    src = { img: im.img, w: im.w, h: im.h };
+  } else {
+    const url = media.url(it.clip.mediaId);
+    if (!url) return c;
     if (!thumb.v) { thumb.v = document.createElement('video'); thumb.v.muted = true; thumb.v.playsInline = true; thumb.v.preload = 'auto'; }
-    const v = thumb.v, url = media.url(it.clip.mediaId);
-    if (v.dataset.url !== url) { v.src = url; v.dataset.url = url; await new Promise(r => { v.onloadeddata = r; v.onerror = r; }); }
-    await new Promise(r => { const d = () => { v.removeEventListener('seeked', d); r(); }; v.addEventListener('seeked', d); v.currentTime = Math.max(0.01, it.clip.in + (t - it.start) * it.clip.speed); });
+    const v = thumb.v;
+    if (v.dataset.url !== url) {
+      v.src = url; v.dataset.url = url;
+      await Promise.race([new Promise(r => { v.onloadeddata = r; v.onerror = r; }), new Promise(r => setTimeout(r, 8000))]);
+    }
+    if (v.error || v.readyState < 1) return c; // can't decode this video here
+    await seekVideo(v, Math.max(0.01, it.clip.in + (t - it.start) * it.clip.speed)); // has a timeout, never hangs
     src = { img: v, w: v.videoWidth, h: v.videoHeight };
   }
   const single = { ...lay, items: [{ ...it, xIn: 0, fadeInBlack: 0, fadeOutBlack: 0 }] };
@@ -1149,7 +1311,7 @@ async function openThumb() {
   if (!app.project.clips.length) return toast('Add a clip first.');
   player.pause();
   await ensureFonts();
-  if (!app.project.thumb.time) app.project.thumb.time = player.t;
+  if (app.project.thumb.time == null) app.project.thumb.time = player.t; // a chosen frame at 0:00 is valid
   thumbSyncInputs(); openDialog('thumbDialog'); await thumbRefresh(true);
 }
 $('thumbBtn').onclick = openThumb; $('thumbBtn2').onclick = openThumb;
@@ -1169,23 +1331,26 @@ $('thumbSave').onclick = async () => {
   let q = 0.92, blob;
   do { blob = await new Promise(r => thumb.canvas.toBlob(r, 'image/jpeg', q)); q -= 0.08; } while (blob && blob.size > 2 * 1024 * 1024 && q > 0.4);
   if (!blob) return toast('Could not create thumbnail.');
-  download(blob, safeName(app.project.youtube.title || app.project.name) + '-thumbnail.jpg');
+  download(blob, exportBaseName(app.project) + '-thumbnail.jpg');
   toast('Thumbnail saved (' + fmtBytes(blob.size) + ', 1280×720).');
 };
 app.thumbRefresh = thumbRefresh;
 
 // ---------------------------------------------------------------- export
 let exporting = false, abort = null, lastExport = null;
+/** Export file name (without extension) from the YouTube title, else the project name; safe on every OS. */
+function exportBaseName(p) { return safeName((p.youtube.title || '').trim() || p.name, 'video'); }
 async function refreshCaps() {
   const c = await capabilities(app.project);
   app.caps = c;
   const fmtPref = app.project.settings.format;
+  const plan = planFormat(c, fmtPref);
+  app.exportPlan = plan;
   let note;
-  const mr = c.recorder.find(t => t.includes('mp4')) ? 'MP4' : c.recorder.length ? 'WebM' : null;
-  if (c.fastMp4 && fmtPref !== 'webm') note = `Fast export: MP4 (H.264 + ${c.aac ? 'AAC' : 'Opus'} audio), faster than real time.`;
-  else if (c.fastWebm) note = 'Fast export: WebM (VP9 + Opus), faster than real time.';
-  else if (mr) note = `This browser records in real time: ${mr}. Keep this tab open during export.`;
-  else note = 'This browser cannot export video. Use Chrome, Edge or Safari 17+.';
+  if (plan.engine === 'fast' && plan.ext === 'mp4') note = `Fast export: MP4 (H.264 + ${c.aac ? 'AAC' : 'Opus'} audio), faster than real time.`;
+  else if (plan.engine === 'fast') note = 'Fast export: WebM (VP9 + Opus), faster than real time.' + (fmtPref === 'auto' ? ' This browser can’t encode MP4 quickly, so Auto makes WebM.' : '');
+  else if (plan.engine === 'realtime') note = `This browser records in real time: ${plan.ext.toUpperCase()}. Keep this tab open during export.`;
+  else note = plan.reason || 'This browser cannot export video. Use Chrome, Edge or Safari 17+.';
   $('capsNote').textContent = note;
 }
 $('exportBtn').onclick = async () => {
@@ -1195,15 +1360,19 @@ $('exportBtn').onclick = async () => {
   const missing = [...p.clips, ...(p.overlays || [])].filter(c => !media.has(c.mediaId));
   if (missing.length) return toast('Relink missing media before exporting (red clips).');
   if (voice.busy) return toast('Finish the voiceover recording first.');
-  const fmtWanted = p.settings.format === 'auto' ? 'mp4' : p.settings.format;
-  const name0 = safeName(p.youtube.title || p.name) + '.' + fmtWanted;
+  const fmtWanted = ['mp4', 'webm'].includes(p.settings.format) ? p.settings.format : 'auto';
+  // expected container (Auto = MP4 when this browser can encode it, otherwise WebM); the engine has the final say
+  const plan = app.caps ? planFormat(app.caps, fmtWanted) : { ext: fmtWanted === 'webm' ? 'webm' : 'mp4', engine: 'fast' };
+  if (!plan.engine && plan.reason) return toast(plan.reason, 5000);
+  const baseName = exportBaseName(p);
   // "Save straight to a file": the picker must open before any other await (it needs the click's user activation)
   let handle = null;
   if ($('saveToDisk').checked && window.showSaveFilePicker) {
     try {
-      handle = await window.showSaveFilePicker({ suggestedName: name0, types: [fmtWanted === 'webm' ? { description: 'WebM video', accept: { 'video/webm': ['.webm'] } } : { description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } }] });
+      handle = await window.showSaveFilePicker({ suggestedName: baseName + '.' + plan.ext, types: [plan.ext === 'webm' ? { description: 'WebM video', accept: { 'video/webm': ['.webm'] } } : { description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } }] });
     } catch (e) { if (e.name === 'AbortError') return; console.warn('Save picker unavailable', e); handle = null; }
   }
+  let handleUnused = false; // the engine produced another container than the picked file's extension
   const lay = layout(p), estBytes = bitrateFor(...Object.values(outputDims(p)), p.settings.fps, p.settings.quality) * lay.total / 8;
   const streams = !!handle || canStreamToOPFS();
   const lowMem = (navigator.deviceMemory || 8) <= 4;
@@ -1222,7 +1391,12 @@ $('exportBtn').onclick = async () => {
     const res = await runExport(JSON.parse(JSON.stringify(p)), media, {
       format: fmtWanted,
       signal: abort.signal,
-      makeSink: (ext) => createSink({ handle, ext }), // disk-backed output (picked file or private temp file) when possible
+      // disk-backed output (picked file or private temp file) when possible; called once the container is known
+      makeSink: (ext) => {
+        const pickedExt = handle && (handle.name.match(/\.([^.]+)$/) || [])[1];
+        if (handle && pickedExt && pickedExt.toLowerCase() !== ext) { handleUnused = true; return createSink({ ext }); }
+        return createSink({ handle, ext });
+      },
       onWarn: (msg) => toast(msg, 6000),
       onFallback: (why) => toast('Using real-time recording (' + why + ')', 4000),
       onProgress: ({ frac, stage, eta, speed }) => {
@@ -1232,22 +1406,29 @@ $('exportBtn').onclick = async () => {
         $('progressEta').textContent = (eta != null ? 'ETA ' + fmtDuration(eta) : 'ETA —') + (speed ? ` · ${speed.toFixed(1)}× real time` : '');
       },
     });
-    const name = handle ? handle.name : safeName(p.youtube.title || p.name) + '.' + res.ext;
+    const name = handle && res.streamed === 'file' ? handle.name : baseName + '.' + res.ext;
     if (res.streamed !== 'file') download(res.blob, name); // a picked file is already saved on disk
+    if (handleUnused) {
+      // the picked .mp4/.webm name would lie about the content: download under the right name, drop the empty picked file
+      try { await handle.remove?.(); } catch { }
+      toast(`This browser made a ${res.ext.toUpperCase()} file, so it was downloaded as “${name}” instead of the file you picked.`, 7000);
+    }
     lastExport = { ...res, name, url: URL.createObjectURL(res.blob) };
     app.lastExport = lastExport;
     const took = (performance.now() - t0) / 1000;
     $('progressBar').style.width = '100%'; $('progressPercent').textContent = '100%';
     $('progressStatus').textContent = 'Done'; $('progressEta').textContent = 'Took ' + fmtDuration(took);
     const where = res.streamed === 'file' ? ' · saved directly to your disk' : res.streamed === 'opfs' ? ' · streamed to disk while rendering' : '';
-    $('exportResultText').innerHTML = `<b>${name}</b> · ${res.width}×${res.height} · ${res.fps} fps · ${fmt(res.duration)} · ${fmtBytes(res.blob.size)}<br><span class="hint">${res.method}${where} · rendered in ${fmtDuration(took)}. Upload it in YouTube Studio.</span>`;
+    // built from text nodes: a picked file name can contain < > & quotes
+    $('exportResultText').replaceChildren(el('b', { text: name }), ` · ${res.width}×${res.height} · ${res.fps} fps · ${fmt(res.duration)} · ${fmtBytes(res.blob.size)}`, el('br'),
+      el('span', { class: 'hint', text: `${res.method}${where} · rendered in ${fmtDuration(took)}. Upload it in YouTube Studio.` }));
     $('downloadAgain').href = lastExport.url; $('downloadAgain').download = name;
     const file = new File([res.blob], name, { type: res.mime });
     $('shareExport').hidden = !(navigator.canShare && navigator.canShare({ files: [file] }));
     $('shareExport').onclick = () => navigator.share({ files: [file], title: p.youtube.title || p.name }).catch(() => { });
     $('exportResult').hidden = false;
     $('outputNote').textContent = 'Export complete.'; $('outputNote').classList.add('status-good');
-    toast((res.streamed === 'file' ? 'Video saved: ' : 'Video exported: ') + name);
+    if (!handleUnused) toast((res.streamed === 'file' ? 'Video saved: ' : 'Video exported: ') + name);
   } catch (e) {
     if (e instanceof ExportCancelled || e.name === 'ExportCancelled') { $('progressStatus').textContent = 'Export cancelled.'; toast('Export cancelled'); }
     else { console.error(e); $('progressStatus').textContent = 'Export failed: ' + (e.message || e); toast('The export could not finish: ' + (e.message || e), 5000); }
@@ -1397,7 +1578,10 @@ async function boot() {
   const onboarded = await db.kvGet('onboarded').catch(() => true);
   if (!onboarded) { if (app.project.clips.length) db.kvSet('onboarded', true).catch(() => { }); else $('onboard').hidden = false; }
   // files shared to the installed app (Android share sheet → share_target)
-  if (new URLSearchParams(location.search).has('shared')) {
+  if (new URLSearchParams(location.search).get('shared') === 'error') {
+    toast('The shared files could not be received. Open them with “Add clips” instead.', 6000);
+    history.replaceState(null, '', location.pathname);
+  } else if (new URLSearchParams(location.search).has('shared')) {
     const inbox = await db.inboxAll().catch(() => []);
     if (inbox.length) { await importFiles(inbox.map(x => new File([x.blob], x.name, { type: x.type }))); await db.inboxClear(); }
     history.replaceState(null, '', location.pathname);

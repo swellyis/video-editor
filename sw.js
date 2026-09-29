@@ -1,5 +1,5 @@
 /* Video Editor service worker: offline app shell (versioned cache) + share target inbox. */
-const VERSION = 'v7f627a106b';
+const VERSION = 'v53c9409050';
 const CACHE = 'video-editor-shell-' + VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
@@ -26,9 +26,11 @@ self.addEventListener('activate', (event) => {
 });
 self.addEventListener('message', (e) => { if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting(); });
 
+// Opens the app's database at whatever version it has (no hard-coded version, so a DB_VERSION bump in js/db.js
+// can't break sharing). On a brand-new install the app hasn't created it yet: create the stores it expects.
 function idbPutInbox(items) {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('video-editor-pro', 1);
+    const req = indexedDB.open('video-editor-pro');
     req.onupgradeneeded = () => {
       const db = req.result;
       for (const s of ['projects', 'media', 'inbox']) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s, { keyPath: 'id' });
@@ -36,9 +38,11 @@ function idbPutInbox(items) {
     };
     req.onerror = () => reject(req.error);
     req.onsuccess = () => {
-      const t = req.result.transaction('inbox', 'readwrite');
+      const db = req.result;
+      if (!db.objectStoreNames.contains('inbox')) { db.close(); return reject(new Error('inbox store missing')); }
+      const t = db.transaction('inbox', 'readwrite');
       items.forEach((it) => t.objectStore('inbox').put(it));
-      t.oncomplete = () => resolve(); t.onerror = () => reject(t.error);
+      t.oncomplete = () => { db.close(); resolve(); }; t.onerror = () => { db.close(); reject(t.error); };
     };
   });
 }
@@ -52,7 +56,9 @@ self.addEventListener('fetch', (event) => {
         const form = await req.formData();
         const files = form.getAll('media').filter((f) => f && typeof f === 'object');
         await idbPutInbox(files.map((f, i) => ({ id: 'in_' + Date.now() + '_' + i, name: f.name, type: f.type, blob: f })));
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        return Response.redirect('./?shared=error', 303); // the app explains instead of silently showing nothing
+      }
       return Response.redirect('./?shared=1', 303);
     })());
     return;
@@ -63,7 +69,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
       try {
         const res = await fetch(req);
-        if (res.ok) { const c = await caches.open(CACHE); c.put('./index.html', res.clone()); }
+        // only the app page itself may replace the offline shell (not a README, PNG, etc. opened in a tab)
+        const isShell = /\/(index\.html)?$/.test(url.pathname) && (res.headers.get('content-type') || '').includes('text/html');
+        if (res.ok && isShell) { const c = await caches.open(CACHE); c.put('./index.html', res.clone()); }
         return res;
       } catch { return (await caches.match('./index.html')) || (await caches.match('./')) || Response.error(); }
     })());

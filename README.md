@@ -15,18 +15,18 @@ The app is plain static files (HTML, CSS and ES modules). There's no build step.
 - **Keyframes:** animate position, scale, rotation and opacity of main clips, text layers and overlays. Easing can be Linear, Ease in, Ease out, Ease in/out or Hold. Add a keyframe with ◆ (or Shift+K). After that, moving a slider or dragging the item on the preview sets a keyframe at the playhead automatically.
 - **Picture-in-picture (PiP tab):** a second video or image over the main track. It has its own timing and trim, corner/center/full presets, position, size, scale, rotation, opacity, rounded corners, border, shadow, fades (the overlay's sound fades too), speed from 0.25× to 4× for video overlays (the sound keeps its pitch), and optional sound.
 - **Chroma key (green screen)** for overlays: a key color (with "Pick from preview"), similarity, smoothness and spill suppression. It runs in a WebGL shader in both preview and export.
-- **Voiceover:** record from the microphone straight into a voice track at the playhead. It shows a live level meter and a timer, and after each take you can listen back, then keep it, retake it or discard it. The video can play (muted) while you record. Music ducks under voice tracks automatically. Shortcut: `R`.
+- **Voiceover:** record from the microphone straight into a voice track at the playhead. It shows a live level meter and a timer, and after each take you can listen back, then keep it, retake it or discard it. The video can play (muted) while you record. Music ducks under voice tracks automatically. Shortcut: `R` starts a 3-second countdown (press `R` or `Esc` again to cancel), and `R` during a take stops it. The microphone is released as soon as a take ends.
 - **Music tracks:** trim, offset, volume, fade in/out, **Loop** (repeats the trimmed section until the video ends, or for a length you set; loop seams show on the timeline), and optional auto-ducking under clip audio and voiceovers. A track never ducks under itself. The timeline shows a waveform.
 - **Starter templates:** Scripture verse card, Channel intro, Shorts quote (9:16), Lower-third name, and Sermon/devotional outline with chapter markers. Each one creates a new project or is inserted at the playhead, with generated backgrounds, animated text and slow-zoom keyframes. Everything stays editable.
 - **Export:**
-  - Settings: 720p, 1080p or 4K; 24, 30 or 60 fps; three quality levels; MP4 or WebM. The file extension always matches the container.
+  - Settings: 720p, 1080p or 4K; 24, 30 or 60 fps; three quality levels; Auto, MP4 or WebM. **Auto** makes an MP4 where the browser can encode H.264 and otherwise a WebM (VP9/VP8), in both engines. The file extension always matches the container, and the file is named after the YouTube title, or the project name when that is empty (letters in any language, digits, dots and dashes are kept).
   - A progress bar shows the ETA and render speed, and you can cancel.
   - **Low memory use:** audio is decoded and mixed in 10-second chunks, and the output file streams to disk: straight into a file you pick ("Save straight to a file", Chrome/Edge desktop) or into the browser's private storage (OPFS) and then downloaded. Where neither is available the file is built in memory, and you get a warning before long exports on low-memory devices.
   - **Fast engine:** WebCodecs through the vendored [Mediabunny](https://mediabunny.dev) library (MPL-2.0). It decodes and encodes frame by frame, so it isn't tied to real time and audio/video sync is frame-accurate.
   - **Fallback engine:** a real-time canvas + MediaRecorder recording. It prefers MP4 when the browser supports it and falls back to WebM.
 - **Thumbnail maker:** pick a frame, add a headline, a small line and an accent color, then download a 1280×720 JPG (kept under 2 MB).
 - **YouTube details:** title, description and tags with character counters. Chapters are generated from markers (or clip names) using YouTube's rules (starts at 00:00, at least 3 chapters, each at least 10 s). There are copy buttons.
-- **Projects:** the project and its media blobs autosave to IndexedDB. A status label shows *Unsaved changes*, *Saving…*, *Saved hh:mm* or *Save failed – retrying*, and failed saves retry automatically. Older saved projects are migrated to the current schema when they open. The project list lets you create, open, rename, duplicate and delete. You can export or import a project as JSON, with the media optionally embedded; media that wasn't embedded can be relinked.
+- **Projects:** the project and its media blobs autosave to IndexedDB. A status label shows *Unsaved changes*, *Saving…*, *Saved hh:mm* or *Save failed – retrying*, and failed saves retry automatically. Older saved projects are migrated to the current schema when they open. The project list lets you create, open, rename, duplicate and delete. Switching projects saves pending edits first and frees the previous project's decoded media. You can export a project as a small `.vedit.json` (media stays on the device) or, with media included, as a `.vedit` file: a standard tar archive holding `project.json` plus each media file as raw bytes, streamed straight from storage (no base64, so it's about the size of the media). Older `.vedit.json` files with base64-embedded media still import. Media that wasn't embedded can be relinked.
 - **PWA:**
   - A real manifest with icons, including maskable and Apple touch icons.
   - A service worker that caches the app shell for offline use under a versioned cache.
@@ -34,6 +34,8 @@ The app is plain static files (HTML, CSS and ES modules). There's no build step.
   - An install button (`beforeinstallprompt`) with iOS and Android instructions.
   - An update banner when a new version is deployed.
   - An Android share target: share videos from the Gallery straight into the installed app.
+
+- **Keyboard:** shortcuts only act when you aren't typing, and a focused control keeps its own keys (arrows move a focused slider, Space presses a focused button). Every slider has a label and announces its current value. Press Tab to reach the timeline items: Enter selects, ←/→ nudges by a frame (Shift: 1 s; main clips swap with their neighbour), Alt+←/→ trims the end. Tabs support arrow keys.
 
 ## Browser support for export
 Only Chrome was tested (desktop, plus a phone-sized viewport with touch emulation). The Safari and Firefox rows describe the expected behaviour, based on the capability detection built into the app.
@@ -55,12 +57,16 @@ The real-time fallback takes as long as the video itself. Keep the tab visible w
 
 To test locally, run `python3 -m http.server 8000` in this folder and open http://localhost:8000. Service workers need HTTPS or localhost.
 
+Development checks (optional, needs Node 20+): `npm install`, then `npm run lint` (ESLint), `npm test` (unit tests in `tests/`), or `npm run predeploy` to lint, test and bump the version in one go. `node_modules` is git-ignored and isn't needed by the app.
+
 ## Notes and limitations
 - **ffmpeg.wasm isn't included.** The single-threaded core is about 30 MB. It encodes H.264 far slower than real time on phones, and it would need to be downloaded before the first offline use. The WebCodecs path already produces MP4 faster than real time, so ffmpeg.wasm added little except weight.
 - **Storage:** exports stream to disk where the browser supports OPFS writable streams or the File System Access save picker (Chrome/Edge, Android Chrome, recent Safari/Firefox for OPFS). Elsewhere they're assembled in memory. Media is stored in the browser's IndexedDB. Clearing site data deletes it. The app asks for persistent storage when you import media.
 - **Speed changes:** in the export, audio for sped-up or slowed-down clips is time-stretched with WSOLA so the pitch stays the same. Preview uses the browser's own pitch preservation.
 - **HEVC phone videos** play in the preview wherever the browser can play them. If WebCodecs can't decode them, export falls back to a slower frame-by-frame seek of a `<video>` element; output is identical, just slower.
-- **Color grading** uses a small WebGL shader, so it looks the same in every browser.
+- **Color grading** uses a small WebGL shader, so it looks the same in every browser. If WebGL is unavailable or the GPU context is lost, it falls back to canvas filters with an approximation of warmth, fade and vignette, and returns to WebGL when the context is restored.
+- **Security:** the page ships a Content-Security-Policy (only the app's own scripts, plus wasm for the HEIC decoder). Imported project files are validated: settings are clamped and embedded media must be real base64 media data (URLs are never fetched). `window.__app` is only exposed on localhost or with `?debug`.
+- **Several tabs:** cleanup of unused stored media is coordinated between open tabs (Web Locks + BroadcastChannel), so one tab never deletes media another tab still has in its undo history.
 - **Voiceover** needs microphone permission and a secure context (HTTPS or localhost). Recordings are Opus/WebM in Chrome and Firefox and AAC/MP4 in Safari. Use headphones if you turn off "Silence timeline audio while recording".
 - **Chroma key** works best on evenly lit, saturated green or blue backgrounds. Hair-fine detail is approximated with a soft edge.
 - **Keyframe times** are relative to the item's start, so moving a clip or text moves its animation with it. Trimming an item's start shifts its keyframes, so the animation stays pinned to the same frames.

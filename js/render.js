@@ -18,6 +18,13 @@ class ColorGL {
   constructor() {
     this.canvas = document.createElement('canvas');
     this.ok = false;
+    // a lost context (GPU reset, too many contexts) is rebuilt when the browser restores it
+    this.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.ok = false; });
+    this.canvas.addEventListener('webglcontextrestored', () => this._init());
+    this._init();
+  }
+  _init() {
+    this.ok = false;
     try {
       const gl = this.canvas.getContext('webgl', { preserveDrawingBuffer: true, premultipliedAlpha: false, antialias: false });
       if (!gl) return;
@@ -33,8 +40,7 @@ class ColorGL {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       this.u = {}; for (const n of ['bri', 'con', 'sat', 'tmp', 'sep', 'fad', 'vig', 'asp']) this.u[n] = gl.getUniformLocation(pr, n);
-      this.gl = gl; this.ok = true;
-      this.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.ok = false; });
+      this.gl = gl; this.ok = !gl.isContextLost();
     } catch (e) { console.warn('WebGL color pipeline unavailable', e); this.ok = false; }
   }
   process(src, W, H, c) {
@@ -67,12 +73,19 @@ gl_FragColor=vec4(rgb,a*c.a);}`;
 class KeyGL {
   constructor() {
     this.canvas = document.createElement('canvas'); this.ok = false;
+    this.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.ok = false; });
+    this.canvas.addEventListener('webglcontextrestored', () => this._init());
+    this._init();
+  }
+  _init() {
+    this.ok = false;
     try {
       const gl = this.canvas.getContext('webgl', { preserveDrawingBuffer: true, premultipliedAlpha: false, alpha: true, antialias: false });
       if (!gl) return;
       const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
       const pr = gl.createProgram();
       gl.attachShader(pr, sh(gl.VERTEX_SHADER, VERT)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, KFRAG)); gl.linkProgram(pr);
+      if (!gl.getProgramParameter(pr, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error('link failed: ' + gl.getProgramInfoLog(pr));
       gl.useProgram(pr);
       const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
@@ -81,7 +94,7 @@ class KeyGL {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       this.u = {}; for (const n of ['key', 'sim', 'smo', 'spill']) this.u[n] = gl.getUniformLocation(pr, n);
-      this.gl = gl; this.ok = true;
+      this.gl = gl; this.ok = !gl.isContextLost();
     } catch (e) { console.warn('Chroma key unavailable', e); }
   }
   process(src, W, H, ck) {
@@ -98,6 +111,28 @@ class KeyGL {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     return this.canvas;
   }
+}
+
+/**
+ * Approximate the WebGL grade's warmth, fade and vignette with 2D compositing (used only when WebGL is unavailable,
+ * together with CSS filters for brightness/contrast/saturation/sepia). Works in place on a fully painted layer.
+ */
+function emulateGrade(x, W, H, col) {
+  const tmp = (col.temperature || 0) / 100, fad = (col.fade || 0) / 100, vig = (col.vignette || 0) / 100;
+  x.save(); x.filter = 'none'; x.globalAlpha = 1;
+  const fill = (op, style) => { x.globalCompositeOperation = op; x.fillStyle = style; x.fillRect(0, 0, W, H); };
+  if (Math.abs(tmp) > 0.005) {
+    const k = Math.abs(tmp) * 0.09 * 255;
+    if (tmp > 0) { fill('lighter', `rgb(${k.toFixed(1)},${(k * 0.22).toFixed(1)},0)`); fill('multiply', `rgb(255,255,${(255 - k).toFixed(1)})`); }
+    else { fill('lighter', `rgb(0,0,${k.toFixed(1)})`); fill('multiply', `rgb(${(255 - k).toFixed(1)},${(255 - k * 0.22).toFixed(1)},255)`); }
+  }
+  if (fad > 0.005) { const m = 255 * (1 - 0.14 * fad); fill('multiply', `rgb(${m},${m},${m})`); const a = 255 * 0.08 * fad; fill('lighter', `rgb(${a},${a},${a})`); }
+  if (vig > 0.005) {
+    const r = Math.hypot(W, H) / 2, g = x.createRadialGradient(W / 2, H / 2, r * 0.45 / 1.5 * 2 * 0.707, W / 2, H / 2, r * 1.25 / 1.5 * 2 * 0.707);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${vig})`);
+    fill('source-atop', g);
+  }
+  x.restore();
 }
 
 let filterSupport = null;
@@ -390,6 +425,7 @@ export class Compositor {
         ctx.globalAlpha = a;
         if (gl) ctx.drawImage(gl.process(this.layer, W, H, col), 0, 0);
         else {
+          emulateGrade(l, W, H, col); // warmth / fade / vignette, which CSS filters don't have
           ctx.filter = `brightness(${1 + col.brightness / 200}) contrast(${1 + col.contrast / 100}) saturate(${1 + col.saturation / 100}) sepia(${col.sepia / 100})`;
           ctx.drawImage(this.layer, 0, 0);
           ctx.filter = 'none';
@@ -417,8 +453,9 @@ export class Compositor {
       const L = project.logo, base = Math.min(W, H);
       const lw = base * (L.size || 0.14), lh = lw * lg.h / lg.w, m = base * (L.margin ?? 0.035);
       const pos = L.position || 'tr';
-      const x = pos.includes('l') ? m : pos.includes('r') ? W - lw - m : (W - lw) / 2;
-      const y = pos.startsWith('t') ? m : pos.startsWith('b') ? H - lh - m : (H - lh) / 2;
+      const col = { tl: 'l', bl: 'l', tr: 'r', br: 'r' }[pos] || 'c', row = { tl: 't', tr: 't', bl: 'b', br: 'b' }[pos] || 'm'; // 'center' contains an 'r'
+      const x = col === 'l' ? m : col === 'r' ? W - lw - m : (W - lw) / 2;
+      const y = row === 't' ? m : row === 'b' ? H - lh - m : (H - lh) / 2;
       ctx.globalAlpha = L.opacity ?? 0.85;
       ctx.drawImage(lg.img, x, y, lw, lh);
       ctx.globalAlpha = 1;

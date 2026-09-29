@@ -2,8 +2,6 @@
 import { layout, clipLen, audioLen, audioSpan, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes } from './model.js';
 import { clamp, fmt, el, icon } from './util.js';
 
-const HANDLE = 14;
-
 export class Timeline {
   constructor(root, app) {
     this.root = root; this.app = app;
@@ -36,6 +34,8 @@ export class Timeline {
     this.root.append(this.heads, this.scroll);
     this.ruler.addEventListener('pointerdown', e => this.onScrubStart(e));
     for (const tr of [this.vTrack, this.oTrack, this.tTrack, this.aTrack]) tr.addEventListener('pointerdown', e => { if (e.target === tr) this.onEmptyDown(e); });
+    // the ruler only draws ticks for the visible range; redraw as the timeline scrolls
+    this.scroll.addEventListener('scroll', () => { if (this._rulerRaf) return; this._rulerRaf = requestAnimationFrame(() => { this._rulerRaf = 0; this.renderRuler(); }); }, { passive: true });
     this.scroll.addEventListener('wheel', e => {
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, this.timeAtClient(e.clientX)); }
     }, { passive: false });
@@ -72,7 +72,7 @@ export class Timeline {
     return pts;
   }
   snap(t, exclude, candidates) {
-    if (!this.app.snapEnabled) { this.snapLine.style.display = 'none'; return { t, snapped: false }; }
+    if (!this.app.snapEnabled || this._noSnap) { this.snapLine.style.display = 'none'; return { t, snapped: false }; }
     const th = 9 / this.pps; let best = null, bd = th;
     for (const p of this.snapPoints(exclude)) for (const c of (candidates || [0])) { const d = Math.abs(t + c - p); if (d < bd) { bd = d; best = p - c; } }
     if (best == null) { this.snapLine.style.display = 'none'; return { t, snapped: false }; }
@@ -94,17 +94,8 @@ export class Timeline {
     const sel = this.app.selection || {};
     const width = Math.max(this.scroll.clientWidth, this.x(Math.max(lay.total, ...p.audio.map(a => a.start + audioSpan(a, lay.total)), ...p.texts.map(t => t.end), ...(p.overlays || []).map(o => o.start + overlayLen(o)))) + 240);
     this.content.style.width = width + 'px';
-    // ruler ticks
-    const secs = width / this.pps;
-    const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
-    const major = steps.find(s => s * this.pps >= 70) || 600;
-    const minor = steps.slice().reverse().find(s => s < major && s * this.pps >= 12) || major;
-    let html = '';
-    for (let t = 0; t <= secs; t += minor) {
-      const isMajor = Math.abs(t / major - Math.round(t / major)) < 1e-6;
-      html += `<div class="tick${isMajor ? ' major' : ''}" style="left:${this.x(t)}px">${isMajor ? `<span>${major < 1 ? t.toFixed(1) + 's' : fmt(t)}</span>` : ''}</div>`;
-    }
-    if (this._rulerKey !== html) { this._rulerHtml && this._rulerHtml.remove(); this._rulerHtml = el('div', { class: 'ticks', html }); this.ruler.prepend(this._rulerHtml); this._rulerKey = html; }
+    this._width = width;
+    this.renderRuler();
     // markers
     for (const m of p.markers) {
       const n = this._node('m:' + m.id, () => {
@@ -128,17 +119,19 @@ export class Timeline {
           el('div', { class: 'badges' }),
           el('div', { class: 'h-l', 'aria-label': 'Trim start' }), el('div', { class: 'h-r', 'aria-label': 'Trim end' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'clip', d._id));
+        this.keyable(d, 'clip');
         return d;
       }, this.vTrack);
       n._id = c.id; n.dataset.id = c.id;
       const w = Math.max(6, it.len * this.pps);
       n.style.left = this.x(it.start) + 'px'; n.style.width = w + 'px';
       n.style.zIndex = String(10 + it.index);
-      n.classList.toggle('sel', sel.type === 'clip' && sel.id === c.id);
+      n.classList.toggle('sel', sel.type === 'clip' && sel.id === c.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.classList.toggle('image', c.kind === 'image');
       const rec = this.app.media.peek(c.mediaId);
       n.classList.toggle('offline', !rec);
       n.querySelector('.meta b').textContent = c.name;
+      n.setAttribute('aria-label', `${c.kind === 'image' ? 'Image' : 'Clip'} ${it.index + 1}: ${c.name}, ${fmt(it.start)} to ${fmt(it.end)}`);
       n.querySelector('.meta span').textContent = fmt(it.len) + (c.kind === 'video' && c.speed !== 1 ? ' · ' + c.speed + '×' : '');
       const badges = [];
       if (c.kind === 'video' && (c.muted || !c.hasAudio)) badges.push('🔇');
@@ -161,6 +154,7 @@ export class Timeline {
       const n = this._node('o:' + o.id, () => {
         const d = el('div', { class: 'tl-item tl-ovlitem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'overlay', d._id));
+        this.keyable(d, 'overlay');
         return d;
       }, this.oTrack);
       n._id = o.id; n.dataset.id = o.id;
@@ -168,7 +162,8 @@ export class Timeline {
       n.style.top = (3 + ol.lane.get(o.id) * 30) + 'px';
       const lab = n.querySelector('span'), keyed = !!(o.chroma && o.chroma.enabled), lk = keyed + '|' + o.name;
       if (lab._key !== lk) { lab._key = lk; lab.replaceChildren(icon(keyed ? 'key' : 'pip', 'ico item-ico'), ' ' + o.name); }
-      n.classList.toggle('sel', sel.type === 'overlay' && sel.id === o.id);
+      n.classList.toggle('sel', sel.type === 'overlay' && sel.id === o.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
+      n.setAttribute('aria-label', `Overlay ${o.name}, ${fmt(o.start)} to ${fmt(o.start + overlayLen(o))}`);
       n.classList.toggle('offline', !this.app.media.peek(o.mediaId));
       this.renderKfs(n, o, o.start, overlayLen(o));
     }
@@ -179,13 +174,15 @@ export class Timeline {
       const n = this._node('t:' + t.id, () => {
         const d = el('div', { class: 'tl-item tl-textitem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'text', d._id));
+        this.keyable(d, 'text');
         return d;
       }, this.tTrack);
       n._id = t.id; n.dataset.id = t.id;
       n.style.left = this.x(t.start) + 'px'; n.style.width = Math.max(8, (t.end - t.start) * this.pps) + 'px';
       n.style.top = (4 + tl.lane.get(t.id) * 26) + 'px';
       n.querySelector('span').textContent = (t.text || '(empty)').replace(/\n/g, ' ');
-      n.classList.toggle('sel', sel.type === 'text' && sel.id === t.id);
+      n.classList.toggle('sel', sel.type === 'text' && sel.id === t.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
+      n.setAttribute('aria-label', `Text “${(t.text || '').replace(/\n/g, ' ').slice(0, 60)}”, ${fmt(t.start)} to ${fmt(t.end)}`);
       n.classList.toggle('animated', !!(t.anim && (t.anim.in !== 'none' || t.anim.out !== 'none')));
       this.renderKfs(n, t, t.start, t.end - t.start);
     }
@@ -196,6 +193,7 @@ export class Timeline {
       const n = this._node('a:' + a.id, () => {
         const d = el('div', { class: 'tl-item tl-audioitem' }, el('canvas', { class: 'wave' }), el('div', { class: 'seams' }), el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'audio', d._id));
+        this.keyable(d, 'audio');
         return d;
       }, this.aTrack);
       n._id = a.id; n.dataset.id = a.id;
@@ -208,7 +206,8 @@ export class Timeline {
       n.classList.toggle('loop', !!a.loop);
       const seams = n.querySelector('.seams'), sk = a.loop ? loopSeams(a, lay.total).map(t => ((t - a.start) * this.pps).toFixed(1)).join(',') : '';
       if (seams._key !== sk) { seams._key = sk; seams.replaceChildren(...(sk ? sk.split(',').slice(0, 400).map(x => { const i = document.createElement('i'); i.style.left = x + 'px'; return i; }) : [])); }
-      n.classList.toggle('sel', sel.type === 'audio' && sel.id === a.id);
+      n.classList.toggle('sel', sel.type === 'audio' && sel.id === a.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
+      n.setAttribute('aria-label', `${a.voice ? 'Voice' : 'Music'} ${a.name}${a.loop ? ' (loop)' : ''}, ${fmt(a.start)} to ${fmt(a.start + span)}`);
       n.classList.toggle('offline', !this.app.media.peek(a.mediaId));
       this.renderWave(n.querySelector('.wave'), a, w, null, 30, 1, span);
     }
@@ -216,6 +215,27 @@ export class Timeline {
     for (const [k, n] of this.nodes) if (n._seen !== this._gen) { n.remove(); this.nodes.delete(k); }
     this.vTrack.classList.toggle('empty', !lay.items.length);
     this.updatePlayhead(this.app.player.t);
+  }
+  /** Ruler ticks for the visible part of the timeline (plus a screen of margin each side), not the whole length. */
+  renderRuler() {
+    const width = this._width || this.content.clientWidth, vw = Math.max(1, this.scroll.clientWidth);
+    const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+    const major = steps.find(s => s * this.pps >= 70) || 600;
+    const minor = steps.slice().reverse().find(s => s < major && s * this.pps >= 12) || major;
+    const block = Math.max(vw, 800); // window snapped to blocks so small scrolls don't rebuild
+    const x0 = Math.max(0, Math.floor((this.scroll.scrollLeft - vw) / block) * block), x1 = Math.min(width, x0 + vw + 3 * block);
+    const t0 = Math.max(0, Math.floor(((x0 - 12) / this.pps) / minor) * minor), t1 = (x1 - 12) / this.pps;
+    const key = [this.pps.toFixed(4), x0, x1].join('|');
+    if (this._rulerKey === key) return;
+    this._rulerKey = key;
+    let html = '';
+    for (let i = Math.round(t0 / minor), t = t0; t <= t1 && i < 1e6; i++, t = i * minor) {
+      const isMajor = Math.abs(t / major - Math.round(t / major)) < 1e-6;
+      html += `<div class="tick${isMajor ? ' major' : ''}" style="left:${this.x(t)}px">${isMajor ? `<span>${major >= 1 ? fmt(t) : t < 60 ? t.toFixed(1) + 's' : fmt(Math.floor(t + 1e-6)) + '.' + Math.round(((t + 1e-6) % 1) * 10) % 10}</span>` : ''}</div>`;
+    }
+    const d = el('div', { class: 'ticks', html });
+    if (this._rulerHtml) this._rulerHtml.replaceWith(d); else this.ruler.prepend(d);
+    this._rulerHtml = d;
   }
   lanes(items) {
     const lane = new Map(), ends = [];
@@ -314,13 +334,16 @@ export class Timeline {
     move(e);
   }
   onEmptyDown(e) {
-    const sx = e.clientX, sy = e.clientY, target = e.currentTarget;
+    const sx = e.clientX, sy = e.clientY, target = e.currentTarget, pid = e.pointerId;
+    if (e.pointerType === 'mouse') { this.app.select(null); this.app.seek(this.timeAtClient(e.clientX)); return; }
+    // touch/pen: a tap (not a scroll) seeks; the listeners go away on up or when the browser takes over for scrolling
+    const done = () => { target.removeEventListener('pointerup', up); target.removeEventListener('pointercancel', done); };
     const up = (ev) => {
-      target.removeEventListener('pointerup', up);
+      if (ev.pointerId !== pid) return;
+      done();
       if (Math.abs(ev.clientX - sx) < 6 && Math.abs(ev.clientY - sy) < 6) { this.app.select(null); this.app.seek(this.timeAtClient(ev.clientX)); }
     };
-    target.addEventListener('pointerup', up);
-    if (e.pointerType === 'mouse') { this.app.select(null); this.app.seek(this.timeAtClient(e.clientX)); target.removeEventListener('pointerup', up); }
+    target.addEventListener('pointerup', up); target.addEventListener('pointercancel', done);
   }
   autoScroll(ev) {
     const r = this.scroll.getBoundingClientRect();
@@ -345,9 +368,10 @@ export class Timeline {
     e.stopPropagation();
     if (isTouch && !alreadySel) {
       // Touch: first tap selects (lets the timeline scroll natively); drag once selected.
-      const sx = e.clientX, sy = e.clientY;
-      const up = (ev) => { node.removeEventListener('pointerup', up); if (Math.abs(ev.clientX - sx) < 8 && Math.abs(ev.clientY - sy) < 8) this.app.select({ type, id }, { seekInto: true }); };
-      node.addEventListener('pointerup', up, { once: true });
+      const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
+      const done = () => { node.removeEventListener('pointerup', up); node.removeEventListener('pointercancel', done); };
+      const up = (ev) => { if (ev.pointerId !== pid) return; done(); if (Math.abs(ev.clientX - sx) < 8 && Math.abs(ev.clientY - sy) < 8) this.app.select({ type, id }, { seekInto: true }); };
+      node.addEventListener('pointerup', up); node.addEventListener('pointercancel', done);
       return;
     }
     e.preventDefault();
@@ -357,14 +381,16 @@ export class Timeline {
 
   startDrag(e, node, type, id, handle) {
     const p = this.project;
-    const x0 = this.contentX(e) + 0; const sl0 = this.scroll.scrollLeft;
+    const kb = !!e.kb; // keyboard nudge/trim: same edit logic as a drag, without pointer capture, threshold or auto-scroll
+    const x0 = kb ? 0 : this.contentX(e);
     const lay0 = layout(p);
     const snapshot = JSON.parse(JSON.stringify(p));
     let moved = false;
     const d = this.drag = { type, id, handle };
     const pointerId = e.pointerId;
-    try { node.setPointerCapture(pointerId); } catch { }
-    const dtOf = (ev) => (this.contentX(ev) - x0) / this.pps;
+    if (!kb) try { node.setPointerCapture(pointerId); } catch { }
+    const dtOf = (ev) => (kb ? ev.dt : (this.contentX(ev) - x0) / this.pps);
+    const gate = (ev, dt) => { if (!moved && !kb && Math.abs(dt * this.pps) < 4) return false; moved = true; if (!kb) this.autoScroll(ev); return true; };
     const tip = (txt, t) => { this.tip.textContent = txt; this.tip.style.display = 'block'; this.tip.style.left = this.x(t) + 'px'; };
 
     if (type === 'clip') {
@@ -373,8 +399,7 @@ export class Timeline {
       const keyed = hasKeyframes(c);
       d.onMove = (ev) => {
         const dt = dtOf(ev);
-        if (!moved && Math.abs(dt * this.pps) < 4) return;
-        moved = true; this.autoScroll(ev);
+        if (!gate(ev, dt)) return;
         if (handle === 'l') {
           if (c.kind === 'image') c.out = clamp(orig.out - dt, MIN_CLIP, 3600);
           else c.in = clamp(orig.in + dt * c.speed, 0, orig.out - MIN_CLIP * c.speed);
@@ -415,8 +440,7 @@ export class Timeline {
       const keyed = hasKeyframes(t0);
       d.onMove = (ev) => {
         const dt = dtOf(ev);
-        if (!moved && Math.abs(dt * this.pps) < 4) return;
-        moved = true; this.autoScroll(ev);
+        if (!gate(ev, dt)) return;
         if (handle === 'body') {
           const len = o.e - o.s; let s = Math.max(0, o.s + dt);
           const sn = this.snap(s, id, [0, len]); if (sn.snapped) { s = Math.max(0, sn.t); this.showSnap(Math.abs(sn.t - s) < 1e-6 ? s : s + len); }
@@ -436,8 +460,7 @@ export class Timeline {
       const a = p.audio.find(x => x.id === id); const o = { s: a.start, i: a.in, out: a.out, span: audioSpan(a, lay0.total), ll: a.loopLen };
       d.onMove = (ev) => {
         const dt = dtOf(ev);
-        if (!moved && Math.abs(dt * this.pps) < 4) return;
-        moved = true; this.autoScroll(ev);
+        if (!gate(ev, dt)) return;
         if (handle === 'body') {
           let s = Math.max(0, o.s + dt); const len = o.out - o.i;
           const sn = this.snap(s, id, [0, len]); if (sn.snapped) { s = Math.max(0, sn.t); this.showSnap(s); }
@@ -464,8 +487,7 @@ export class Timeline {
       const sp = o.kind === 'image' ? 1 : (o.speed || 1);
       d.onMove = (ev) => {
         const dt = dtOf(ev);
-        if (!moved && Math.abs(dt * this.pps) < 4) return;
-        moved = true; this.autoScroll(ev);
+        if (!gate(ev, dt)) return;
         const len0 = (or.out - or.i) / sp;
         if (handle === 'body') {
           let s = Math.max(0, or.s + dt);
@@ -489,14 +511,14 @@ export class Timeline {
       const m = p.markers.find(x => x.id === id); const o = m.time;
       d.onMove = (ev) => {
         const dt = dtOf(ev);
-        if (!moved && Math.abs(dt * this.pps) < 4) return;
-        moved = true; this.autoScroll(ev);
+        if (!gate(ev, dt)) return;
         let t = Math.max(0, o + dt); const sn = this.snap(t, id); if (sn.snapped) { t = sn.t; this.showSnap(t); }
         m.time = t; tip(fmt(t), t);
         this.app.liveUpdate({ keepTime: true });
       };
       d.onUp = () => { if (moved) this.app.commit('Move marker'); else this.app.seek(m.time); };
     }
+    if (kb) return d; // caller drives onMove/onUp
     const move = (ev) => { if (ev.pointerId === pointerId) d.onMove(ev); };
     const end = (ev) => {
       if (ev.pointerId !== pointerId) return;
@@ -514,6 +536,40 @@ export class Timeline {
       if (moved) { this.app.restore(snapshot); }
     };
     node.addEventListener('pointermove', move); node.addEventListener('pointerup', end); node.addEventListener('pointercancel', cancel);
-    void sl0;
+  }
+
+  /**
+   * Keyboard access for timeline items: Tab to focus, Enter/Space selects, Left/Right moves by one frame (Shift: 1 s;
+   * main clips swap places with their neighbour), Alt+Left/Right trims the end. Other keys (S, Delete...) reach the app.
+   */
+  keyable(d, type) {
+    d.tabIndex = 0; d.setAttribute('role', 'button');
+    d.addEventListener('keydown', (e) => {
+      const id = d._id, fps = this.project.settings.fps || 30;
+      const isSel = this.app.selection && this.app.selection.type === type && this.app.selection.id === id;
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); this.app.select({ type, id }, { seekInto: true }); return; }
+      if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.ctrlKey || e.metaKey) return;
+      e.preventDefault(); e.stopPropagation();
+      if (!isSel) this.app.select({ type, id });
+      const dir = e.key === 'ArrowLeft' ? -1 : 1;
+      if (type === 'clip' && !e.altKey) {
+        const p = this.project, idx = p.clips.findIndex(c => c.id === id), to = idx + dir;
+        if (idx < 0 || to < 0 || to >= p.clips.length) return;
+        moveClip(p, idx, to); this.app.commit('Reorder clip'); this._refocus(type, id); return;
+      }
+      const step = (e.shiftKey ? 1 : 1 / fps) * dir;
+      this._noSnap = true;
+      try {
+        const drag = this.startDrag({ kb: true, pointerId: -1 }, d, type, id, e.altKey ? 'r' : 'body');
+        drag.onMove({ dt: step });
+        this.tip.style.display = 'none'; this.snapLine.style.display = 'none'; this.drag = null;
+        drag.onUp();
+      } finally { this._noSnap = false; }
+      this._refocus(type, id);
+    });
+  }
+  _refocus(type, id) {
+    const n = this.nodes.get({ clip: 'c:', overlay: 'o:', text: 't:', audio: 'a:' }[type] + id);
+    if (n && document.activeElement !== n) n.focus({ preventScroll: true });
   }
 }

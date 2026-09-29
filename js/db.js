@@ -55,17 +55,44 @@ export const db = {
   inboxClear: () => tx('inbox', 'readwrite', s => { s.clear(); }),
   kvGet: (k) => tx('kv', 'readonly', s => reqP(s.get(k))),
   kvSet: (k, v) => tx('kv', 'readwrite', s => { s.put(v, k); }),
-  /** Delete media blobs that no saved project references (keepIds: extra ids to keep, e.g. undo history). */
+  /**
+   * Delete media blobs that no saved project references (keepIds: extra ids to keep, e.g. undo history).
+   * Other open tabs of the app are asked which media they still use (unsaved imports, their undo history) and only
+   * one tab collects at a time (Web Locks), so a second tab starting up can't delete media the first one needs.
+   */
   async gc(keepIds = new Set()) {
-    const projects = await this.listProjects();
-    const used = new Set(keepIds);
-    for (const p of projects) for (const id of mediaIdsOf(p)) used.add(id);
-    const keys = await this.mediaKeys();
-    let removed = 0;
-    for (const k of keys) if (!used.has(k)) { await this.deleteMedia(k); removed++; }
-    return removed;
+    const run = async () => {
+      const used = new Set([...keepIds, ...localKeep()]);
+      for (const id of await askOtherTabs()) used.add(id);
+      const projects = await this.listProjects();
+      for (const p of projects) for (const id of mediaIdsOf(p)) used.add(id);
+      const keys = await this.mediaKeys();
+      let removed = 0;
+      for (const k of keys) if (!used.has(k)) { await this.deleteMedia(k); removed++; }
+      return removed;
+    };
+    if (navigator.locks && navigator.locks.request) return navigator.locks.request(DB_NAME + '-gc', run);
+    return run();
   },
 };
+
+// ---- cross-tab coordination for gc ----
+let keepProvider = () => [];
+/** The app registers a function returning the media ids this tab still needs (open project, undo history, imports). */
+export function setKeepProvider(fn) { keepProvider = fn; }
+const localKeep = () => { try { return [...keepProvider()]; } catch { return []; } };
+const chan = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(DB_NAME + '-gc') : null;
+if (chan) chan.onmessage = (e) => { const d = e.data || {}; if (d.type === 'ask') chan.postMessage({ type: 'keep', q: d.q, ids: localKeep() }); };
+function askOtherTabs(timeout = 350) {
+  if (!chan) return Promise.resolve([]);
+  const q = Math.random().toString(36).slice(2), got = new Set();
+  return new Promise((resolve) => {
+    const rx = new BroadcastChannel(DB_NAME + '-gc'); // a second object receives replies to our own channel's question
+    rx.onmessage = (e) => { const d = e.data || {}; if (d.type === 'keep' && d.q === q) for (const id of d.ids || []) got.add(id); };
+    chan.postMessage({ type: 'ask', q });
+    setTimeout(() => { rx.close(); resolve([...got]); }, timeout);
+  });
+}
 
 export function mediaIdsOf(p) {
   const ids = new Set();

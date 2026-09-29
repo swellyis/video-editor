@@ -6,7 +6,21 @@
   <meta name="color-scheme" content="light dark" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
-  <meta name="description" content="Edit, trim, title and export YouTube videos on your device. Works offline." />
+  <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <meta name="description" content="Edit, trim, title and export YouTube videos and Shorts on your device: timeline, text, music, voiceover, green screen, MP4 export. Free, private, works offline." />
+  <link rel="canonical" href="https://swellyis.github.io/video-editor/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Video Editor" />
+  <meta property="og:title" content="Video Editor: edit YouTube videos and Shorts in your browser" />
+  <meta property="og:description" content="Trim, add titles, music and voiceover, then export MP4, all on your own device. Installable and works offline." />
+  <meta property="og:url" content="https://swellyis.github.io/video-editor/" />
+  <meta property="og:image" content="https://swellyis.github.io/video-editor/screenshots/desktop.png" />
+  <meta property="og:image:alt" content="The video editor with a preview, inspector panel and multi-track timeline" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Video Editor: edit YouTube videos and Shorts in your browser" />
+  <meta name="twitter:description" content="Trim, add titles, music and voiceover, then export MP4, all on your own device." />
+  <meta name="twitter:image" content="https://swellyis.github.io/video-editor/screenshots/desktop.png" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -18,7 +32,7 @@
   <link rel="stylesheet" href="css/fonts.css" />
   <link rel="stylesheet" href="css/app.css" />
   <link rel="modulepreload" href="js/app.js" />
-  <title>Video Editor</title>
+  <title>Video Editor: edit YouTube videos and Shorts in your browser</title>
 </head>
 <body>
 <main class="app" id="app">
@@ -474,7 +488,7 @@
 <!-- Projects -->
 <dialog class="sheet" id="projectsDialog" aria-labelledby="projectsTitle">
   <div class="sheet-head"><h2 id="projectsTitle">Projects</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
-  <div class="button-row"><button class="btn primary" id="newProject" type="button">＋ New project</button><label class="btn secondary" for="importProject">Import project…</label><input id="importProject" type="file" accept=".json,application/json" /></div>
+  <div class="button-row"><button class="btn primary" id="newProject" type="button">＋ New project</button><label class="btn secondary" for="importProject">Import project…</label><input id="importProject" type="file" accept=".vedit,.json,application/json,application/x-tar" /></div>
   <label class="check"><input type="checkbox" id="embedMedia" /> Include media files when exporting a project (larger file, fully portable)</label>
   <div class="project-list" id="projectList"></div>
   <p class="hint" id="storageNote"></p>
@@ -502,12 +516,14 @@
     <div><kbd>T</kbd><span>Add text at playhead</span></div>
     <div><kbd>M</kbd><span>Add marker at playhead</span></div>
     <div><kbd>Shift</kbd>+<kbd>K</kbd><span>Keyframe selected item at playhead</span></div>
-    <div><kbd>R</kbd><span>Start / stop voiceover recording</span></div>
+    <div><kbd>R</kbd><span>Voiceover: starts after a 3-second countdown (R or Esc cancels); R again stops</span></div>
     <div><kbd>+</kbd> <kbd>−</kbd> / <kbd>0</kbd><span>Zoom timeline in / out / fit</span></div>
     <div><kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd><span>Undo</span></div>
     <div><kbd>Ctrl/⌘</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd><span>Redo</span></div>
     <div><kbd>Esc</kbd><span>Deselect / close</span></div>
     <div><kbd>?</kbd><span>This help</span></div>
+    <div><kbd>Tab</kbd><span>Focus timeline items; <kbd>Enter</kbd> selects, <kbd>←</kbd> <kbd>→</kbd> move (Shift: 1 s), <kbd>Alt</kbd>+<kbd>←</kbd> <kbd>→</kbd> trim the end</span></div>
+    <div><kbd>←</kbd> <kbd>→</kbd> on a slider<span>Adjust the slider (shortcuts don’t take over focused controls)</span></div>
   </div>
   <p class="hint">On phones: tap a timeline item to select it, then drag it or its edges. Drag the time ruler to scrub.</p>
 </dialog>

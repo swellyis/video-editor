@@ -1,7 +1,7 @@
 // Project data model, timeline layout, edit operations, audio envelopes, history.
 import { uid, clamp, deepClone, fmt } from './util.js';
 
-export const SCHEMA = 4;
+export const SCHEMA = 5;
 export const MIN_CLIP = 0.1; // seconds on timeline
 
 export const PRESETS = {
@@ -37,7 +37,7 @@ export function newProject(name = 'Untitled project') {
     clips: [], overlays: [], texts: [], audio: [], markers: [],
     logo: null,
     youtube: { title: '', description: '', tags: '', chaptersFrom: 'auto' },
-    thumb: { time: 0, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow' },
+    thumb: { time: null, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow' },
   };
 }
 
@@ -52,9 +52,50 @@ export function migrate(p) {
   out.texts = (p.texts || []).map(t => { const b = newText(0); const r = Object.assign(b, t); r.anim = Object.assign(newText(0).anim, t.anim || {}); r.keyframes = t.keyframes || {}; return r; });
   out.audio = (p.audio || []).map(a => Object.assign(newAudio({ id: a.mediaId, duration: a.srcDuration || 1, name: a.name }, 0), a));
   out.overlays = (p.overlays || []).map(o => normalizeOverlay(o));
-  out.markers = p.markers || [];
+  out.markers = (Array.isArray(p.markers) ? p.markers : []).filter(m => m && typeof m === 'object').map(m => ({ ...m, time: num(m.time, 0, 1e6, 0) }));
+  if ((p.schema || 0) < 5 && out.thumb.time === 0) out.thumb.time = null; // before v5, 0 meant "not chosen yet"
+  sanitizeProject(out);
   out.schema = SCHEMA;
   return out;
+}
+const num = (v, lo, hi, d) => (v !== null && v !== '' && Number.isFinite(+v) ? clamp(+v, lo, hi) : d);
+const oneOf = (v, list, d) => (list.includes(v) ? v : d);
+/**
+ * Keep every setting and numeric field inside the range the UI allows. Protects against damaged or hand-edited
+ * project files (e.g. a huge resolution or speed that would exhaust memory in the encoder or canvas).
+ */
+export function sanitizeProject(p) {
+  const s = p.settings;
+  s.res = oneOf(+s.res, [720, 1080, 2160], 1080); s.fps = oneOf(+s.fps, [24, 30, 60], 30);
+  s.quality = oneOf(s.quality, ['low', 'medium', 'high', 'max'], 'high'); s.format = oneOf(s.format, ['auto', 'mp4', 'webm'], 'auto');
+  s.ratio = oneOf(s.ratio, ['original', '16:9', '9:16', '1:1', '4:5'], '16:9'); s.fit = oneOf(s.fit, ['contain', 'cover'], 'contain');
+  s.bg = oneOf(s.bg, ['black', 'blur', 'white', 'color'], 'black');
+  s.imageDuration = num(s.imageDuration, 0.1, 3600, 4); s.endFade = num(s.endFade, 0, 30, 0);
+  if (p.thumb.time !== null) p.thumb.time = num(p.thumb.time, 0, 1e6, null);
+  for (const c of p.clips) {
+    c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
+    c.srcDuration = num(c.srcDuration, 0, 1e6, 1); c.in = num(c.in, 0, 1e6, 0); c.out = num(c.out, c.in + 0.01, 1e6, c.in + 1);
+    c.fadeIn = num(c.fadeIn, 0, 60, 0); c.fadeOut = num(c.fadeOut, 0, 60, 0);
+    c.transition.duration = num(c.transition.duration, 0, 10, 0.6);
+    c.transform.zoom = num(c.transform.zoom, 0.05, 20, 1);
+  }
+  for (const o of p.overlays) {
+    o.speed = num(o.speed, 0.25, 4, 1); o.volume = num(o.volume, 0, 2, 1); o.opacity = num(o.opacity, 0, 1, 1);
+    o.w = num(o.w, 0.01, 4, 0.36); o.scale = num(o.scale, 0.05, 20, 1); o.start = num(o.start, 0, 1e6, 0);
+    o.in = num(o.in, 0, 1e6, 0); o.out = num(o.out, o.in + 0.01, 1e6, o.in + 1);
+  }
+  for (const t of p.texts) {
+    t.size = num(t.size, 0.005, 1, 0.075); t.scale = num(t.scale, 0.05, 20, 1); t.opacity = num(t.opacity, 0, 1, 1);
+    t.start = num(t.start, 0, 1e6, 0); t.end = num(t.end, t.start + 0.05, 1e6, t.start + 4);
+    if (typeof t.text !== 'string') t.text = String(t.text ?? '');
+  }
+  for (const a of p.audio) {
+    a.volume = num(a.volume, 0, 2, 0.6); a.duckLevel = num(a.duckLevel, 0, 1, 0.3); a.start = num(a.start, 0, 1e6, 0);
+    a.in = num(a.in, 0, 1e6, 0); a.out = num(a.out, a.in + 0.01, 1e6, a.in + 1); a.loopLen = num(a.loopLen, 0, 1e6, 0); a.phase = num(a.phase, 0, 1e6, 0);
+    a.fadeIn = num(a.fadeIn, 0, 60, 0); a.fadeOut = num(a.fadeOut, 0, 60, 0);
+  }
+  if (p.logo) { const L = p.logo; L.size = num(L.size, 0.01, 1, 0.14); L.opacity = num(L.opacity, 0, 1, 0.85); L.margin = num(L.margin, 0, 0.5, 0.035); L.position = oneOf(L.position, ['tl', 'tr', 'bl', 'br', 'center'], 'tr'); }
+  return p;
 }
 
 export function normalizeClip(c) {
@@ -548,7 +589,7 @@ export function moveClip(project, from, to) {
 // ---------- YouTube chapters ----------
 export function chapters(project) {
   const lay = layout(project);
-  let pts = [];
+  let pts;
   const useMarkers = project.markers.length > 0 && project.youtube.chaptersFrom !== 'clips';
   if (useMarkers) pts = project.markers.map(m => ({ t: m.time, name: m.name || 'Chapter' }));
   else pts = lay.items.map(it => ({ t: it.start + (it.xIn || 0) / 2, name: it.clip.name || 'Part ' + (it.index + 1) }));
