@@ -1,6 +1,6 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
 import { layout, clipLen, audioLen, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes } from './model.js';
-import { clamp, fmt, el } from './util.js';
+import { clamp, fmt, el, icon } from './util.js';
 
 const HANDLE = 14;
 
@@ -142,9 +142,11 @@ export class Timeline {
       n.querySelector('.meta span').textContent = fmt(it.len) + (c.kind === 'video' && c.speed !== 1 ? ' · ' + c.speed + '×' : '');
       const badges = [];
       if (c.kind === 'video' && (c.muted || !c.hasAudio)) badges.push('🔇');
-      if (c.transition.type !== 'cut' && (it.index > 0 || c.transition.type === 'fade')) badges.push(c.transition.type === 'crossfade' ? '⧓' : '◐');
+      if (c.transition.type !== 'cut' && (it.index > 0 || c.transition.type === 'fade')) badges.push(c.transition.type === 'crossfade' ? 'xfade' : '◐');
       if (c.color.preset !== 'none') badges.push('◑');
-      n.querySelector('.badges').textContent = badges.join(' ');
+      const bkey = badges.join(' ');
+      const bEl = n.querySelector('.badges');
+      if (bEl._key !== bkey) { bEl._key = bkey; bEl.replaceChildren(...badges.flatMap((b, i) => [i ? ' ' : '', b === 'xfade' ? icon('crossfade', 'ico badge-ico') : b])); }
       const xf = n.querySelector('.xfade');
       xf.style.width = (it.xIn * this.pps) + 'px'; xf.style.display = it.xIn > 0 ? 'block' : 'none';
       this.renderStrip(n.querySelector('.strip'), c, rec, w);
@@ -164,7 +166,8 @@ export class Timeline {
       n._id = o.id; n.dataset.id = o.id;
       n.style.left = this.x(o.start) + 'px'; n.style.width = Math.max(8, overlayLen(o) * this.pps) + 'px';
       n.style.top = (3 + ol.lane.get(o.id) * 30) + 'px';
-      n.querySelector('span').textContent = (o.chroma && o.chroma.enabled ? '🟩 ' : '⧉ ') + o.name;
+      const lab = n.querySelector('span'), keyed = !!(o.chroma && o.chroma.enabled), lk = keyed + '|' + o.name;
+      if (lab._key !== lk) { lab._key = lk; lab.replaceChildren(icon(keyed ? 'key' : 'pip', 'ico item-ico'), ' ' + o.name); }
       n.classList.toggle('sel', sel.type === 'overlay' && sel.id === o.id);
       n.classList.toggle('offline', !this.app.media.peek(o.mediaId));
       this.renderKfs(n, o, o.start, overlayLen(o));

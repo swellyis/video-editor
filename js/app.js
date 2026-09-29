@@ -1,5 +1,5 @@
 // Video Editor Pro — main controller
-import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, safeName, isIOS, isMac, deepClone, blobToDataURL, dataURLToBlob, uid } from './util.js';
+import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, isMac, deepClone, blobToDataURL, dataURLToBlob, uid } from './util.js';
 import { db, mediaIdsOf } from './db.js';
 import { media, kindOf } from './media.js';
 import {
@@ -378,7 +378,7 @@ function renderLists(light) {
   const ol = $('overlayList'); ol.replaceChildren();
   (p.overlays || []).forEach(o => {
     ol.append(el('div', { class: 'item' + (sel.type === 'overlay' && sel.id === o.id ? ' selected' : ''), onclick: () => app.select({ type: 'overlay', id: o.id }, { seekInto: true }) },
-      el('span', { text: o.chroma && o.chroma.enabled ? '🟩' : '⧉' }), el('span', { class: 'grow', text: o.name }), el('span', { class: 't', text: fmt(o.start) + ' · ' + fmt(overlayLen(o)) })));
+      el('span', { class: 'item-ico', title: o.chroma && o.chroma.enabled ? 'Green screen' : 'Picture-in-picture' }, icon(o.chroma && o.chroma.enabled ? 'key' : 'pip')), el('span', { class: 'grow', text: o.name }), el('span', { class: 't', text: fmt(o.start) + ' · ' + fmt(overlayLen(o)) })));
   });
   if (light) return;
   const ml = $('markerList'); ml.replaceChildren();

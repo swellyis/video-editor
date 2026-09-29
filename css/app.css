@@ -356,3 +356,7 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
   .tabs button{font-size:10.5px}
   .tpl-grid{grid-template-columns:1fr}
 }
+.item-ico{display:inline-flex;align-items:center;flex:none}
+.item .item-ico .ico,.item .item-ico{width:15px;height:15px}
+.tl-item span .item-ico{width:13px;height:13px;vertical-align:-2px}
+.badges .badge-ico{width:11px;height:11px;vertical-align:-1px;filter:drop-shadow(0 1px 2px #000)}

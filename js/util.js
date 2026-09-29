@@ -76,3 +76,17 @@ export function blobToDataURL(blob) {
 export async function dataURLToBlob(url) { return (await fetch(url)).blob(); }
 export function nextFrame() { return new Promise(r => requestAnimationFrame(() => r())); }
 export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/** Small inline SVG icons (no dependency on symbol fonts, which vary by device). */
+const ICONS = {
+  pip: '<rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="8" y="8" width="5" height="4" rx="1" fill="currentColor"/>',
+  key: '<rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5 11l2.5-3.5L9.5 10l1.5-2L13 11z" fill="currentColor"/><circle cx="5.5" cy="6" r="1.3" fill="currentColor"/>',
+  crosshair: '<circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v4M8 11v4M1 8h4M11 8h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  crossfade: '<path d="M2 3l6 5-6 5zM14 3l-6 5 6 5z" fill="currentColor" opacity=".9"/>',
+};
+export function icon(name, cls = 'ico') {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 16 16'); s.setAttribute('class', cls); s.setAttribute('aria-hidden', 'true');
+  s.innerHTML = ICONS[name] || '';
+  return s;
+}
