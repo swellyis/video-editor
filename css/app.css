@@ -449,3 +449,9 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .kf-list .item{min-height:44px}
 .kf-list .item.kf-row button,.kf-list .item.kf-row button:last-child{min-height:40px;min-width:40px}
 .kf-list .kf-row .mini-select{min-height:40px}
+
+dialog.sheet.small{width:min(420px,calc(100vw - 20px))}
+#renameDialog .field{min-height:44px;font-size:16px}
+#renameDialog .btn{min-height:44px;min-width:96px}
+#renameDialog .icon-btn{min-width:44px;min-height:44px}
+#renameDialog .hint.err{color:var(--accent)}

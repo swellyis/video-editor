@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { newProject, migrate, layout, splitItem, newBlur, blurAt, animated, setKeyframe, defaultClipBlur, newAudio, clipGain, musicGain, speechIntervals, rebaseKeyframes, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen, thumbFormat, THUMB_FORMATS } from '../js/model.js';
+import { textLabel, blurLabel, newProject, migrate, layout, splitItem, newBlur, blurAt, animated, setKeyframe, defaultClipBlur, newAudio, clipGain, musicGain, speechIntervals, rebaseKeyframes, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen, thumbFormat, THUMB_FORMATS } from '../js/model.js';
 import { safeName, tarBlob, isTar, readTar, dataURLToBlob, fmt } from '../js/util.js';
 
 const clip = (id, out, extra = {}) => normalizeClip({ id, mediaId: 'm_' + id, name: id, kind: 'video', srcDuration: 60, in: 0, out, ...extra });
@@ -81,7 +81,7 @@ test('migrate upgrades old projects and sanitizeProject clamps bad values', () =
   assert.deepEqual([p.clips[0].speed, p.clips[0].volume], [4, 0]);
   assert.equal(p.audio[0].volume, 2);
   assert.equal(p.texts[0].text, '5'); assert.ok(p.texts[0].end > p.texts[0].start);
-  assert.deepEqual(p.markers, [{ time: 0 }]);
+  assert.deepEqual(p.markers, [{ name: '', time: 0 }]);
   assert.deepEqual([p.logo.position, p.logo.size], ['tr', 1]);
   const legacy = migrate({ ...newProject('Legacy'), youtube: { title: 'Old title', tags: 'a,b', chaptersFrom: 'clips' } });
   assert.equal(legacy.youtube.title, 'Old title', 'old YouTube details in saves are kept untouched (no UI any more)');
@@ -147,4 +147,19 @@ test('blur regions: defaults, timing + fades, keyframed motion, split, ripple, m
   assert.equal(q.shape, 'rect'); assert.equal(q.mode, 'blur'); assert.equal(q.invert, false); assert.ok(q.x <= 1.5 && q.w >= 0.01 && q.strength === 1 && q.end > q.start && q.start >= 0);
   assert.deepEqual(q.keyframes.x.map(k => k.v), [1.5]);
   assert.equal(bad.clips[0].blur.enabled, false); assert.equal(bad.clips[0].blur.strength, 1); assert.equal(bad.clips[0].blur.mode, 'blur');
+});
+
+test('item names: defaults, trimming to 80 chars, blank clip names fall back, labels', () => {
+  const p = migrate({ clips: [{ id: 'c1', mediaId: 'm', name: '  ' }, { id: 'c2', mediaId: 'm', name: 'x'.repeat(200) }], texts: [{ id: 't', text: 'Hello', name: 5 }], markers: [{ time: 1, name: 'y'.repeat(100) }] });
+  sanitizeProject(p);
+  assert.equal(p.clips[0].name, 'Clip');
+  assert.equal(p.clips[1].name.length, 80);
+  assert.equal(p.texts[0].name, '');
+  assert.equal(textLabel(p.texts[0]), 'Hello');
+  assert.equal(textLabel({ text: 'Hello', name: 'Title' }), 'Title');
+  assert.equal(p.markers[0].name.length, 80);
+  assert.equal(blurLabel({ mode: 'blur' }), 'Blur');
+  assert.equal(blurLabel({ mode: 'pixelate' }), 'Pixelate');
+  assert.equal(blurLabel({ invert: true }), 'Focus');
+  assert.equal(blurLabel({ name: 'Face' }), 'Face');
 });

@@ -1,5 +1,5 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
-import { layout, clipLen, audioLen, audioSpan, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes } from './model.js';
+import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes } from './model.js';
 import { clamp, fmt, el, icon, toast } from './util.js';
 
 function muteBadge(title, extra = '') {
@@ -229,9 +229,9 @@ export class Timeline {
       n._id = t.id; n.dataset.id = t.id;
       n.style.left = this.x(t.start) + 'px'; n.style.width = Math.max(8, (t.end - t.start) * this.pps) + 'px';
       n.style.top = (4 + tl.lane.get(t.id) * 26) + 'px';
-      n.querySelector('span').textContent = (t.text || '(empty)').replace(/\n/g, ' ');
+      n.querySelector('span').textContent = textLabel(t);
       n.classList.toggle('sel', sel.type === 'text' && sel.id === t.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
-      n.setAttribute('aria-label', `Text “${(t.text || '').replace(/\n/g, ' ').slice(0, 60)}”, ${fmt(t.start)} to ${fmt(t.end)}`);
+      n.setAttribute('aria-label', `Text “${textLabel(t).slice(0, 60)}”, ${fmt(t.start)} to ${fmt(t.end)}`);
       n.classList.toggle('animated', !!(t.anim && (t.anim.in !== 'none' || t.anim.out !== 'none')));
       this.renderKfs(n, t, t.start, t.end - t.start);
     }
@@ -250,10 +250,10 @@ export class Timeline {
       n._id = b.id; n.dataset.id = b.id;
       n.style.left = this.x(b.start) + 'px'; n.style.width = Math.max(8, (b.end - b.start) * this.pps) + 'px';
       n.style.top = (4 + bl.lane.get(b.id) * 28) + 'px';
-      const lab = n.querySelector('span'), bk = b.mode + '|' + b.invert;
-      if (lab._key !== bk) { lab._key = bk; lab.replaceChildren(icon('blur', 'ico item-ico'), ' ' + (b.invert ? 'Focus' : b.mode === 'pixelate' ? 'Pixelate' : 'Blur')); }
+      const lab = n.querySelector('span'), bk = blurLabel(b);
+      if (lab._key !== bk) { lab._key = bk; lab.replaceChildren(icon('blur', 'ico item-ico'), ' ' + bk); }
       n.classList.toggle('sel', sel.type === 'blur' && sel.id === b.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
-      n.setAttribute('aria-label', `${b.invert ? 'Focus (blur outside)' : b.mode === 'pixelate' ? 'Pixelate' : 'Blur'} region, ${fmt(b.start)} to ${fmt(b.end)}`);
+      n.setAttribute('aria-label', `${blurLabel(b)} (${b.invert ? 'blur outside' : b.mode === 'pixelate' ? 'pixelate' : 'blur'} region), ${fmt(b.start)} to ${fmt(b.end)}`);
       n.classList.toggle('animated', hasKeyframes(b));
       this.renderKfs(n, b, b.start, b.end - b.start);
     }

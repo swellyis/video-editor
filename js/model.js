@@ -47,16 +47,21 @@ export function migrate(p) {
   out.color = Object.assign(defaultColor(), p.color || {});
   out.thumb = Object.assign(newProject().thumb, p.thumb || {});
   out.clips = (p.clips || []).map(c => normalizeClip(c));
-  out.texts = (p.texts || []).map(t => { const b = newText(0); const r = Object.assign(b, t); r.anim = Object.assign(newText(0).anim, t.anim || {}); r.keyframes = t.keyframes || {}; return r; });
+  out.texts = (p.texts || []).map(t => { const b = newText(0); const r = Object.assign(b, t); r.name = typeof t.name === 'string' ? t.name.slice(0, NAME_MAX) : ''; r.anim = Object.assign(newText(0).anim, t.anim || {}); r.keyframes = t.keyframes || {}; return r; });
   out.audio = (p.audio || []).map(a => Object.assign(newAudio({ id: a.mediaId, duration: a.srcDuration || 1, name: a.name }, 0), a));
   out.overlays = (p.overlays || []).map(o => normalizeOverlay(o));
   out.blurs = (Array.isArray(p.blurs) ? p.blurs : []).filter(b => b && typeof b === 'object').slice(0, 200).map(b => normalizeBlur(b));
-  out.markers = (Array.isArray(p.markers) ? p.markers : []).filter(m => m && typeof m === 'object').map(m => ({ ...m, time: num(m.time, 0, 1e6, 0) }));
+  out.markers = (Array.isArray(p.markers) ? p.markers : []).filter(m => m && typeof m === 'object').map(m => ({ ...m, name: typeof m.name === 'string' ? m.name.slice(0, NAME_MAX) : '', time: num(m.time, 0, 1e6, 0) }));
   if ((p.schema || 0) < 5 && out.thumb.time === 0) out.thumb.time = null; // before v5, 0 meant "not chosen yet"
   sanitizeProject(out);
   out.schema = SCHEMA;
   return out;
 }
+export const NAME_MAX = 80;
+/** Display name of a text layer (custom name, else its first line) and of a blur region (custom name, else its kind). */
+export const textLabel = (t) => (t.name && t.name.trim()) || (t.text || '(empty)').replace(/\n/g, ' ');
+export const blurLabel = (b) => (b.name && b.name.trim()) || (b.invert ? 'Focus' : b.mode === 'pixelate' ? 'Pixelate' : 'Blur');
+const cleanName = (o, d) => { o.name = typeof o.name === 'string' && o.name.trim() ? o.name.slice(0, NAME_MAX) : d; };
 const num = (v, lo, hi, d) => (v !== null && v !== '' && Number.isFinite(+v) ? clamp(+v, lo, hi) : d);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
 /**
@@ -76,7 +81,7 @@ export function sanitizeProject(p) {
   T.type = oneOf(T.type, ['jpg', 'png'], 'jpg'); T.position = oneOf(T.position, ['left', 'center', 'right', 'top', 'bottom'], 'left');
   T.pip = T.pip !== false; T.logo = T.logo !== false;
   for (const c of p.clips) {
-    c.muted = c.muted === true; c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
+    cleanName(c, 'Clip'); c.muted = c.muted === true; c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
     c.srcDuration = num(c.srcDuration, 0, 1e6, 1); c.in = num(c.in, 0, 1e6, 0); c.out = num(c.out, c.in + 0.01, 1e6, c.in + 1);
     c.fadeIn = num(c.fadeIn, 0, 60, 0); c.fadeOut = num(c.fadeOut, 0, 60, 0);
     c.transition.duration = num(c.transition.duration, 0, 10, 0.6);
@@ -84,7 +89,7 @@ export function sanitizeProject(p) {
     cleanClipBlur(c.blur);
   }
   for (const o of p.overlays) {
-    o.muted = o.muted !== false; o.speed = num(o.speed, 0.25, 4, 1); o.volume = num(o.volume, 0, 2, 1); o.opacity = num(o.opacity, 0, 1, 1);
+    cleanName(o, 'Overlay'); o.muted = o.muted !== false; o.speed = num(o.speed, 0.25, 4, 1); o.volume = num(o.volume, 0, 2, 1); o.opacity = num(o.opacity, 0, 1, 1);
     o.w = num(o.w, 0.01, 4, 0.36); o.scale = num(o.scale, 0.05, 20, 1); o.start = num(o.start, 0, 1e6, 0);
     o.in = num(o.in, 0, 1e6, 0); o.out = num(o.out, o.in + 0.01, 1e6, o.in + 1);
   }
@@ -95,7 +100,7 @@ export function sanitizeProject(p) {
   }
   for (const b of p.blurs || []) cleanBlur(b);
   for (const a of p.audio) {
-    a.muted = a.muted === true; a.volume = num(a.volume, 0, 2, 0.6); a.duckLevel = num(a.duckLevel, 0, 1, 0.3); a.start = num(a.start, 0, 1e6, 0);
+    cleanName(a, 'Music'); a.muted = a.muted === true; a.volume = num(a.volume, 0, 2, 0.6); a.duckLevel = num(a.duckLevel, 0, 1, 0.3); a.start = num(a.start, 0, 1e6, 0);
     a.in = num(a.in, 0, 1e6, 0); a.out = num(a.out, a.in + 0.01, 1e6, a.in + 1); a.loopLen = num(a.loopLen, 0, 1e6, 0); a.phase = num(a.phase, 0, 1e6, 0);
     a.fadeIn = num(a.fadeIn, 0, 60, 0); a.fadeOut = num(a.fadeOut, 0, 60, 0);
   }
@@ -110,7 +115,7 @@ export const BLUR_SHAPES = ['rect', 'ellipse'], BLUR_MODES = ['blur', 'pixelate'
 export const defaultClipBlur = () => ({ enabled: false, mode: 'blur', strength: 0.6, keep: false, shape: 'ellipse', x: 0.5, y: 0.5, w: 0.5, h: 0.62, radius: 0.3, feather: 0.35 });
 export function newBlur(start, dur = 4) {
   return {
-    id: uid('blr'), shape: 'rect', mode: 'blur', x: 0.5, y: 0.5, w: 0.3, h: 0.3, radius: 0.15, strength: 0.7, feather: 0.1, invert: false,
+    id: uid('blr'), name: '', shape: 'rect', mode: 'blur', x: 0.5, y: 0.5, w: 0.3, h: 0.3, radius: 0.15, strength: 0.7, feather: 0.1, invert: false,
     start, end: start + dur, fadeIn: 0.2, fadeOut: 0.2, keyframes: {},
   };
 }
@@ -121,6 +126,7 @@ export function normalizeBlur(b) {
 }
 const BLUR_KF = ['x', 'y', 'w', 'h'];
 export function cleanBlur(b) {
+  b.name = typeof b.name === 'string' ? b.name.slice(0, NAME_MAX) : '';
   b.shape = oneOf(b.shape, BLUR_SHAPES, 'rect'); b.mode = oneOf(b.mode, BLUR_MODES, 'blur');
   b.x = num(b.x, -0.5, 1.5, 0.5); b.y = num(b.y, -0.5, 1.5, 0.5); b.w = num(b.w, 0.01, 3, 0.3); b.h = num(b.h, 0.01, 3, 0.3);
   b.radius = num(b.radius, 0, 1, 0.15); b.strength = num(b.strength, 0, 1, 0.7); b.feather = num(b.feather, 0, 1, 0.1);
@@ -180,7 +186,7 @@ export function newClipFromMedia(media, settings) {
 
 export function newText(start, dur = 4, text = 'Your text here') {
   return {
-    id: uid('txt'), text, start, end: start + dur, x: 0.5, y: 0.82, size: 0.075,
+    id: uid('txt'), name: '', text, start, end: start + dur, x: 0.5, y: 0.82, size: 0.075,
     color: '#ffffff', bg: '#000000', bgOpacity: 0.62, style: 'clean', font: 'sans', align: 'center',
     fadeIn: 0.3, fadeOut: 0.3, maxWidth: 0.86,
     scale: 1, rotation: 0, opacity: 1, anim: { in: 'none', out: 'none', inDur: 0.6, outDur: 0.4 }, keyframes: {},
