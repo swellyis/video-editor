@@ -361,6 +361,12 @@ function fillInspector() {
   $('logoPanel').hidden = !p.logo; $('logoHint').hidden = !!p.logo;
   const sel = !!app.selection;
   qsa('.tl-toolbar [data-action=duplicate], .tl-toolbar [data-action=delete]').forEach(b => b.disabled = !sel);
+  // Keyframes only exist for things that animate visually (clip, text, overlay) - not music, voice or markers.
+  const kfOk = !!app.selection && ['clip', 'text', 'overlay'].includes(app.selection.type);
+  qsa('.tl-toolbar [data-action=addKeyframe]').forEach(b => {
+    b.disabled = !kfOk;
+    b.title = kfOk ? 'Keyframe the selected clip, text or overlay at the playhead (Shift+K)' : 'Select a clip, text or overlay to keyframe (music uses fades, volume and ducking instead)';
+  });
 }
 // Side-panel lists: rebuilt only when what they show changed (they're refreshed on every slider input event).
 const listKeys = {};
