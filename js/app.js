@@ -1,4 +1,5 @@
 // Video Editor Pro — main controller
+import { initInstall } from './install.js';
 import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar } from './util.js';
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
@@ -1398,33 +1399,8 @@ $('exportBtn').onclick = async () => {
 };
 $('cancelExport').onclick = () => { if (abort) abort.abort(); };
 
-// ---------------------------------------------------------------- install (PWA)
-let deferredPrompt = null;
-const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-function updateInstallBtn() {
-  const b = $('installBtn');
-  if (standalone()) { b.textContent = 'Installed ✓'; b.disabled = false; }
-  else b.textContent = deferredPrompt ? 'Install app' : 'How to install';
-}
-window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; updateInstallBtn(); });
-window.addEventListener('appinstalled', () => { deferredPrompt = null; updateInstallBtn(); $('installHelp').classList.remove('show'); toast('Installed! Open it from your home screen.'); });
-$('installBtn').onclick = async () => {
-  if (standalone()) return toast('Video Editor is installed and running as an app.');
-  if (deferredPrompt) {
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice.catch(() => ({}));
-    deferredPrompt = null; updateInstallBtn();
-    if (outcome === 'accepted') toast('Installing…');
-    return;
-  }
-  let msg;
-  if (isIOS()) msg = '<b>Install on iPhone / iPad:</b> open this page in <b>Safari</b>, tap the <b>Share</b> button (square with arrow), then choose <b>Add to Home Screen</b>. The editor then opens full-screen and works offline.';
-  else if (/android/i.test(navigator.userAgent)) msg = '<b>Install on Android:</b> open the browser menu (⋮) and choose <b>Install app</b> or <b>Add to Home screen</b>. If you don’t see it, reload the page once.';
-  else msg = '<b>Install on desktop:</b> in Chrome or Edge, click the install icon at the right of the address bar (or menu ⋮ → <b>Install Video Editor</b>). In Safari on Mac: File → <b>Add to Dock</b>.';
-  $('installCopy').innerHTML = msg;
-  $('installHelp').classList.toggle('show');
-};
-$('closeInstall').onclick = () => $('installHelp').classList.remove('show');
+// ---------------------------------------------------------------- install (PWA): see js/install.js
+initInstall({ $, toast, isIOS });
 
 // service worker
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
@@ -1532,7 +1508,6 @@ async function boot() {
   let ok = last ? await openProject(last) : false;
   if (!ok) { const all = await db.listProjects(); if (all.length) ok = await openProject(all[0].id); }
   if (!ok) await createProject('My first video');
-  updateInstallBtn();
   const onboarded = await db.kvGet('onboarded').catch(() => true);
   if (!onboarded) { if (app.project.clips.length) db.kvSet('onboarded', true).catch(() => { }); else $('onboard').hidden = false; }
   // files shared to the installed app (Android share sheet → share_target)

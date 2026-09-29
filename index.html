@@ -9,6 +9,7 @@
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <meta name="description" content="Edit, trim, title and export YouTube videos and Shorts on your device: timeline, text, music, voiceover, green screen, MP4 export. Free, private, works offline." />
+  <script src="js/install-early.js"></script>
   <link rel="canonical" href="https://swellyis.github.io/video-editor/" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Video Editor" />
@@ -51,7 +52,7 @@
         <button class="icon-btn" id="helpBtn" type="button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
         <button class="icon-btn" id="themeBtn" type="button" title="Switch light / dark" aria-label="Switch theme">◐</button>
       </div>
-      <button class="btn install-btn" id="installBtn" type="button">Install app</button>
+      <button class="btn install-btn" id="installBtn" type="button">How to install</button>
       <div class="project-stats" aria-label="Project summary">
         <div class="stat"><b id="clipCount">0 clips</b><span>sequence</span></div>
         <div class="stat"><b id="projectDuration">00:00</b><span>runtime</span></div>

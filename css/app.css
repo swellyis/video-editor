@@ -47,6 +47,10 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .icon-btn:disabled{opacity:.38;cursor:not-allowed}
 .install-btn{min-height:40px;background:var(--chrome);color:#f5f5f1;white-space:nowrap}
 .install-btn:hover{background:var(--chrome-2)}
+.install-btn[hidden]{display:none}
+/* installed app (any window mode) or install prompt dismissed: never show install UI (js/install-early.js sets the attributes before first paint) */
+html[data-installed] .install-btn,html[data-installed] .install-help,html[data-install-dismissed] .install-btn,html[data-install-dismissed] .install-help{display:none!important}
+@media (display-mode:standalone),(display-mode:fullscreen),(display-mode:minimal-ui),(display-mode:window-controls-overlay){.install-btn,.install-help{display:none!important}}
 .install-help,.update-bar{display:none;margin:-3px 2px 16px;padding:13px 15px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .install-help.show,.update-bar:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:18px}
 .install-help p,.update-bar p{margin:0;color:var(--muted);font-size:12px;line-height:1.5}

@@ -30,7 +30,7 @@ The app is plain static files (HTML, CSS and ES modules). There's no build step.
   - A real manifest with icons, including maskable and Apple touch icons.
   - A service worker that caches the app shell for offline use under a versioned cache.
   - Self-hosted fonts.
-  - An install button (`beforeinstallprompt`) with iOS and Android instructions.
+  - An install button (`beforeinstallprompt`) with iOS, Android and desktop instructions. It's never shown when the app already runs installed (display-mode standalone, fullscreen, minimal-ui or window-controls-overlay, iOS `navigator.standalone`, or an `android-app://` referrer), and it's decided before first paint so it can't flash. The `appinstalled` event is remembered in localStorage, so a normal browser tab hides it too; Chrome/Edge's `navigator.getInstalledRelatedApps()` is used as an extra hint (the manifest lists this web app in `related_applications` with its `id`). Dismissing the browser's install prompt hides the button for 90 days; on iPhone the Add to Home Screen hint shows until you tap "Got it" once. If the app is uninstalled, the next `beforeinstallprompt` clears the flag and the button returns.
   - An update banner when a new version is deployed.
   - An Android share target: share videos from the Gallery straight into the installed app.
 

@@ -27,5 +27,8 @@
     "enctype": "multipart/form-data",
     "params": { "files": [ { "name": "media", "accept": ["video/*", "image/*", "audio/*"] } ] }
   },
+  "related_applications": [
+    { "platform": "webapp", "url": "manifest.webmanifest", "id": "https://swellyis.github.io/" }
+  ],
   "launch_handler": { "client_mode": "focus-existing" }
 }
