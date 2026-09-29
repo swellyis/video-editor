@@ -174,7 +174,7 @@ async function exportFast(project, media, { onProgress, signal, format, openSink
   output.addVideoTrack(vsrc, { frameRate: fps });
   let asrc = null;
   if (withAudio) { asrc = new mb.AudioBufferSource({ codec: acodec, bitrate: 192000 }); output.addAudioTrack(asrc); }
-  output.setMetadataTags && output.setMetadataTags({ title: project.youtube.title || project.name });
+  output.setMetadataTags && output.setMetadataTags({ title: project.name });
   await output.start();
 
   // --- frame plan: which clips are visible on each frame and at which source time

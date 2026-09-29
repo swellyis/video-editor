@@ -1,5 +1,5 @@
 // Project data model, timeline layout, edit operations, audio envelopes, history.
-import { uid, clamp, deepClone, fmt } from './util.js';
+import { uid, clamp, deepClone } from './util.js';
 
 export const SCHEMA = 5;
 export const MIN_CLIP = 0.1; // seconds on timeline
@@ -36,7 +36,6 @@ export function newProject(name = 'Untitled project') {
     color: defaultColor(),
     clips: [], overlays: [], texts: [], audio: [], markers: [],
     logo: null,
-    youtube: { title: '', description: '', tags: '', chaptersFrom: 'auto' },
     thumb: { time: null, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow' },
   };
 }
@@ -46,7 +45,6 @@ export function migrate(p) {
   const out = Object.assign(base, p);
   out.settings = Object.assign(base.settings, p.settings || {});
   out.color = Object.assign(defaultColor(), p.color || {});
-  out.youtube = Object.assign(newProject().youtube, p.youtube || {});
   out.thumb = Object.assign(newProject().thumb, p.thumb || {});
   out.clips = (p.clips || []).map(c => normalizeClip(c));
   out.texts = (p.texts || []).map(t => { const b = newText(0); const r = Object.assign(b, t); r.anim = Object.assign(newText(0).anim, t.anim || {}); r.keyframes = t.keyframes || {}; return r; });
@@ -584,30 +582,6 @@ export function moveClip(project, from, to) {
   if (from === to || from < 0 || from >= project.clips.length) return;
   const [c] = project.clips.splice(from, 1);
   project.clips.splice(clamp(to, 0, project.clips.length), 0, c);
-}
-
-// ---------- YouTube chapters ----------
-export function chapters(project) {
-  const lay = layout(project);
-  let pts;
-  const useMarkers = project.markers.length > 0 && project.youtube.chaptersFrom !== 'clips';
-  if (useMarkers) pts = project.markers.map(m => ({ t: m.time, name: m.name || 'Chapter' }));
-  else pts = lay.items.map(it => ({ t: it.start + (it.xIn || 0) / 2, name: it.clip.name || 'Part ' + (it.index + 1) }));
-  pts.sort((a, b) => a.t - b.t);
-  if (!pts.length) return { list: [], warnings: ['Add clips or markers to generate chapters.'] };
-  if (pts[0].t > 0.5) pts.unshift({ t: 0, name: 'Intro' }); else pts[0].t = 0;
-  // YouTube requires >= 10s per chapter: merge short ones into previous
-  const out = [];
-  let merged = 0;
-  for (const p of pts) {
-    if (out.length && p.t - out[out.length - 1].t < 10) { merged++; continue; }
-    out.push({ ...p });
-  }
-  const warnings = [];
-  if (merged) warnings.push(merged + ' chapter point(s) closer than 10 s to the previous one were skipped (YouTube minimum).');
-  if (out.length && lay.total - out[out.length - 1].t < 10 && out.length > 1) { out.pop(); warnings.push('The last chapter would be shorter than 10 s, so it was dropped.'); }
-  if (out.length < 3) warnings.push('YouTube needs at least 3 chapters of 10 seconds or longer — add markers to fine-tune.');
-  return { list: out, warnings, text: out.map(p => fmt(p.t) + ' ' + p.name).join('\n') };
 }
 
 // ---------- History (snapshot based) ----------

@@ -4,7 +4,7 @@ import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
-  moveClip, rippleShift, chapters, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
+  moveClip, rippleShift, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, ANIM_PROPS, normalizeClip,
   splitItem, audioSpan, rebaseKeyframes,
 } from './model.js';
@@ -98,7 +98,7 @@ app.seek = (t) => { player.setTime(t); };
 app.select = (sel, opts = {}) => {
   app.selection = sel;
   if (sel) {
-    const tab = { clip: 'clip', text: 'text', audio: 'audio', marker: 'youtube', overlay: 'pip' }[sel.type];
+    const tab = { clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip' }[sel.type];
     if (tab) showTab(tab);
     if (opts.seekInto) {
       const t = player.t;
@@ -249,7 +249,6 @@ function afterSet(path, obj, old, before) {
   if (path === 'ovl.speed') obj.speed = clamp(Number(obj.speed) || 1, 0.25, 4);
   if (path === 'text.anim.in' || path === 'text.anim.out') { const t = selected('text'); const d = t.end - t.start; if (t.anim.inDur + t.anim.outDur > d) { t.anim.inDur = Math.min(t.anim.inDur, d * 0.6); t.anim.outDur = Math.min(t.anim.outDur, d * 0.35); } }
   if (path === 'proj.settings.ratio' || path === 'proj.settings.res') sizeStage();
-  if (path === 'proj.youtube.title' || path === 'proj.youtube.tags') updateCounts();
   if (path.startsWith('proj.settings.') && ['res', 'fps', 'quality', 'format'].includes(path.split('.')[2])) refreshCaps();
 }
 const FMT = {
@@ -361,17 +360,6 @@ function fillInspector() {
   $('logoPanel').hidden = !p.logo; $('logoHint').hidden = !!p.logo;
   const sel = !!app.selection;
   qsa('.tl-toolbar [data-action=duplicate], .tl-toolbar [data-action=delete]').forEach(b => b.disabled = !sel);
-  updateCounts();
-  renderChapters();
-}
-function updateCounts() {
-  $('titleCount').textContent = (app.project.youtube.title || '').length + '/100';
-  $('tagCount').textContent = (app.project.youtube.tags || '').length + '/500';
-}
-function renderChapters() {
-  const ch = chapters(app.project);
-  $('chaptersOut').textContent = ch.text || '—';
-  $('chapterWarn').textContent = ch.warnings.join(' ');
 }
 // Side-panel lists: rebuilt only when what they show changed (they're refreshed on every slider input event).
 const listKeys = {};
@@ -399,16 +387,6 @@ function renderLists(light) {
   const ovs = (p.overlays || []).map(o => ({ o, key: [o.id, o.name, !!(o.chroma && o.chroma.enabled), fmt(o.start), fmt(overlayLen(o)), isSel('overlay', o.id)] }));
   renderList('overlayList', ovs, ({ o }) => { const keyed = o.chroma && o.chroma.enabled; return listItem(isSel('overlay', o.id), `Overlay ${o.name}, ${fmt(o.start)}`, () => app.select({ type: 'overlay', id: o.id }, { seekInto: true }),
     el('span', { class: 'item-ico', title: keyed ? 'Green screen' : 'Picture-in-picture' }, icon(keyed ? 'key' : 'pip')), el('span', { class: 'grow', text: o.name }), el('span', { class: 't', text: fmt(o.start) + ' · ' + fmt(overlayLen(o)) })); });
-  if (light) return;
-  const ml = $('markerList'); ml.replaceChildren();
-  [...p.markers].sort((a, b) => a.time - b.time).forEach(m => {
-    const name = el('input', { value: m.name || '', 'aria-label': 'Marker name', placeholder: 'Chapter name' });
-    name.addEventListener('change', () => { m.name = name.value; app.commit('Rename marker'); });
-    ml.append(el('div', { class: 'item' + (sel.type === 'marker' && sel.id === m.id ? ' selected' : '') },
-      el('button', { type: 'button', class: 't', text: fmt(m.time), title: 'Jump', onclick: () => { app.select({ type: 'marker', id: m.id }); player.setTime(m.time); } }),
-      name,
-      el('button', { type: 'button', text: '✕', 'aria-label': 'Delete marker', onclick: () => { p.markers = p.markers.filter(x => x !== m); app.commit('Delete marker'); } })));
-  });
 }
 
 // trim controls
@@ -504,11 +482,9 @@ const actions = {
   deleteAudio() { const a = selected('audio'); if (!a) return; app.project.audio = app.project.audio.filter(x => x !== a); app.selection = null; app.commit('Remove music'); },
   addMarker() {
     const t = player.t;
-    const n = app.project.markers.length + 1;
-    const it = clipAt(layout(app.project), t);
-    const m = { id: uid('mk'), time: t, name: it && app.project.markers.length ? 'Chapter ' + (n) : (t < 0.5 ? 'Intro' : 'Chapter ' + n) };
+    const m = { id: uid('mk'), time: t, name: 'Marker ' + (app.project.markers.length + 1) };
     app.project.markers.push(m); app.selection = { type: 'marker', id: m.id };
-    app.commit('Add marker'); toast('Marker added at ' + fmt(t) + ' — rename it in the YouTube tab.');
+    app.commit('Add marker'); toast('Marker added at ' + fmt(t) + '. Drag it to move it, or select it and press Delete to remove it.');
   },
   removeLogo() { app.project.logo = null; app.commit('Remove logo'); },
   deleteOverlay() { const o = selected('overlay'); if (!o) return; app.project.overlays = app.project.overlays.filter(x => x !== o); app.selection = null; app.commit('Delete overlay'); },
@@ -1207,23 +1183,6 @@ $('themeBtn').onclick = async () => {
   applyTheme(next); db.kvSet('theme', next);
 };
 
-// ---------------------------------------------------------------- YouTube details
-function detailsText() {
-  const y = app.project.youtube, ch = chapters(app.project);
-  let s = '';
-  if (y.title.trim()) s += y.title.trim() + '\n\n';
-  if (y.description.trim()) s += y.description.trim() + '\n\n';
-  if (ch.list.length >= 3) s += 'Chapters\n' + ch.text + '\n';
-  return s.trim();
-}
-async function copy(text, msg) {
-  try { await navigator.clipboard.writeText(text); }
-  catch { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
-  toast(msg);
-}
-$('copyDetails').onclick = () => { const t = detailsText(); if (!t) return toast('Add a title or description first.'); copy(t, 'Title, description and chapters copied.'); };
-$('copyTags').onclick = () => { const t = app.project.youtube.tags.split(',').map(s => s.trim()).filter(Boolean).join(', '); if (!t) return toast('Add some tags first.'); copy(t, 'Tags copied.'); };
-
 // ---------------------------------------------------------------- thumbnail maker
 const thumb = { canvas: $('thumbCanvas'), comp: new Compositor(), v: null };
 async function thumbFrame(t) {
@@ -1303,7 +1262,7 @@ async function thumbRefresh(refetch) {
 }
 function thumbSyncInputs() {
   const P = app.project.thumb;
-  $('thumbText').value = P.text || app.project.youtube.title || ''; $('thumbSub').value = P.sub || '';
+  $('thumbText').value = P.text || ''; $('thumbSub').value = P.sub || '';
   $('thumbFont').value = P.font; $('thumbPos').value = P.position; $('thumbColor').value = P.color; $('thumbAccent').value = P.accent;
   $('thumbTime').max = Math.max(0.01, layout(app.project).total - 0.01); $('thumbTime').value = P.time; $('thumbTimeOut').textContent = fmt(P.time);
 }
@@ -1314,7 +1273,7 @@ async function openThumb() {
   if (app.project.thumb.time == null) app.project.thumb.time = player.t; // a chosen frame at 0:00 is valid
   thumbSyncInputs(); openDialog('thumbDialog'); await thumbRefresh(true);
 }
-$('thumbBtn').onclick = openThumb; $('thumbBtn2').onclick = openThumb;
+$('thumbBtn').onclick = openThumb;
 const thumbInput = debounce(() => thumbRefresh(false), 30);
 for (const id of ['thumbText', 'thumbSub', 'thumbFont', 'thumbPos', 'thumbColor', 'thumbAccent', 'thumbDarken', 'thumbSize']) {
   $(id).addEventListener('input', () => {
@@ -1338,8 +1297,8 @@ app.thumbRefresh = thumbRefresh;
 
 // ---------------------------------------------------------------- export
 let exporting = false, abort = null, lastExport = null;
-/** Export file name (without extension) from the YouTube title, else the project name; safe on every OS. */
-function exportBaseName(p) { return safeName((p.youtube.title || '').trim() || p.name, 'video'); }
+/** Export file name (without extension) from the project name; safe on every OS. */
+function exportBaseName(p) { return safeName(p.name, 'video'); }
 async function refreshCaps() {
   const c = await capabilities(app.project);
   app.caps = c;
@@ -1421,11 +1380,11 @@ $('exportBtn').onclick = async () => {
     const where = res.streamed === 'file' ? ' · saved directly to your disk' : res.streamed === 'opfs' ? ' · streamed to disk while rendering' : '';
     // built from text nodes: a picked file name can contain < > & quotes
     $('exportResultText').replaceChildren(el('b', { text: name }), ` · ${res.width}×${res.height} · ${res.fps} fps · ${fmt(res.duration)} · ${fmtBytes(res.blob.size)}`, el('br'),
-      el('span', { class: 'hint', text: `${res.method}${where} · rendered in ${fmtDuration(took)}. Upload it in YouTube Studio.` }));
+      el('span', { class: 'hint', text: `${res.method}${where} · rendered in ${fmtDuration(took)}. Ready to upload.` }));
     $('downloadAgain').href = lastExport.url; $('downloadAgain').download = name;
     const file = new File([res.blob], name, { type: res.mime });
     $('shareExport').hidden = !(navigator.canShare && navigator.canShare({ files: [file] }));
-    $('shareExport').onclick = () => navigator.share({ files: [file], title: p.youtube.title || p.name }).catch(() => { });
+    $('shareExport').onclick = () => navigator.share({ files: [file], title: p.name }).catch(() => { });
     $('exportResult').hidden = false;
     $('outputNote').textContent = 'Export complete.'; $('outputNote').classList.add('status-good');
     if (!handleUnused) toast((res.streamed === 'file' ? 'Video saved: ' : 'Video exported: ') + name);
@@ -1511,7 +1470,6 @@ async function applyTemplate(t, mode) {
     await createProject(t.name);
     Object.assign(app.project.settings, { ratio: t.ratio || '16:9' }, spec.settings || {});
     if (app.project.settings.ratio === '9:16' && app.project.settings.bg === 'black') app.project.settings.bg = 'blur';
-    if (t.id !== 'lowerThird') app.project.youtube.title = '';
     player.setTime(0);
   }
   const p = app.project;

@@ -1,6 +1,6 @@
 // Starter templates for faith / devotional videos and Shorts.
 // Each template produces background image "clips" (generated on a canvas), text layers with
-// animation presets, optional keyframes and chapter markers — everything stays editable.
+// animation presets, optional keyframes and section markers — everything stays editable.
 import { newText } from './model.js';
 
 const rnd = (seed) => () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
@@ -116,7 +116,7 @@ export const TEMPLATES = [
   },
   {
     id: 'sermon', name: 'Sermon / devotional outline', icon: '🎙️', ratio: '16:9',
-    desc: 'Title card, three points and a closing prayer — with YouTube chapter markers.',
+    desc: 'Title card, three points and a closing prayer — with section markers.',
     build: () => {
       const bg = (seed, c) => ({ colors: c, rays: seed % 2 === 1, bokeh: seed % 2 === 0, seed });
       const secs = [

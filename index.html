@@ -115,7 +115,6 @@
         <button data-tab="audio" type="button" role="tab">Audio</button>
         <button data-tab="pip" type="button" role="tab">PiP</button>
         <button data-tab="look" type="button" role="tab">Look</button>
-        <button data-tab="youtube" type="button" role="tab">YouTube</button>
       </div>
 
       <!-- CLIP -->
@@ -131,7 +130,7 @@
           </div>
           <section class="section">
             <div class="section-head"><h2 id="clipTitle">Clip</h2><span class="hint mono" id="clipLenLabel">00:00</span></div>
-            <label><span class="label">Name (used for chapters)</span><input class="field" data-bind="clip.name" data-commit="change" maxlength="80" /></label>
+            <label><span class="label">Name</span><input class="field" data-bind="clip.name" data-commit="change" maxlength="80" /></label>
             <div id="trimBlock">
               <div class="field-row" style="margin-top:10px">
                 <label><span class="label">In point (s)</span><input class="field mono" id="clipIn" type="number" min="0" step="0.1" /></label>
@@ -410,29 +409,6 @@
         </section>
       </div>
 
-      <!-- YOUTUBE -->
-      <div class="tab-panel" id="tab-youtube">
-        <section class="section">
-          <h2 class="sh">YouTube details</h2>
-          <label><span class="label">Video title <span class="count" id="titleCount">0/100</span></span><input class="field" data-bind="proj.youtube.title" data-commit="change" maxlength="100" placeholder="Write a clear, searchable title" /></label>
-          <label style="display:block;margin-top:10px"><span class="label">Description</span><textarea data-bind="proj.youtube.description" data-commit="change" maxlength="5000" placeholder="Summary, scripture reference, and viewer prompt…"></textarea></label>
-          <label style="display:block;margin-top:10px"><span class="label">Tags (comma separated) <span class="count" id="tagCount">0/500</span></span><input class="field" data-bind="proj.youtube.tags" data-commit="change" placeholder="faith, devotional, bible study" /></label>
-        </section>
-        <section class="section">
-          <div class="section-head"><h2>Chapters</h2><select class="mini-select" data-bind="proj.youtube.chaptersFrom"><option value="auto">Markers, else clips</option><option value="clips">Clip names</option></select></div>
-          <pre class="chapters mono" id="chaptersOut"></pre>
-          <p class="hint warn" id="chapterWarn"></p>
-          <div class="section-head" style="margin-top:12px"><h2>Markers</h2><button class="btn ghost small" data-action="addMarker" type="button">＋ Marker at playhead (M)</button></div>
-          <div class="item-list" id="markerList"></div>
-        </section>
-        <section class="section">
-          <div class="button-row">
-            <button class="btn primary" id="copyDetails" type="button">Copy title, description &amp; chapters</button>
-            <button class="btn secondary" id="copyTags" type="button">Copy tags</button>
-            <button class="btn secondary" id="thumbBtn2" type="button">Thumbnail maker</button>
-          </div>
-        </section>
-      </div>
     </aside>
 
     <div class="timeline-panel">
@@ -468,7 +444,6 @@
     </div>
     <div class="publish-actions">
       <button class="btn secondary" id="thumbBtn" type="button" disabled>Thumbnail maker</button>
-      <a class="link-btn" href="https://www.youtube.com/upload" target="_blank" rel="noopener noreferrer">YouTube Studio ↗</a>
       <button class="btn primary" id="exportBtn" type="button" disabled>Export video</button>
     </div>
     <div class="progress" id="progress" aria-live="polite">

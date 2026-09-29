@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { newProject, migrate, layout, splitItem, rebaseKeyframes, chapters, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen } from '../js/model.js';
+import { newProject, migrate, layout, splitItem, rebaseKeyframes, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen } from '../js/model.js';
 import { safeName, tarBlob, isTar, readTar, dataURLToBlob, fmt } from '../js/util.js';
 
 const clip = (id, out, extra = {}) => normalizeClip({ id, mediaId: 'm_' + id, name: id, kind: 'video', srcDuration: 60, in: 0, out, ...extra });
@@ -38,14 +38,6 @@ test('rebaseKeyframes cuts tracks at a split point', () => {
   assert.equal(left.x.at(-1).t, 4); assert.ok(Math.abs(left.x.at(-1).v - 40) < 1e-6);
   assert.equal(right.x[0].t, 0); assert.ok(Math.abs(right.x[0].v - 40) < 1e-6);
   assert.equal(right.x.at(-1).t, 6);
-});
-
-test('chapters: intro added, short chapters merged, YouTube text', () => {
-  const p = proj(clip('Intro talk', 30), clip('Main', 60), clip('Tiny', 5), clip('End', 40));
-  const c = chapters(p);
-  assert.equal(c.list[0].t, 0);
-  assert.ok(c.list.every((x, i) => i === 0 || x.t - c.list[i - 1].t >= 10));
-  assert.ok(c.text.startsWith('00:00 Intro talk'));
 });
 
 test('safeName keeps titles readable and safe as file names', () => {
@@ -91,6 +83,9 @@ test('migrate upgrades old projects and sanitizeProject clamps bad values', () =
   assert.equal(p.texts[0].text, '5'); assert.ok(p.texts[0].end > p.texts[0].start);
   assert.deepEqual(p.markers, [{ time: 0 }]);
   assert.deepEqual([p.logo.position, p.logo.size], ['tr', 1]);
+  const legacy = migrate({ ...newProject('Legacy'), youtube: { title: 'Old title', tags: 'a,b', chaptersFrom: 'clips' } });
+  assert.equal(legacy.youtube.title, 'Old title', 'old YouTube details in saves are kept untouched (no UI any more)');
+  assert.equal('youtube' in newProject(), false);
   const keep = migrate({ ...newProject('New'), thumb: { ...newProject().thumb, time: 0 } });
   assert.equal(keep.thumb.time, 0, 'a v5 project keeps a thumbnail chosen at 0:00');
   assert.equal(sanitizeProject(newProject()).settings.res, 1080);
