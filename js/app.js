@@ -10,7 +10,7 @@ import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, ANIM_PROPS, normalizeClip,
-  splitItem, audioSpan, rebaseKeyframes, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, NAME_MAX, textLabel, blurLabel,
+  splitItem, audioSpan, rebaseKeyframes, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
 import { Compositor, drawLogo, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
@@ -333,7 +333,6 @@ function fillOutputs() {
 // What to tell the user when a toolbar action can't apply to the current selection.
 const TOOL_HINT = {
   duplicate: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Duplicate.' },
-  rename: { none: 'Nothing selected. Tap a clip, text, overlay, music track, blur region or marker on the timeline first, then tap Rename.' },
   delete: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Delete.' },
   addKeyframe: {
     none: 'Nothing selected. Tap a clip, text or overlay on the timeline first, then tap Keyframe.',
@@ -418,7 +417,6 @@ function fillInspector() {
   const setState = (sel, ok, tipOk, tipNo) => qsa(sel).forEach(b => { b.disabled = false; b.setAttribute('aria-disabled', ok ? 'false' : 'true'); b.classList.toggle('is-off', !ok); b.title = ok ? tipOk : tipNo; });
   setState('.tl-toolbar [data-action=duplicate]', !!st, 'Duplicate selected (Ctrl+D)', TOOL_HINT.duplicate.none);
   setState('.tl-toolbar [data-action=delete]', !!st, 'Delete selected (Del)', TOOL_HINT.delete.none);
-  setState('.tl-toolbar [data-action=rename]', !!st, 'Rename the selected item (F2)', TOOL_HINT.rename.none);
   setState('.tl-toolbar [data-action=addKeyframe]', kfOk, 'Keyframe the selected clip, text or overlay at the playhead (Shift+K)', TOOL_HINT.addKeyframe[st || 'none'] || TOOL_HINT.addKeyframe.none);
 }
 // Side-panel lists: rebuilt only when what they show changed (they're refreshed on every slider input event).
@@ -564,21 +562,6 @@ const actions = {
   removeLogo() { app.project.logo = null; app.commit('Remove logo'); },
   deleteOverlay() { const o = selected('overlay'); if (!o) return; app.project.overlays = app.project.overlays.filter(x => x !== o); app.selection = null; app.commit('Delete overlay'); },
   ovlStartHere() { const o = selected('overlay'); if (!o) return; o.start = Math.max(0, player.t); app.commit('Move overlay'); },
-  rename() {
-    const s = app.selection, item = s && selected(s.type);
-    if (!s || !item) return toast(TOOL_HINT.rename.none, 4000);
-    const kind = { clip: 'clip', text: 'text layer', overlay: 'overlay', audio: item.voice ? 'voice track' : 'music track', blur: 'blur region', marker: 'marker' }[s.type];
-    const cur = s.type === 'text' ? (item.name || '') : s.type === 'blur' ? (item.name || '') : (item.name || '');
-    const needs = s.type === 'clip' || s.type === 'overlay' || s.type === 'audio';
-    renameCtx = { type: s.type, id: s.id, needs, auto: s.type === 'text' ? textLabel({ text: item.text }) : s.type === 'blur' ? blurLabel({ mode: item.mode, invert: item.invert }) : '' };
-    $('renameTitle').textContent = 'Rename ' + kind;
-    $('renameLabel').textContent = 'Name';
-    $('renameHint').textContent = needs ? '' : 'Leave empty to use the automatic name' + (renameCtx.auto ? ' (“' + renameCtx.auto.slice(0, 40) + '”).' : '.');
-    $('renameHint').classList.remove('err');
-    const inp = $('renameInput'); inp.value = cur; inp.placeholder = needs ? '' : renameCtx.auto.slice(0, 40);
-    openDialog('renameDialog');
-    setTimeout(() => { inp.focus(); inp.select(); }, 30);
-  },
   addBlur() {
     const p = app.project, total = layout(p).total;
     if (!p.clips.length) return toast('Add a video clip first, then add a blur region over it.');
@@ -609,25 +592,6 @@ const actions = {
   kfClear() { const k = kfTarget(); if (!k) return; k.item.keyframes = {}; app.commit('Clear keyframes'); toast('Keyframes cleared'); },
 };
 app.actions = actions;
-let renameCtx = null;
-/** Apply a new name to the item chosen in the Rename dialog (returns an error message, or '' when done). */
-function applyRename(name) {
-  const c = renameCtx; if (!c) return '';
-  const item = selected(c.type); if (!item || app.selection.id !== c.id) return 'That item is no longer selected.';
-  name = String(name).replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
-  if (c.needs && !name) return 'Type a name.';
-  if (item.name === name) return '';
-  item.name = name;
-  app.commit('Rename');
-  return '';
-}
-$('renameForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const err = applyRename($('renameInput').value);
-  if (err) { $('renameHint').textContent = err; $('renameHint').classList.add('err'); $('renameInput').focus(); return; }
-  closeDialog('renameDialog'); toast('Renamed', 1400);
-});
-$('renameDialog').addEventListener('close', () => { renameCtx = null; });
 
 // ---------------------------------------------------------------- keyframe panels
 function renderKfPanels() {
@@ -1035,7 +999,6 @@ document.addEventListener('keydown', (e) => {
     case 'Delete': case 'Backspace': handled(); actions.delete(); break;
     case 't': case 'T': if (!e.repeat) actions.addText(); break;
     case 'm': case 'M': if (!e.repeat) actions.addMarker(); break;
-    case 'F2': handled(); actions.rename(); break;
     // R never starts recording instantly: it arms a 3-second countdown (R or Esc cancels); R again stops a recording
     case 'r': case 'R': handled(); if (!e.repeat) voice.keyR(); break;
     case '+': case '=': timeline.zoomBy(1.4); break;

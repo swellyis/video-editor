@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="ve-build" content="ved197f7e7e" />
+  <meta name="ve-build" content="vaece8694f3" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
@@ -530,7 +530,6 @@
         <button class="tool" data-action="duplicate" type="button" title="Duplicate selected (Ctrl+D)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3.5V3a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 2 3v6a1.5 1.5 0 0 0 1.5 1.5H4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>Duplicate</span></button>
         <button class="tool" data-action="delete" type="button" title="Delete selected (Del)">🗑<span>Delete</span></button>
         <button class="tool" data-action="addKeyframe" type="button" title="Keyframe the selected clip, text or overlay at the playhead (Shift+K)">◆<span>Keyframe</span></button>
-        <button class="tool" data-action="rename" type="button" title="Rename the selected item (F2)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 14l.7-3.3L11 2.4a1.4 1.4 0 0 1 2 0l.6.6a1.4 1.4 0 0 1 0 2L5.3 13.3z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M9.6 3.8l2.6 2.6" stroke="currentColor" stroke-width="1.5"/></svg><span>Rename</span></button>
         <i class="sep"></i>
         <button class="tool" data-action="addMarker" type="button" title="Add marker (M)">⚑<span>Marker</span></button>
         <i class="sep"></i>
@@ -596,16 +595,6 @@
   <div class="button-row" id="siteTryRow" hidden><button class="btn secondary" id="siteTry" type="button">Try showing it here anyway</button></div>
 </dialog>
 
-<!-- Rename -->
-<dialog class="sheet small" id="renameDialog" aria-labelledby="renameTitle">
-  <form id="renameForm" method="dialog" autocomplete="off">
-    <div class="sheet-head"><h2 id="renameTitle">Rename</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
-    <label><span class="label" id="renameLabel">Name</span><input class="field" id="renameInput" maxlength="80" aria-describedby="renameHint" enterkeyhint="done" /></label>
-    <p class="hint" id="renameHint" aria-live="polite"></p>
-    <div class="button-row" style="margin-top:14px"><button class="btn primary" id="renameOk" type="submit">Rename</button><button class="btn secondary" id="renameCancel" type="button" data-close>Cancel</button></div>
-  </form>
-</dialog>
-
 <!-- Help -->
 <dialog class="sheet" id="helpDialog" aria-labelledby="helpTitle">
   <div class="sheet-head"><h2 id="helpTitle">Keyboard shortcuts</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
@@ -620,7 +609,6 @@
     <div><kbd>Ctrl/⌘</kbd>+<kbd>D</kbd><span>Duplicate selected</span></div>
     <div><kbd>T</kbd><span>Add text at playhead</span></div>
     <div><kbd>M</kbd><span>Add marker at playhead</span></div>
-    <div><kbd>F2</kbd><span>Rename the selected item</span></div>
     <div><kbd>Shift</kbd>+<kbd>K</kbd><span>Keyframe selected item at playhead</span></div>
     <div><kbd>R</kbd><span>Voiceover: starts after a 3-second countdown (R or Esc cancels); R again stops</span></div>
     <div><kbd>+</kbd> <kbd>−</kbd> / <kbd>0</kbd><span>Zoom timeline in / out / fit</span></div>
