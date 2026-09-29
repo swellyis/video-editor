@@ -1,10 +1,10 @@
 /* Video Editor service worker: offline app shell (versioned cache) + share target inbox. */
-const VERSION = 'vde0850b790';
+const VERSION = 'v9ded6b5dc5';
 const CACHE = 'video-editor-shell-' + VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css', './css/fonts.css',
-  './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/render.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/exporter.js', './js/templates.js', './js/install.js', './js/install-early.js',
+  './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/render.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/exporter.js', './js/templates.js', './js/install.js', './js/install-early.js', './js/build.js',
   './js/heic-worker.js',
   './vendor/mediabunny.min.mjs', './vendor/gifuct.min.mjs', './vendor/libheif/libheif.js', './vendor/libheif/libheif.wasm',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-192.png', './icons/maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png',
@@ -15,6 +15,7 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
+  // Precache everything for THIS version. It then waits (the app offers "Reload") so open tabs keep their own version.
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))));
 });
 self.addEventListener('activate', (event) => {
@@ -64,26 +65,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
+  const own = () => caches.open(CACHE); // ONLY this version's cache: never a file left over from another version
   if (req.mode === 'navigate') {
-    // Network first for navigations (fresh HTML when online), cached shell offline.
+    // The app page comes from this version's cache, the same version as its scripts (fetching it from the network could
+    // return a newer or HTTP-cached older index.html that doesn't match the cached JS, which broke the page). A new
+    // version arrives through the service worker update (sw.js is always revalidated), not through the page fetch.
+    const isShell = /\/(index\.html)?$/.test(url.pathname);
     event.respondWith((async () => {
-      try {
-        const res = await fetch(req);
-        // only the app page itself may replace the offline shell (not a README, PNG, etc. opened in a tab)
-        const isShell = /\/(index\.html)?$/.test(url.pathname) && (res.headers.get('content-type') || '').includes('text/html');
-        if (res.ok && isShell) { const c = await caches.open(CACHE); c.put('./index.html', res.clone()); }
-        return res;
-      } catch { return (await caches.match('./index.html')) || (await caches.match('./')) || Response.error(); }
+      if (isShell) { const hit = await (await own()).match('./index.html'); if (hit) return hit; }
+      try { return await fetch(req, { cache: 'no-cache' }); } catch { return (await (await own()).match('./index.html')) || Response.error(); }
     })());
     return;
   }
   // Cache first for versioned static assets; fill cache at runtime for anything else same-origin.
   event.respondWith((async () => {
-    const hit = await caches.match(req, { ignoreSearch: true });
+    const c = await own();
+    const hit = await c.match(req, { ignoreSearch: true });
     if (hit) return hit;
     try {
       const res = await fetch(req);
-      if (res.ok && res.type === 'basic' && !url.pathname.includes('/screenshots/')) { const c = await caches.open(CACHE); c.put(req, res.clone()); }
+      if (res.ok && res.type === 'basic' && !url.pathname.includes('/screenshots/')) c.put(req, res.clone());
       return res;
     } catch { return Response.error(); }
   })());

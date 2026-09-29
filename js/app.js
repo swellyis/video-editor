@@ -1,5 +1,6 @@
 // Video Editor Pro — main controller
 import { initInstall } from './install.js';
+import { BUILD } from './build.js';
 import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar } from './util.js';
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
@@ -14,6 +15,26 @@ import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { Timeline } from './timeline.js';
 import { runExport, capabilities, planFormat, ExportCancelled, createSink, canStreamToOPFS, cleanupExports, bitrateFor } from './exporter.js';
+
+// Page/script version check first, before anything else can fail on a mismatched page (see the service worker section).
+// If an old copy of index.html (browser HTTP cache / old offline copy) is paired with these newer scripts, elements the scripts
+// expect are missing and the app would die half-started ("not responding"). Reset the offline copy, refetch the page past the
+// HTTP cache and reload once. Projects live in IndexedDB and are untouched.
+async function healBuildMismatch() {
+  const meta = document.querySelector('meta[name="ve-build"]');
+  if (meta && meta.content === BUILD) return false; // (an old page without the tag next to new scripts counts as a mismatch too)
+  let tried = false; try { tried = sessionStorage.getItem('ve.healed') === BUILD; sessionStorage.setItem('ve.healed', BUILD); } catch { /* storage blocked */ }
+  if (tried) return false; // already tried once in this tab: run as well as we can rather than loop
+  try {
+    if ('serviceWorker' in navigator) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+    if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+    await Promise.race([fetch(location.pathname, { cache: 'reload' }), new Promise(r => setTimeout(r, 6000))]); // refresh the HTTP-cached page
+  } catch { /* best effort */ }
+  location.reload();
+  return true;
+}
+if (await healBuildMismatch()) await new Promise(() => { }); // the page is reloading: don't start this mismatched copy
+
 
 const app = {
   project: newProject(),
@@ -1211,6 +1232,7 @@ async function thumbVideoAt(v, url, t) {
   await seekVideo(v, Math.max(0.01, t)); // has a timeout, never hangs
   return { img: v, w: v.videoWidth, h: v.videoHeight };
 }
+const withTimeout = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timed out')), ms))]);
 async function thumbFrame(t, F) {
   // Render the sequence frame at time t at the chosen thumbnail size (independent of the project aspect ratio).
   const P = app.project.thumb;
@@ -1225,8 +1247,8 @@ async function thumbFrame(t, F) {
   if (!it) return c;
   let src = null;
   if (it.clip.kind === 'image') {
-    const im = await media.image(it.clip.mediaId).catch(() => null);
-    if (!im) return c; // missing or undecodable image: plain background
+    const im = await withTimeout(media.image(it.clip.mediaId), 8000, 'image').catch(() => null);
+    if (!im) return c; // missing, undecodable or stuck image: plain background
     src = { img: im.img, w: im.w, h: im.h };
   } else {
     const url = media.url(it.clip.mediaId);
@@ -1240,7 +1262,7 @@ async function thumbFrame(t, F) {
   const ovSrc = new Map();
   for (const o of overlaysAt(p, tt)) {
     try {
-      if (o.kind === 'image') { await media.image(o.mediaId); const s = media.imageSourceAt(o.mediaId, 0, () => { }); if (s) ovSrc.set(o.id, s); continue; }
+      if (o.kind === 'image') { await withTimeout(media.image(o.mediaId), 8000, 'overlay image'); const s = media.imageSourceAt(o.mediaId, 0, () => { }); if (s) ovSrc.set(o.id, s); continue; }
       const url = media.url(o.mediaId); if (!url) continue;
       let v = thumb.ov.get(o.id);
       if (!v) { v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; thumb.ov.set(o.id, v); }
@@ -1260,7 +1282,7 @@ async function thumbRefresh(refetch) {
   if (refetch || !thumbBg || key !== thumb.key || thumbBg.width !== W) {
     const bg = await thumbFrame(P.time, F);
     let lg = null;
-    if (P.logo && app.project.logo) lg = await media.image(app.project.logo.mediaId).catch(() => null);
+    if (P.logo && app.project.logo) lg = await withTimeout(media.image(app.project.logo.mediaId), 8000, 'logo').catch(() => null);
     if (seq !== thumb.seq) return; // a newer refresh took over
     thumbBg = bg; thumb.logo = lg; thumb.key = key;
   }
@@ -1339,15 +1361,26 @@ function thumbSyncInputs() {
   g.hidden = !$('thumbGuides').checked;
   $('thumbCanvas').dataset.format = F.key;
 }
+let thumbOpening = false;
 async function openThumb() {
   if (!app.project.clips.length) return toast('Add a clip first.');
-  player.pause();
-  await ensureFonts();
-  if (app.project.thumb.time == null) app.project.thumb.time = player.t; // a chosen frame at 0:00 is valid
-  thumbSyncInputs(); openDialog('thumbDialog'); await thumbRefresh(true);
+  if (thumbOpening) return; // ignore double taps while the first frame is being prepared
+  thumbOpening = true;
+  try {
+    player.pause();
+    await Promise.race([ensureFonts(), new Promise(r => setTimeout(r, 3000))]); // never wait forever for fonts
+    if (app.project.thumb.time == null) app.project.thumb.time = player.t; // a chosen frame at 0:00 is valid
+    thumbSyncInputs(); openDialog('thumbDialog');
+    await Promise.race([thumbRefresh(true), new Promise((_, rej) => setTimeout(() => rej(new Error('The frame took too long to load')), 25000))]);
+  } catch (e) {
+    console.warn('Thumbnail maker', e);
+    toast('Could not prepare the thumbnail frame: ' + (e && e.message ? e.message : 'unknown error') + '. Try another frame.');
+    if (!$('thumbDialog').open) { try { openDialog('thumbDialog'); } catch { /* dialog unsupported */ } }
+  } finally { thumbOpening = false; }
 }
 $('thumbBtn').onclick = openThumb;
-const thumbInput = debounce(() => thumbRefresh(false), 30);
+const thumbRefreshSafe = (refetch) => thumbRefresh(refetch).catch((e) => { console.warn('Thumbnail refresh', e); toast('Could not update the thumbnail preview.'); });
+const thumbInput = debounce(() => thumbRefreshSafe(false), 30);
 for (const id of ['thumbText', 'thumbSub', 'thumbFont', 'thumbPos', 'thumbColor', 'thumbAccent', 'thumbDarken', 'thumbSize']) {
   $(id).addEventListener('input', () => {
     const P = app.project.thumb;
@@ -1361,15 +1394,15 @@ for (const id of ['thumbFormat', 'thumbFit', 'thumbPip', 'thumbLogo', 'thumbType
   $(id).addEventListener('change', () => {
     const P = app.project.thumb;
     P.format = $('thumbFormat').value; P.fit = $('thumbFit').value; P.pip = $('thumbPip').checked; P.logo = $('thumbLogo').checked; P.type = $('thumbType').value;
-    thumbSyncInputs(); thumbRefresh(true); scheduleSave();
+    thumbSyncInputs(); thumbRefreshSafe(true); scheduleSave();
   });
 }
 $('thumbGuides').addEventListener('change', () => { $('thumbSafe').hidden = !$('thumbGuides').checked; });
-$('thumbTime').addEventListener('input', debounce(() => { app.project.thumb.time = parseFloat($('thumbTime').value); $('thumbTimeOut').textContent = fmt(app.project.thumb.time); thumbRefresh(true); scheduleSave(); }, 60));
-$('thumbUsePlayhead').onclick = () => { app.project.thumb.time = player.t; thumbSyncInputs(); thumbRefresh(true); };
+$('thumbTime').addEventListener('input', debounce(() => { app.project.thumb.time = parseFloat($('thumbTime').value); $('thumbTimeOut').textContent = fmt(app.project.thumb.time); thumbRefreshSafe(true); scheduleSave(); }, 60));
+$('thumbUsePlayhead').onclick = () => { app.project.thumb.time = player.t; thumbSyncInputs(); thumbRefreshSafe(true); };
 const YT_THUMB_LIMIT = 2 * 1024 * 1024;
 $('thumbSave').onclick = async () => {
-  await thumbRefresh(false);
+  try { await thumbRefresh(false); } catch (e) { return toast('Could not create thumbnail: ' + (e && e.message || 'error')); }
   const P = app.project.thumb, F = thumbFmt();
   const toBlob = (cv, type, q) => new Promise(r => cv.toBlob(r, type, q));
   let blob, note = '';
@@ -1500,24 +1533,33 @@ $('cancelExport').onclick = () => { if (abort) abort.abort(); };
 initInstall({ $, toast, isIOS });
 
 // service worker
+// The worker serves the page and its scripts from one versioned cache, so they always match. As a safety net, if the page
+// and the scripts still disagree (e.g. an old copy of the page came from the browser's HTTP cache), reset the offline copy
+// once and reload rather than run half-wired. Projects live in IndexedDB and are untouched.
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', async () => {
     try {
       const reg = await navigator.serviceWorker.register('./sw.js');
       app.swReg = reg;
-      const showUpdate = (w) => { $('updateBar').hidden = false; $('reloadBtn').onclick = () => w.postMessage({ type: 'SKIP_WAITING' }); };
-      if (reg.waiting && navigator.serviceWorker.controller) showUpdate(reg.waiting);
+      const hadController = !!navigator.serviceWorker.controller;
+      const showUpdate = () => { $('updateBar').hidden = false; };
+      $('reloadBtn').addEventListener('click', () => {
+        app._updateRequested = true; saveNow();
+        if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' }); else location.reload();
+      });
+      if (reg.waiting && hadController) showUpdate();
       reg.addEventListener('updatefound', () => {
         const w = reg.installing;
-        w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdate(w); });
+        w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdate(); });
       });
       let reloading = false;
-      navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloading || !app._updateRequested) return; reloading = true; location.reload(); });
-      $('reloadBtn').addEventListener('click', () => { app._updateRequested = true; saveNow(); });
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloading) return;
+        if (app._updateRequested) { reloading = true; location.reload(); } else if (hadController) showUpdate(); // new version took over: offer a reload (this tab keeps running its own loaded code)
+      });
     } catch (e) { console.warn('Service worker registration failed', e); }
   });
 }
-
 // ---------------------------------------------------------------- templates
 function renderTemplates() {
   const g = $('templateGrid'); g.replaceChildren();
