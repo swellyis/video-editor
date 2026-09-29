@@ -120,7 +120,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .tl-ovlitem.offline{background:repeating-linear-gradient(45deg,#3a1f1d 0 8px,#7a4a1c 8px 16px)}
 .tl-audioitem.voice{background:#6a2c52}
 .tl-textitem.animated span::after{content:" ✦";opacity:.8}
-.tl-clip .cwave{position:absolute;left:0;bottom:16px;height:16px;pointer-events:none;opacity:.9}
 .kfs{position:absolute;inset:0;pointer-events:none;z-index:3}
 .kf{position:absolute;top:50%;width:11px;height:11px;margin:-6px 0 0 -6px;padding:0;border:1px solid #111;background:#ffd24a;transform:rotate(45deg);pointer-events:auto;cursor:pointer;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,.35)}
 .tl-clip .kf{top:14px}

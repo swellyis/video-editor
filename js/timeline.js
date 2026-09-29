@@ -123,7 +123,7 @@ export class Timeline {
       const c = it.clip;
       const n = this._node('c:' + c.id, () => {
         const d = el('div', { class: 'tl-clip' },
-          el('div', { class: 'strip' }), el('canvas', { class: 'cwave' }), el('div', { class: 'xfade' }), el('div', { class: 'kfs' }),
+          el('div', { class: 'strip' }), el('div', { class: 'xfade' }), el('div', { class: 'kfs' }),
           el('div', { class: 'meta' }, el('b'), el('span')),
           el('div', { class: 'badges' }),
           el('div', { class: 'h-l', 'aria-label': 'Trim start' }), el('div', { class: 'h-r', 'aria-label': 'Trim end' }));
@@ -148,7 +148,6 @@ export class Timeline {
       const xf = n.querySelector('.xfade');
       xf.style.width = (it.xIn * this.pps) + 'px'; xf.style.display = it.xIn > 0 ? 'block' : 'none';
       this.renderStrip(n.querySelector('.strip'), c, rec, w);
-      this.renderWave(n.querySelector('.cwave'), c.kind === 'video' && c.hasAudio ? c : null, w, rec, 16, c.speed || 1);
       this.renderKfs(n, c, it.start, it.len);
     }
     // picture-in-picture overlays
