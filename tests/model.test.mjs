@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { newProject, migrate, layout, splitItem, rebaseKeyframes, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen, thumbFormat, THUMB_FORMATS } from '../js/model.js';
+import { newProject, migrate, layout, splitItem, newAudio, clipGain, musicGain, speechIntervals, rebaseKeyframes, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen, thumbFormat, THUMB_FORMATS } from '../js/model.js';
 import { safeName, tarBlob, isTar, readTar, dataURLToBlob, fmt } from '../js/util.js';
 
 const clip = (id, out, extra = {}) => normalizeClip({ id, mediaId: 'm_' + id, name: id, kind: 'video', srcDuration: 60, in: 0, out, ...extra });
@@ -106,4 +106,23 @@ test('thumbnail formats: sizes, auto follows the project aspect, old projects an
   const m = migrate(old); assert.equal(m.thumb.format, 'auto'); assert.equal(m.thumb.type, 'jpg'); assert.equal(m.thumb.text, 'Hi');
   const bad = JSON.parse(JSON.stringify(newProject('b'))); bad.thumb.format = 'x'; bad.thumb.type = 'gif';
   const mb = migrate(bad); assert.equal(mb.thumb.format, 'auto'); assert.equal(mb.thumb.type, 'jpg');
+});
+
+test('mute: muted clips/tracks are silent, do not duck, survive split, and old projects default to sound on', () => {
+  const p = proj(clip('a', 10), clip('b', 10)); p.clips[0].muted = true;
+  let lay = layout(p);
+  assert.equal(clipGain(lay.items[0], 5), 0); assert.ok(clipGain(lay.items[1], 15) > 0);
+  assert.deepEqual(speechIntervals(lay, p).map(x => x.map(Math.round)), [[10, 20]]); // only the unmuted clip counts as speech
+  const mu = newAudio({ id: 'm', duration: 30, name: 'song' }, 0); mu.fadeIn = 0; assert.equal(mu.muted, false);
+  const iv = speechIntervals(lay, p);
+  assert.ok(musicGain(mu, 5, iv, 20) > 0.59, 'no ducking under the muted clip'); assert.ok(musicGain(mu, 15, iv, 20) < 0.3, 'ducks under the unmuted one');
+  mu.muted = true; assert.equal(musicGain(mu, 5, iv, 20), 0);
+  const v = newAudio({ id: 'v', duration: 30, name: 'vo' }, 0); v.voice = true; p.audio = [v]; p.clips.forEach(c => c.muted = true); lay = layout(p);
+  assert.equal(speechIntervals(lay, p).length, 1); v.muted = true; assert.equal(speechIntervals(lay, p).length, 0);
+  const q = proj(clip('s', 10, { muted: true })); const r = splitItem(q, { type: 'clip', id: 's' }, 4);
+  assert.ok(r && q.clips.length === 2 && q.clips.every(c => c.muted));
+  const old = { schema: 5, clips: [{ id: 'c', mediaId: 'x', in: 0, out: 2 }], audio: [{ id: 'a', mediaId: 'y', srcDuration: 5 }], overlays: [] };
+  const m = migrate(old); assert.equal(m.clips[0].muted, false); assert.equal(m.audio[0].muted, false);
+  const bad = migrate({ clips: [{ id: 'c', mediaId: 'x', in: 0, out: 2, muted: 'yes' }], audio: [{ id: 'a', mediaId: 'y', srcDuration: 5, muted: 1 }] });
+  assert.equal(bad.clips[0].muted, false); assert.equal(bad.audio[0].muted, false);
 });

@@ -1,7 +1,13 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
 import { layout, clipLen, audioLen, audioSpan, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes } from './model.js';
-import { clamp, fmt, el, icon } from './util.js';
+import { clamp, fmt, el, icon, toast } from './util.js';
 
+function muteBadge(title, extra = '') {
+  const i = icon('spkOff', 'ico badge-ico mute-badge' + (extra ? ' ' + extra : ''));
+  i.setAttribute('role', 'img'); i.setAttribute('aria-hidden', 'false'); i.setAttribute('aria-label', title);
+  const t = document.createElementNS('http://www.w3.org/2000/svg', 'title'); t.textContent = title; i.prepend(t);
+  return i;
+}
 export class Timeline {
   constructor(root, app) {
     this.root = root; this.app = app;
@@ -14,10 +20,10 @@ export class Timeline {
     this.root.innerHTML = '';
     this.heads = el('div', { class: 'tl-heads' },
       el('div', { class: 'tl-head ruler-head' }, el('span', { text: 'TIME' })),
-      el('div', { class: 'tl-head video-head' }, el('span', { text: 'VIDEO' })),
-      el('div', { class: 'tl-head overlay-head' }, el('span', { text: 'PIP' })),
+      el('div', { class: 'tl-head video-head' }, this.muteBtn('video', 'VIDEO')),
+      el('div', { class: 'tl-head overlay-head' }, this.muteBtn('overlay', 'PIP')),
       el('div', { class: 'tl-head text-head' }, el('span', { text: 'TEXT' })),
-      el('div', { class: 'tl-head audio-head' }, el('span', { text: 'MUSIC' })));
+      el('div', { class: 'tl-head audio-head' }, this.muteBtn('music', 'MUSIC'), this.muteBtn('voice', 'VOICE')));
     this.scroll = el('div', { class: 'tl-scroll', tabindex: '0', 'aria-label': 'Timeline' });
     this.content = el('div', { class: 'tl-content' });
     this.ruler = el('div', { class: 'tl-ruler' });
@@ -42,6 +48,45 @@ export class Timeline {
     new ResizeObserver(() => { if (this.autoFit) this.fit(); else this.render(); }).observe(this.scroll);
   }
   get project() { return this.app.project; }
+  // ---------- track mute buttons (timeline headers) ----------
+  muteBtn(kind, label) {
+    const b = el('button', { class: 'track-mute', type: 'button', 'data-track': kind, 'aria-pressed': 'false', 'aria-label': 'Mute ' + label.toLowerCase() + ' track' },
+      icon('spk', 'ico spk-on'), icon('spkOff', 'ico spk-off'), el('span', { class: 'tm-l', text: label }));
+    b.addEventListener('click', () => this.toggleTrackMute(kind));
+    return b;
+  }
+  /** The items a track button controls (only those that can make sound). */
+  trackItems(kind) {
+    const p = this.project;
+    if (kind === 'video') return p.clips.filter(c => c.kind === 'video' && c.hasAudio);
+    if (kind === 'overlay') return (p.overlays || []).filter(o => o.kind === 'video' && o.hasAudio);
+    if (kind === 'voice') return p.audio.filter(a => a.voice);
+    return p.audio.filter(a => !a.voice);
+  }
+  toggleTrackMute(kind) {
+    const items = this.trackItems(kind), names = { video: 'video track', overlay: 'PiP track', music: 'music track', voice: 'voiceover track' };
+    if (!items.length) { toast(kind === 'video' ? 'No clips with sound on the video track.' : kind === 'overlay' ? 'No picture-in-picture videos with sound yet.' : kind === 'voice' ? 'No voiceover yet. Record one from the Audio tab.' : 'No music yet. Add music from the Audio tab.'); return; }
+    const target = !items.every(x => x.muted);
+    for (const x of items) x.muted = target;
+    this.app.commit((target ? 'Mute ' : 'Unmute ') + names[kind]);
+    toast((target ? 'Muted ' : 'Unmuted ') + names[kind], 1400);
+  }
+  renderHeads() {
+    for (const b of this.heads.querySelectorAll('.track-mute')) {
+      const kind = b.dataset.track, items = this.trackItems(kind), n = items.filter(x => x.muted).length;
+      const all = items.length > 0 && n === items.length, some = n > 0 && !all;
+      const label = { video: 'video', overlay: 'PiP', music: 'music', voice: 'voiceover' }[kind];
+      b.setAttribute('aria-pressed', all ? 'true' : some ? 'mixed' : 'false');
+      b.setAttribute('aria-label', (all ? 'Unmute ' : 'Mute ') + label + ' track');
+      b.title = items.length ? (all ? 'Unmute ' : 'Mute ') + label + ' track' + (some ? ' (some items are muted)' : '') : 'No ' + label + ' audio yet';
+      b.classList.toggle('is-off', !items.length);
+      b.setAttribute('aria-disabled', items.length ? 'false' : 'true');
+      // voice button only appears once there is a voice track; music button is always there
+      const hide = kind === 'voice' && !this.project.audio.some(a => a.voice);
+      b.hidden = hide;
+    }
+    this._audioBtns = this.heads.querySelectorAll('.audio-head .track-mute:not([hidden])').length;
+  }
   x(t) { return 12 + t * this.pps; }
   timeAtClient(cx) { const r = this.content.getBoundingClientRect(); return Math.max(0, (cx - r.left - 12) / this.pps); }
 
@@ -134,12 +179,13 @@ export class Timeline {
       n.setAttribute('aria-label', `${c.kind === 'image' ? 'Image' : 'Clip'} ${it.index + 1}: ${c.name}, ${fmt(it.start)} to ${fmt(it.end)}`);
       n.querySelector('.meta span').textContent = fmt(it.len) + (c.kind === 'video' && c.speed !== 1 ? ' · ' + c.speed + '×' : '');
       const badges = [];
-      if (c.kind === 'video' && (c.muted || !c.hasAudio)) badges.push('🔇');
+      if (c.kind === 'video' && c.muted && c.hasAudio) badges.push('muted');
+      else if (c.kind === 'video' && !c.hasAudio) badges.push('noaudio');
       if (c.transition.type !== 'cut' && (it.index > 0 || c.transition.type === 'fade')) badges.push(c.transition.type === 'crossfade' ? 'xfade' : '◐');
       if (c.color.preset !== 'none') badges.push('◑');
       const bkey = badges.join(' ');
       const bEl = n.querySelector('.badges');
-      if (bEl._key !== bkey) { bEl._key = bkey; bEl.replaceChildren(...badges.flatMap((b, i) => [i ? ' ' : '', b === 'xfade' ? icon('crossfade', 'ico badge-ico') : b])); }
+      if (bEl._key !== bkey) { bEl._key = bkey; bEl.replaceChildren(...badges.flatMap((b, i) => [i ? ' ' : '', b === 'xfade' ? icon('crossfade', 'ico badge-ico') : b === 'muted' ? muteBadge('Muted') : b === 'noaudio' ? muteBadge('No audio in this clip', 'dim') : b])); }
       const xf = n.querySelector('.xfade');
       xf.style.width = (it.xIn * this.pps) + 'px'; xf.style.display = it.xIn > 0 ? 'block' : 'none';
       this.renderStrip(n.querySelector('.strip'), c, rec, w);
@@ -148,7 +194,7 @@ export class Timeline {
     // picture-in-picture overlays
     const ovs = p.overlays || [];
     const ol = this.lanes(ovs.map(o => ({ id: o.id, s: o.start, e: o.start + overlayLen(o) })));
-    this.oTrack.style.height = Math.max(34, ol.count * 30 + 6) + 'px';
+    this.oTrack.style.height = Math.max(44, ol.count * 30 + 6) + 'px';
     this.oTrack.classList.toggle('empty', !ovs.length);
     for (const o of ovs) {
       const n = this._node('o:' + o.id, () => {
@@ -160,10 +206,10 @@ export class Timeline {
       n._id = o.id; n.dataset.id = o.id;
       n.style.left = this.x(o.start) + 'px'; n.style.width = Math.max(8, overlayLen(o) * this.pps) + 'px';
       n.style.top = (3 + ol.lane.get(o.id) * 30) + 'px';
-      const lab = n.querySelector('span'), keyed = !!(o.chroma && o.chroma.enabled), lk = keyed + '|' + o.name;
-      if (lab._key !== lk) { lab._key = lk; lab.replaceChildren(icon(keyed ? 'key' : 'pip', 'ico item-ico'), ' ' + o.name); }
+      const lab = n.querySelector('span'), keyed = !!(o.chroma && o.chroma.enabled), om = o.kind === 'video' && o.hasAudio && o.muted, lk = keyed + '|' + o.name + '|' + om;
+      if (lab._key !== lk) { lab._key = lk; lab.replaceChildren(icon(keyed ? 'key' : 'pip', 'ico item-ico'), ' ' + o.name, ...(om ? [' ', muteBadge('Muted')] : [])); }
       n.classList.toggle('sel', sel.type === 'overlay' && sel.id === o.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
-      n.setAttribute('aria-label', `Overlay ${o.name}, ${fmt(o.start)} to ${fmt(o.start + overlayLen(o))}`);
+      n.setAttribute('aria-label', `Overlay ${o.name}${om ? ' (muted)' : ''}, ${fmt(o.start)} to ${fmt(o.start + overlayLen(o))}`);
       n.classList.toggle('offline', !this.app.media.peek(o.mediaId));
       this.renderKfs(n, o, o.start, overlayLen(o));
     }
@@ -188,7 +234,8 @@ export class Timeline {
     }
     // audio lanes
     const al = this.lanes(p.audio.map(a => ({ id: a.id, s: a.start, e: a.start + audioSpan(a, lay.total) })));
-    this.aTrack.style.height = Math.max(42, al.count * 38 + 6) + 'px';
+    this.renderHeads();
+    this.aTrack.style.height = Math.max(44 * (this._audioBtns || 1), al.count * 38 + 6) + 'px';
     for (const a of p.audio) {
       const n = this._node('a:' + a.id, () => {
         const d = el('div', { class: 'tl-item tl-audioitem' }, el('canvas', { class: 'wave' }), el('div', { class: 'seams' }), el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
@@ -201,13 +248,15 @@ export class Timeline {
       const w = Math.max(8, span * this.pps);
       n.style.left = this.x(a.start) + 'px'; n.style.width = w + 'px';
       n.style.top = (3 + al.lane.get(a.id) * 38) + 'px';
-      n.querySelector('span').textContent = (a.voice ? '🎙 ' : '♪ ') + a.name + (a.loop ? ' · loop' : '') + (a.duck ? ' · duck' : '');
+      const alab = n.querySelector('span'), atxt = (a.voice ? '🎙 ' : '♪ ') + a.name + (a.loop ? ' · loop' : '') + (a.duck && !a.muted ? ' · duck' : '') + '|' + !!a.muted;
+      if (alab._key !== atxt) { alab._key = atxt; alab.replaceChildren(...(a.muted ? [muteBadge('Muted'), ' '] : []), atxt.slice(0, atxt.lastIndexOf('|'))); }
+      n.classList.toggle('muted', !!a.muted);
       n.classList.toggle('voice', !!a.voice);
       n.classList.toggle('loop', !!a.loop);
       const seams = n.querySelector('.seams'), sk = a.loop ? loopSeams(a, lay.total).map(t => ((t - a.start) * this.pps).toFixed(1)).join(',') : '';
       if (seams._key !== sk) { seams._key = sk; seams.replaceChildren(...(sk ? sk.split(',').slice(0, 400).map(x => { const i = document.createElement('i'); i.style.left = x + 'px'; return i; }) : [])); }
       n.classList.toggle('sel', sel.type === 'audio' && sel.id === a.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
-      n.setAttribute('aria-label', `${a.voice ? 'Voice' : 'Music'} ${a.name}${a.loop ? ' (loop)' : ''}, ${fmt(a.start)} to ${fmt(a.start + span)}`);
+      n.setAttribute('aria-label', `${a.voice ? 'Voice' : 'Music'} ${a.name}${a.loop ? ' (loop)' : ''}${a.muted ? ' (muted)' : ''}, ${fmt(a.start)} to ${fmt(a.start + span)}`);
       n.classList.toggle('offline', !this.app.media.peek(a.mediaId));
       this.renderWave(n.querySelector('.wave'), a, w, null, 30, 1, span);
     }

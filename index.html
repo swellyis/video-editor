@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="ve-build" content="v0a93e13e5e" />
+  <meta name="ve-build" content="v454b530b26" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
@@ -157,7 +157,7 @@
             <div class="segmented six" data-bind="clip.speed" data-num="1"><button data-value="0.25" type="button">¼×</button><button data-value="0.5" type="button">½×</button><button data-value="1" type="button">1×</button><button data-value="1.5" type="button">1.5×</button><button data-value="2" type="button">2×</button><button data-value="4" type="button">4×</button></div>
             <div class="slider-row"><label>Fine speed</label><input type="range" min="0.25" max="4" step="0.05" data-bind="clip.speed" /><output data-out="clip.speed" data-fmt="x"></output></div>
             <div class="slider-row"><label>Volume</label><input type="range" min="0" max="2" step="0.05" data-bind="clip.volume" /><output data-out="clip.volume" data-fmt="pct"></output></div>
-            <label class="check"><input type="checkbox" data-bind="clip.muted" /> Mute this clip</label>
+            <button type="button" class="mute-btn" data-toggle="clip.muted" aria-pressed="false"><svg class="ico spk-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 5.2a3.6 3.6 0 010 5.6M13 3.4a6.2 6.2 0 010 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><svg class="ico spk-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 6l4 4M15 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mute this clip</span><span class="mb-state" aria-hidden="true">Sound on</span></button>
             <div class="field-row" style="margin-top:10px">
               <label><span class="label">Audio fade in (s)</span><input class="field mono" type="number" min="0" max="10" step="0.1" data-bind="clip.fadeIn" data-commit="change" /></label>
               <label><span class="label">Audio fade out (s)</span><input class="field mono" type="number" min="0" max="10" step="0.1" data-bind="clip.fadeOut" data-commit="change" /></label>
@@ -292,6 +292,7 @@
               <label><span class="label">Trim out (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="audio.out" data-commit="change" /></label>
             </div>
             <div class="loop-row"><label class="switch"><input type="checkbox" data-bind="audio.loop" id="audioLoop" /><span class="switch-ui" aria-hidden="true"></span> <span class="switch-label">Loop</span></label><span class="hint" id="loopHint"></span></div>
+            <button type="button" class="mute-btn" data-toggle="audio.muted" aria-pressed="false"><svg class="ico spk-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 5.2a3.6 3.6 0 010 5.6M13 3.4a6.2 6.2 0 010 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><svg class="ico spk-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 6l4 4M15 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mute this track</span><span class="mb-state" aria-hidden="true">Sound on</span></button>
             <div class="slider-row"><label>Volume</label><input type="range" min="0" max="1.5" step="0.01" data-bind="audio.volume" /><output data-out="audio.volume" data-fmt="pct"></output></div>
             <div class="field-row" style="margin-top:10px">
               <label><span class="label">Fade in (s)</span><input class="field mono" type="number" min="0" max="20" step="0.1" data-bind="audio.fadeIn" data-commit="change" /></label>
@@ -354,7 +355,7 @@
           </section>
           <section class="section" id="ovlSoundSection">
             <h2 class="sh">Sound</h2>
-            <label class="check"><input type="checkbox" data-bind="ovl.muted" /> Mute overlay audio</label>
+            <button type="button" class="mute-btn" data-toggle="ovl.muted" aria-pressed="false"><svg class="ico spk-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 5.2a3.6 3.6 0 010 5.6M13 3.4a6.2 6.2 0 010 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><svg class="ico spk-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 6l4 4M15 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mute overlay audio</span><span class="mb-state" aria-hidden="true">Sound on</span></button>
             <div class="slider-row"><label>Volume</label><input type="range" min="0" max="2" step="0.05" data-bind="ovl.volume" /><output data-out="ovl.volume" data-fmt="pct"></output></div>
           </section>
           <section class="section">

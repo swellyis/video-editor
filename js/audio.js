@@ -208,7 +208,7 @@ export function audioSegments(project, lay) {
     segs.push({ kind: 'overlay', mediaId: o.mediaId, name: o.name, t0: o.start, t1: Math.min(total, o.start + overlayLen(o)), srcIn: o.in, speed: o.speed || 1, gain: (t) => overlayGain(o, t) });
   }
   for (const a of project.audio || []) {
-    if (a.volume <= 0 || a.start >= total) continue;
+    if (a.muted || a.volume <= 0 || a.start >= total) continue;
     const iv = duckIntervalsFor(a, lay, project, speech);
     const gain = (t) => musicGain(a, t, iv, total);
     const end = Math.min(total, a.start + audioSpan(a, total));

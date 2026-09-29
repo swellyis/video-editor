@@ -75,14 +75,14 @@ export function sanitizeProject(p) {
   T.type = oneOf(T.type, ['jpg', 'png'], 'jpg'); T.position = oneOf(T.position, ['left', 'center', 'right', 'top', 'bottom'], 'left');
   T.pip = T.pip !== false; T.logo = T.logo !== false;
   for (const c of p.clips) {
-    c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
+    c.muted = c.muted === true; c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
     c.srcDuration = num(c.srcDuration, 0, 1e6, 1); c.in = num(c.in, 0, 1e6, 0); c.out = num(c.out, c.in + 0.01, 1e6, c.in + 1);
     c.fadeIn = num(c.fadeIn, 0, 60, 0); c.fadeOut = num(c.fadeOut, 0, 60, 0);
     c.transition.duration = num(c.transition.duration, 0, 10, 0.6);
     c.transform.zoom = num(c.transform.zoom, 0.05, 20, 1);
   }
   for (const o of p.overlays) {
-    o.speed = num(o.speed, 0.25, 4, 1); o.volume = num(o.volume, 0, 2, 1); o.opacity = num(o.opacity, 0, 1, 1);
+    o.muted = o.muted !== false; o.speed = num(o.speed, 0.25, 4, 1); o.volume = num(o.volume, 0, 2, 1); o.opacity = num(o.opacity, 0, 1, 1);
     o.w = num(o.w, 0.01, 4, 0.36); o.scale = num(o.scale, 0.05, 20, 1); o.start = num(o.start, 0, 1e6, 0);
     o.in = num(o.in, 0, 1e6, 0); o.out = num(o.out, o.in + 0.01, 1e6, o.in + 1);
   }
@@ -92,7 +92,7 @@ export function sanitizeProject(p) {
     if (typeof t.text !== 'string') t.text = String(t.text ?? '');
   }
   for (const a of p.audio) {
-    a.volume = num(a.volume, 0, 2, 0.6); a.duckLevel = num(a.duckLevel, 0, 1, 0.3); a.start = num(a.start, 0, 1e6, 0);
+    a.muted = a.muted === true; a.volume = num(a.volume, 0, 2, 0.6); a.duckLevel = num(a.duckLevel, 0, 1, 0.3); a.start = num(a.start, 0, 1e6, 0);
     a.in = num(a.in, 0, 1e6, 0); a.out = num(a.out, a.in + 0.01, 1e6, a.in + 1); a.loopLen = num(a.loopLen, 0, 1e6, 0); a.phase = num(a.phase, 0, 1e6, 0);
     a.fadeIn = num(a.fadeIn, 0, 60, 0); a.fadeOut = num(a.fadeOut, 0, 60, 0);
   }
@@ -135,7 +135,7 @@ export function newText(start, dur = 4, text = 'Your text here') {
 export function newAudio(media, start = 0) {
   return {
     id: uid('aud'), mediaId: media.id, name: (media.name || 'Music').replace(/\.[^/.]+$/, ''), srcDuration: media.duration,
-    start, in: 0, out: media.duration, volume: 0.6, fadeIn: 1, fadeOut: 2, duck: true, duckLevel: 0.3, loop: false, voice: false,
+    start, in: 0, out: media.duration, volume: 0.6, muted: false, fadeIn: 1, fadeOut: 2, duck: true, duckLevel: 0.3, loop: false, voice: false,
     loopLen: 0, // looped length on the timeline in seconds (0 = repeat until the end of the video)
     phase: 0, // looped tracks: offset into the loop at the track start (set when a looped track is split)
   };
@@ -400,7 +400,7 @@ export function speechIntervals(lay, project, excludeId) {
   if (project) {
     for (const o of project.overlays || []) if (o.kind === 'video' && !o.muted && o.hasAudio && o.volume > 0.02) iv.push([o.start, o.start + overlayLen(o)]);
     // a voice track drives ducking of OTHER tracks only: never of itself
-    for (const a of project.audio || []) if (a.voice && a.volume > 0.02 && a.id !== excludeId) iv.push([a.start, a.start + audioSpan(a, lay.total)]);
+    for (const a of project.audio || []) if (a.voice && !a.muted && a.volume > 0.02 && a.id !== excludeId) iv.push([a.start, a.start + audioSpan(a, lay.total)]);
   }
   // merge
   iv.sort((a, b) => a[0] - b[0]);
@@ -425,6 +425,7 @@ export function duckIntervalsFor(a, lay, project, shared) {
 }
 /** Music gain at sequence time t */
 export function musicGain(a, t, intervals, total) {
+  if (a.muted) return 0;
   const len = audioSpan(a, total);
   if (t < a.start || t > a.start + len) return 0;
   const local = t - a.start, rem = Math.min(a.start + len, total ?? Infinity) - t;

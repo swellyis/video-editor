@@ -311,7 +311,7 @@ document.addEventListener('click', (e) => {
     return;
   }
   const tg = e.target.closest('[data-toggle]');
-  if (tg) { setVal(tg.dataset.toggle, !getVal(tg.dataset.toggle)); app.commit('Toggle'); return; }
+  if (tg) { setVal(tg.dataset.toggle, !getVal(tg.dataset.toggle)); app.commit(tg.classList.contains('mute-btn') ? (getVal(tg.dataset.toggle) ? 'Mute' : 'Unmute') : 'Toggle'); return; }
   const act = e.target.closest('[data-action]');
   if (act && !act.disabled) { actions[act.dataset.action] && actions[act.dataset.action](); }
 });
@@ -345,6 +345,11 @@ function fillInspector() {
     else inp.value = v;
   }
   for (const t of qsa('[data-toggle]')) t.classList.toggle('on', !!getVal(t.dataset.toggle));
+  for (const t of qsa('.mute-btn[data-toggle]')) {
+    const m = !!getVal(t.dataset.toggle);
+    t.setAttribute('aria-pressed', m ? 'true' : 'false');
+    t.querySelector('.mb-state').textContent = m ? 'Muted' : 'Sound on';
+  }
   fillOutputs();
   // clip panel
   const c = selected('clip');
