@@ -373,7 +373,8 @@ export class Compositor {
         kOpacity = A.opacity;
       }
       const fit = c.fit && c.fit !== 'inherit' ? c.fit : s.fit;
-      const prog = it.len > 0 ? (t - it.start) / it.len : 0;
+      const tr0 = c.transform || {}, kb0 = tr0.kbFrom ?? 0, kb1 = tr0.kbTo ?? 1; // Ken Burns range (split clips carry a sub-range)
+      const prog = kb0 + (kb1 - kb0) * (it.len > 0 ? clamp((t - it.start) / it.len, 0, 1) : 0);
       const col = effectiveColor(project, c);
       const a = alpha * black * clamp(kOpacity, 0, 1);
       if (a <= 0.001) continue;

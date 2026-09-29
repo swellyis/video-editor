@@ -3,8 +3,8 @@
 import { layout, activeAt, sourceTime, outputDims, overlaysAt, overlaySourceTime } from './model.js';
 import { Compositor, ensureFonts } from './render.js';
 import { Player } from './player.js';
-import { mixAudio } from './audio.js';
-import { loadMediabunny, seekVideo } from './media.js';
+import { mixChunks, hasAudio } from './audio.js';
+import { loadMediabunny, seekVideo, gifFrameAt } from './media.js';
 
 export class ExportCancelled extends Error { constructor() { super('Export cancelled'); this.name = 'ExportCancelled'; } }
 
@@ -42,6 +42,49 @@ export async function capabilities(project) {
   return caps;
 }
 
+// ---------- output sinks: stream the encoded file to disk instead of assembling it in memory ----------
+const OPFS_PREFIX = 'export-';
+export const canStreamToOPFS = () => !!(navigator.storage && navigator.storage.getDirectory && window.FileSystemFileHandle && 'createWritable' in FileSystemFileHandle.prototype);
+/** Remove leftover export files from the origin-private file system. */
+export async function cleanupExports(keep) {
+  if (!canStreamToOPFS()) return;
+  try {
+    const dir = await navigator.storage.getDirectory();
+    for await (const [name] of dir.entries()) if (name.startsWith(OPFS_PREFIX) && name !== keep) await dir.removeEntry(name).catch(() => { });
+  } catch { }
+}
+/**
+ * Create where the export is written. kinds:
+ *  - 'file':   a FileSystemFileHandle the user picked (showSaveFilePicker) — written directly to their disk
+ *  - 'opfs':   a temporary file in the origin-private file system (disk-backed, then downloaded from there)
+ *  - 'memory': in-memory buffer (fallback)
+ * Returns { kind, writable?, finish(): Promise<Blob|File>, abort() }.
+ */
+export async function createSink({ handle, ext = 'mp4', allowOPFS = true } = {}) {
+  let fh = handle, kind = handle ? 'file' : 'memory', name = null;
+  if (!fh && allowOPFS && canStreamToOPFS()) {
+    try {
+      const dir = await navigator.storage.getDirectory();
+      name = OPFS_PREFIX + Date.now() + '.' + ext;
+      await cleanupExports(); // only one export kept at a time
+      fh = await dir.getFileHandle(name, { create: true });
+      kind = 'opfs';
+    } catch (e) { console.info('OPFS unavailable, exporting in memory:', e.message); fh = null; kind = 'memory'; }
+  }
+  if (!fh) return { kind: 'memory', finish: async (blob) => blob, abort: async () => { } };
+  let writable;
+  try { writable = await fh.createWritable(); }
+  catch (e) { if (kind === 'file') throw e; return { kind: 'memory', finish: async (blob) => blob, abort: async () => { } }; }
+  return {
+    kind, handle: fh, name, writable,
+    finish: async () => { try { await writable.close(); } catch { /* already closed by the muxer */ } return fh.getFile(); },
+    abort: async () => {
+      try { await writable.abort(); } catch { }
+      if (kind === 'opfs') try { const dir = await navigator.storage.getDirectory(); await dir.removeEntry(name); } catch { }
+    },
+  };
+}
+
 function makeProgress(onProgress) {
   const t0 = performance.now(); let lastEta = null;
   return (frac, stage, extra = {}) => {
@@ -64,7 +107,7 @@ class ElementReader {
 }
 
 /** Fast frame-accurate export. Throws on unsupported configurations so the caller can fall back. */
-async function exportFast(project, media, { onProgress, signal, format }) {
+async function exportFast(project, media, { onProgress, signal, format, sink, onWarn }) {
   const mb = await loadMediabunny();
   const lay = layout(project);
   const { width: W, height: H } = outputDims(project);
@@ -85,11 +128,10 @@ async function exportFast(project, media, { onProgress, signal, format }) {
   }
   if (!vcodec) throw new Error('No WebCodecs video encoder available');
 
-  progress(0, 'Mixing audio…');
-  const mixed = await mixAudio(project, lay, media, { onStatus: (s) => progress(0.01, s) });
-  check();
+  progress(0, 'Preparing…');
+  const withAudio = hasAudio(project, lay);
   let acodec = null;
-  if (mixed) {
+  if (withAudio) {
     const cand = container === 'mp4' ? ['aac', 'opus'] : ['opus', 'vorbis'];
     for (const c of cand) if (await mb.canEncodeAudio(c, { numberOfChannels: 2, sampleRate: 48000, bitrate: 192000 })) { acodec = c; break; }
     if (!acodec) throw new Error('No WebCodecs audio encoder available');
@@ -99,14 +141,16 @@ async function exportFast(project, media, { onProgress, signal, format }) {
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d', { alpha: false });
   const comp = new Compositor();
+  // Streamed sinks write straight to disk (MP4 index at the end, no seeking back through a giant buffer).
+  const streamed = !!(sink && sink.writable);
   const output = new mb.Output({
-    format: container === 'mp4' ? new mb.Mp4OutputFormat({ fastStart: 'in-memory' }) : new mb.WebMOutputFormat(),
-    target: new mb.BufferTarget(),
+    format: container === 'mp4' ? new mb.Mp4OutputFormat({ fastStart: streamed ? false : 'in-memory' }) : new mb.WebMOutputFormat(),
+    target: streamed ? new mb.StreamTarget(sink.writable, { chunked: true, chunkSize: 8 * 1024 * 1024 }) : new mb.BufferTarget(),
   });
   const vsrc = new mb.CanvasSource(canvas, { codec: vcodec, bitrate, keyFrameInterval: 2, latencyMode: 'quality' });
   output.addVideoTrack(vsrc, { frameRate: fps });
   let asrc = null;
-  if (mixed) { asrc = new mb.AudioBufferSource({ codec: acodec, bitrate: 192000 }); output.addAudioTrack(asrc); }
+  if (withAudio) { asrc = new mb.AudioBufferSource({ codec: acodec, bitrate: 192000 }); output.addAudioTrack(asrc); }
   output.setMetadataTags && output.setMetadataTags({ title: project.youtube.title || project.name });
   await output.start();
 
@@ -134,9 +178,20 @@ async function exportFast(project, media, { onProgress, signal, format }) {
       lastFrame.set(o.id, k);
     }
   }
-  for (const o of project.overlays || []) if (o.kind === 'image') { const im = await media.image(o.mediaId).catch(() => null); if (im) images.set(o.mediaId, im); }
+  const gifs = new Map();
+  const loadImg = async (id) => {
+    if (images.has(id)) return;
+    const im = await media.image(id).catch(() => null); if (im) images.set(id, im);
+    if (media.isAnimated && media.isAnimated(id)) { const g = await media.gif(id); if (g && g.frames.length) gifs.set(id, g); }
+  };
+  for (const o of project.overlays || []) if (o.kind === 'image') await loadImg(o.mediaId);
   // images & logo
-  for (const it of lay.items) if (it.clip.kind === 'image') { const im = await media.image(it.clip.mediaId).catch(() => null); if (im) images.set(it.clip.mediaId, im); }
+  for (const it of lay.items) if (it.clip.kind === 'image') await loadImg(it.clip.mediaId);
+  const imageSrc = (id, at) => {
+    const g = gifs.get(id);
+    if (g) { const f = gifFrameAt(g, at); return { img: f.img, w: f.img.width, h: f.img.height }; }
+    const im = images.get(id); return im ? { img: im.img, w: im.w, h: im.h } : null;
+  };
   const logo = project.logo ? await media.image(project.logo.mediaId).catch(() => null) : null;
 
   const readers = new Map();
@@ -170,16 +225,15 @@ async function exportFast(project, media, { onProgress, signal, format }) {
     }
   };
 
-  let audioFed = 0; const SR = mixed ? mixed.sampleRate : 48000;
+  // audio is mixed chunk by chunk, just ahead of the video frames (flat memory for any length)
+  const chunks = withAudio ? mixChunks(project, lay, media, { onWarn }) : null;
+  let audioFedSec = 0, audioDone = !withAudio;
   const feedAudio = async (untilSec) => {
-    if (!asrc) return;
-    const until = Math.min(mixed.length, Math.ceil(untilSec * SR));
-    while (audioFed < until) {
-      const n = Math.min(SR, until - audioFed);
-      const chunk = new AudioBuffer({ numberOfChannels: mixed.numberOfChannels, length: n, sampleRate: SR });
-      for (let c = 0; c < mixed.numberOfChannels; c++) chunk.copyToChannel(mixed.getChannelData(c).subarray(audioFed, audioFed + n), c);
-      await asrc.add(chunk);
-      audioFed += n;
+    while (!audioDone && audioFedSec < untilSec) {
+      const r = await chunks.next();
+      if (r.done) { audioDone = true; break; }
+      await asrc.add(r.value);
+      audioFedSec += r.value.duration;
     }
   };
 
@@ -191,7 +245,7 @@ async function exportFast(project, media, { onProgress, signal, format }) {
       const sources = new Map();
       for (const a of plan[k]) {
         const c = a.it.clip;
-        if (c.kind === 'image') { const im = images.get(c.mediaId); if (im) sources.set(c.id, { img: im.img, w: im.w, h: im.h }); continue; }
+        if (c.kind === 'image') { const src = imageSrc(c.mediaId, (k + 0.001) / fps - a.it.start + (c.in || 0)); if (src) sources.set(c.id, src); continue; }
         let r = readers.get(c.id);
         if (!r) { r = await openReader(c); readers.set(c.id, r); }
         const f = await r.next();
@@ -199,7 +253,7 @@ async function exportFast(project, media, { onProgress, signal, format }) {
         if (lastFrame.get(c.id) === k) { r.close(); readers.delete(c.id); }
       }
       for (const o of planO[k]) {
-        if (o.kind === 'image') { const im = images.get(o.mediaId); if (im) sources.set(o.id, { img: im.img, w: im.w, h: im.h }); continue; }
+        if (o.kind === 'image') { const src = imageSrc(o.mediaId, (k + 0.001) / fps - o.start + (o.in || 0)); if (src) sources.set(o.id, src); continue; }
         let r = readers.get(o.id);
         if (!r) { r = await openReader(o); readers.set(o.id, r); }
         const f = await r.next();
@@ -208,29 +262,30 @@ async function exportFast(project, media, { onProgress, signal, format }) {
       }
       comp.render(ctx, W, H, project, lay, (k + 0.001) / fps, (it) => sources.get(it.clip.id) || null, { getLogo: () => logo, getOverlaySource: (o) => sources.get(o.id) || null });
       await vsrc.add(t, 1 / fps);
-      await feedAudio(t + 1);
+      await feedAudio(t + 2);
       if (k % 3 === 0 || k === N - 1) {
         const el = (performance.now() - tStart) / 1000;
         progress(0.04 + 0.94 * ((k + 1) / N), `Rendering frame ${k + 1} of ${N}`, { speed: el > 0 ? (k + 1) / fps / el : 0, method: 'fast' });
       }
     }
-    await feedAudio(total + 1);
+    await feedAudio(total + 20);
     check();
     progress(0.99, 'Finalizing file…');
     vsrc.close(); asrc && asrc.close();
     await output.finalize();
   } catch (e) {
     for (const r of readers.values()) r.close();
+    if (chunks) chunks.return().catch(() => { });
     try { await output.cancel(); } catch { }
     throw e;
   }
   const mime = container === 'mp4' ? 'video/mp4' : 'video/webm';
-  const blob = new Blob([output.target.buffer], { type: mime });
-  return { blob, mime, ext: container, method: 'WebCodecs (' + vcodec.toUpperCase() + (acodec ? ' + ' + acodec.toUpperCase() : '') + ')', width: W, height: H, fps, duration: total };
+  const blob = streamed ? await sink.finish() : new Blob([output.target.buffer], { type: mime });
+  return { blob, mime, ext: container, streamed: streamed ? sink.kind : null, method: 'WebCodecs (' + vcodec.toUpperCase() + (acodec ? ' + ' + acodec.toUpperCase() : '') + ')', width: W, height: H, fps, duration: total };
 }
 
 /** Real-time fallback using MediaRecorder. */
-async function exportRealtime(project, media, { onProgress, signal, format }) {
+async function exportRealtime(project, media, { onProgress, signal, format, sink, onWarn }) {
   if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) throw new Error('This browser cannot record video (no MediaRecorder).');
   const lay = layout(project);
   const { width: W, height: H } = outputDims(project);
@@ -241,9 +296,12 @@ async function exportRealtime(project, media, { onProgress, signal, format }) {
   if (format === 'webm') types = types.filter(t => t.includes('webm')).concat(types.filter(t => !t.includes('webm')));
   if (format === 'mp4' && !types.some(t => t.includes('mp4'))) throw new Error('MP4 recording is not supported in this browser — choose WebM.');
   const mime = types[0] || '';
-  progress(0, 'Mixing audio…');
-  const mixed = await mixAudio(project, lay, media, { onStatus: s => progress(0.01, s) });
-  if (signal && signal.aborted) throw new ExportCancelled();
+  progress(0, 'Preparing audio…');
+  const withAudio = hasAudio(project, lay);
+  const chunks = withAudio ? mixChunks(project, lay, media, { onWarn }) : null;
+  const ahead = []; // pre-mixed chunks waiting to be scheduled
+  if (chunks) for (let i = 0; i < 2; i++) { const r = await chunks.next(); if (r.done) break; ahead.push(r.value); }
+  if (signal && signal.aborted) { chunks && chunks.return().catch(() => { }); throw new ExportCancelled(); }
   await ensureFonts();
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
   canvas.style.cssText = 'position:fixed;left:-99999px;top:0;width:2px;height:2px;';
@@ -255,14 +313,16 @@ async function exportRealtime(project, media, { onProgress, signal, format }) {
   const ac = new AC({ sampleRate: 48000 });
   await ac.resume();
   const stream = canvas.captureStream(fps);
-  let bsrc = null;
-  if (mixed) {
-    const dest = ac.createMediaStreamDestination();
-    bsrc = ac.createBufferSource(); bsrc.buffer = mixed; bsrc.connect(dest);
+  let dest = null;
+  if (withAudio) {
+    dest = ac.createMediaStreamDestination();
     dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
   }
   const rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: bitrateFor(W, H, fps, project.settings.quality), audioBitsPerSecond: 192000 });
-  const chunks = []; rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  // recorded data goes straight to disk when a sink is available; otherwise it is kept in memory
+  const parts = []; let writeChain = Promise.resolve();
+  const streamed = !!(sink && sink.writable);
+  rec.ondataavailable = e => { if (!(e.data && e.data.size)) return; if (streamed) { const d = e.data; writeChain = writeChain.then(() => sink.writable.write(d)); } else parts.push(e.data); };
   const stopped = new Promise(r => rec.addEventListener('stop', r, { once: true }));
   // preroll first frame
   player.sync(0, false);
@@ -270,7 +330,20 @@ async function exportRealtime(project, media, { onProgress, signal, format }) {
   player.render();
   rec.start(1000);
   const t0 = ac.currentTime + 0.1;
-  if (bsrc) bsrc.start(t0);
+  // schedule audio chunk by chunk; keep ~2 chunks queued ahead of the clock
+  let schedAt = 0, feeding = false, audioEnded = !withAudio;
+  const schedule = (buf) => { const s = ac.createBufferSource(); s.buffer = buf; s.connect(dest); s.start(t0 + schedAt); schedAt += buf.duration; };
+  while (ahead.length) schedule(ahead.shift());
+  const topUp = async () => {
+    if (feeding || audioEnded) return; feeding = true;
+    try {
+      while (!audioEnded && schedAt - Math.max(0, ac.currentTime - t0) < 15) {
+        const r = await chunks.next();
+        if (r.done) { audioEnded = true; break; }
+        schedule(r.value);
+      }
+    } finally { feeding = false; }
+  };
   let cancelled = false;
   await new Promise((resolve) => {
     const step = () => {
@@ -278,6 +351,7 @@ async function exportRealtime(project, media, { onProgress, signal, format }) {
       const t = Math.max(0, ac.currentTime - t0);
       if (t >= total) { player.t = total; player.render(); return resolve(); }
       player.t = t; player.sync(t, true); player.render();
+      topUp();
       progress(0.02 + 0.97 * (t / total), `Recording in real time · ${Math.round(t)}s of ${Math.round(total)}s`, { method: 'realtime', speed: 1 });
       if (document.hidden) setTimeout(step, 1000 / fps); else requestAnimationFrame(step);
     };
@@ -287,9 +361,13 @@ async function exportRealtime(project, media, { onProgress, signal, format }) {
   rec.stop(); await stopped;
   stream.getTracks().forEach(t => t.stop());
   player.destroy(); canvas.remove(); ac.close().catch(() => { });
+  if (chunks) chunks.return().catch(() => { });
   if (cancelled) throw new ExportCancelled();
   const outMime = (rec.mimeType || mime || 'video/webm').split(';')[0];
-  return { blob: new Blob(chunks, { type: outMime }), mime: outMime, ext: extFor(outMime), method: 'MediaRecorder (real time)', width: W, height: H, fps, duration: total };
+  let blob;
+  if (streamed) { await writeChain; await sink.writable.close(); blob = await sink.finish(); }
+  else blob = new Blob(parts, { type: outMime });
+  return { blob, streamed: streamed ? sink.kind : null, mime: outMime, ext: extFor(outMime), method: 'MediaRecorder (real time)', width: W, height: H, fps, duration: total };
 }
 
 /**
@@ -297,8 +375,15 @@ async function exportRealtime(project, media, { onProgress, signal, format }) {
  */
 export async function runExport(project, media, options = {}) {
   const engine = options.engine || 'auto';
+  // options.makeSink(ext) -> sink (see createSink); called once per attempt so a failed attempt's partial file is discarded
+  const attempt = async (fn, ext) => {
+    const sink = options.makeSink ? await options.makeSink(ext) : null;
+    try { return await fn(project, media, { ...options, sink }); }
+    catch (e) { if (sink) await sink.abort(); throw e; }
+  };
+  const ext = options.format === 'webm' ? 'webm' : 'mp4';
   if (engine !== 'realtime' && typeof VideoEncoder !== 'undefined') {
-    try { return await exportFast(project, media, options); }
+    try { return await attempt(exportFast, ext); }
     catch (e) {
       if (e instanceof ExportCancelled) throw e;
       if (engine === 'fast') throw e;
@@ -306,5 +391,5 @@ export async function runExport(project, media, options = {}) {
       options.onFallback && options.onFallback(e.message);
     }
   }
-  return exportRealtime(project, media, options);
+  return attempt(exportRealtime, ext);
 }

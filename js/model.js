@@ -1,7 +1,7 @@
 // Project data model, timeline layout, edit operations, audio envelopes, history.
 import { uid, clamp, deepClone, fmt } from './util.js';
 
-export const SCHEMA = 3;
+export const SCHEMA = 4;
 export const MIN_CLIP = 0.1; // seconds on timeline
 
 export const PRESETS = {
@@ -25,7 +25,7 @@ export const FONTS = {
 export const RATIOS = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5 };
 
 export const defaultColor = () => ({ preset: 'none', brightness: 0, contrast: 0, saturation: 0, temperature: 0, vignette: 0 });
-export const defaultTransform = () => ({ zoom: 1, x: 0, y: 0, rotate: 0, angle: 0, flipH: false, flipV: false, kenBurns: 'none' });
+export const defaultTransform = () => ({ zoom: 1, x: 0, y: 0, rotate: 0, angle: 0, flipH: false, flipV: false, kenBurns: 'none', kbFrom: 0, kbTo: 1 });
 export const defaultChroma = () => ({ enabled: false, color: '#00ff00', similarity: 0.4, smoothness: 0.15, spill: 0.5 });
 
 export function newProject(name = 'Untitled project') {
@@ -72,7 +72,8 @@ export function normalizeClip(c) {
 
 export function newClipFromMedia(media, settings) {
   const isImg = media.kind === 'image';
-  const dur = isImg ? (settings?.imageDuration || 4) : media.duration;
+  // animated GIFs default to at least one full loop (max 60 s)
+  const dur = isImg ? Math.max(settings?.imageDuration || 4, media.animated ? Math.min(60, media.duration || 0) : 0) : media.duration;
   return normalizeClip({
     kind: isImg ? 'image' : 'video', mediaId: media.id, name: media.name.replace(/\.[^/.]+$/, ''),
     srcDuration: isImg ? 3600 : media.duration, width: media.width, height: media.height,
@@ -92,6 +93,8 @@ export function newAudio(media, start = 0) {
   return {
     id: uid('aud'), mediaId: media.id, name: (media.name || 'Music').replace(/\.[^/.]+$/, ''), srcDuration: media.duration,
     start, in: 0, out: media.duration, volume: 0.6, fadeIn: 1, fadeOut: 2, duck: true, duckLevel: 0.3, loop: false, voice: false,
+    loopLen: 0, // looped length on the timeline in seconds (0 = repeat until the end of the video)
+    phase: 0, // looped tracks: offset into the loop at the track start (set when a looped track is split)
   };
 }
 
@@ -121,7 +124,9 @@ export function overlayGain(o, t) {
   if (o.kind !== 'video' || o.muted || !o.hasAudio) return 0;
   const len = overlayLen(o), local = t - o.start;
   if (local < 0 || local > len) return 0;
-  return o.volume * Math.min(clamp(local / 0.05, 0, 1), clamp((len - local) / 0.05, 0, 1));
+  // audio follows the overlay's picture fades (with a short de-click ramp when there is no fade)
+  const fi = Math.max(0.05, o.fadeIn || 0), fo = Math.max(0.05, o.fadeOut || 0);
+  return o.volume * Math.min(clamp(local / fi, 0, 1), clamp((len - local) / fo, 0, 1));
 }
 
 // ---------- keyframes ----------
@@ -133,6 +138,64 @@ export const EASES = {
   hold: () => 0,
 };
 export const ANIM_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity'];
+/** Eased progress 0..1 of the segment starting at key `a`. A key may carry an ease window [e0, e1] (set when a
+ *  segment is cut by a split or trim) so each piece continues exactly along the original curve. */
+export function easeFrac(a, p) {
+  const E = EASES[a.ease] || EASES.linear;
+  if (a.ease === 'hold') return 0;
+  const e0 = a.e0 ?? 0, e1 = a.e1 ?? 1;
+  if (e0 === 0 && e1 === 1) return E(p);
+  const d = E(e1) - E(e0);
+  if (Math.abs(d) < 1e-9) return p;
+  return (E(e0 + (e1 - e0) * p) - E(e0)) / d;
+}
+/** Cut a keyframe track at local time `t`: returns { v, left, right } where left/right are the ease windows for the
+ *  pieces before and after t of the segment containing t (null when t is outside the keyed range). */
+function cutTrack(track, t) {
+  const n = track.length;
+  if (!n) return null;
+  if (t <= track[0].t || t >= track[n - 1].t) return { v: kfValue(track, t, 0), seg: -1 };
+  for (let i = 0; i < n - 1; i++) {
+    const a = track[i], b = track[i + 1];
+    if (Math.abs(t - a.t) < 1e-6) return { v: a.v, seg: -1 };
+    if (t >= a.t && t < b.t) {
+      const p = (t - a.t) / Math.max(1e-6, b.t - a.t);
+      const e0 = a.e0 ?? 0, e1 = a.e1 ?? 1, m = e0 + (e1 - e0) * p;
+      return { v: kfValue(track, t, 0), seg: i, ease: a.ease, left: [e0, m], right: [m, e1] };
+    }
+  }
+  return { v: kfValue(track, t, 0), seg: -1 };
+}
+const winKey = (k, w) => { if (!w || k.ease === 'hold' || (w[0] === 0 && w[1] === 1)) { delete k.e0; delete k.e1; } else { k.e0 = w[0]; k.e1 = w[1]; } return k; };
+/**
+ * Re-base keyframes to the window [from, to] of the item's old local time (to = Infinity keeps the tail).
+ * Times are shifted by -from; a key is inserted at each cut with the interpolated value, so motion continues
+ * seamlessly. `from` < 0 just shifts keys later (e.g. the start of a clip was extended).
+ */
+export function rebaseKeyframes(kf, from, to = Infinity) {
+  const out = {};
+  for (const prop of ANIM_PROPS) {
+    const tr = kf && kf[prop];
+    if (!tr || !tr.length) continue;
+    let keys = tr.map(k => ({ ...k }));
+    if (to < Infinity) {
+      const c = cutTrack(keys, to);
+      const kept = keys.filter(k => c.seg >= 0 ? k.t < to - 1e-6 : k.t <= to + 1e-6);
+      if (c.seg >= 0) { winKey(kept[kept.length - 1], c.left); kept.push({ t: to, v: c.v, ease: c.ease }); }
+      else if (!kept.length) kept.push({ t: Math.max(0, to), v: c.v, ease: keys[0].ease });
+      keys = kept;
+    }
+    if (from > 0) {
+      const c = cutTrack(keys, from);
+      const kept = keys.filter(k => c.seg >= 0 ? k.t > from + 1e-6 : k.t >= from - 1e-6);
+      if (c.seg >= 0) kept.unshift(winKey({ t: from, v: c.v, ease: c.ease }, c.right));
+      else if (!kept.length) kept.push({ t: from, v: c.v, ease: keys[keys.length - 1].ease });
+      keys = kept;
+    }
+    out[prop] = keys.map(k => ({ ...k, t: Math.max(0, Math.round((k.t - from) * 1e6) / 1e6) }));
+  }
+  return out;
+}
 /** base (non-animated) value of a property for an item of a given type */
 export function animBase(type, item, prop) {
   if (type === 'clip') {
@@ -151,7 +214,7 @@ export function kfValue(track, local, base) {
     const a = track[i], b = track[i + 1];
     if (local >= a.t && local < b.t) {
       const p = (local - a.t) / Math.max(1e-6, b.t - a.t);
-      return a.v + (b.v - a.v) * (EASES[a.ease] || EASES.linear)(p);
+      return a.v + (b.v - a.v) * easeFrac(a, p);
     }
   }
   return base;
@@ -169,8 +232,10 @@ export function setKeyframe(item, prop, local, v, ease) {
   item.keyframes = item.keyframes || {};
   const tr = item.keyframes[prop] = item.keyframes[prop] || [];
   const ex = tr.find(k => Math.abs(k.t - local) < 1 / 120);
-  if (ex) { ex.v = v; if (ease) ex.ease = ease; }
-  else { tr.push({ t: Math.max(0, local), v, ease: ease || (tr.length ? tr[tr.length - 1].ease : 'easeInOut') || 'easeInOut' }); tr.sort((a, b) => a.t - b.t); }
+  if (ex) { ex.v = v; if (ease) { ex.ease = ease; delete ex.e0; delete ex.e1; } }
+  else {
+    for (const k of tr) if (k.t < local) { delete k.e0; delete k.e1; } // segment shape changes: drop cut windows before the new key
+    tr.push({ t: Math.max(0, local), v, ease: ease || (tr.length ? tr[tr.length - 1].ease : 'easeInOut') || 'easeInOut' }); tr.sort((a, b) => a.t - b.t); }
 }
 export function kfTimes(item) {
   const s = new Set();
@@ -184,11 +249,26 @@ export function removeKeyframesAt(item, local) {
 }
 export function setEaseAt(item, local, ease) {
   const kf = item.keyframes || {};
-  for (const p of ANIM_PROPS) for (const k of kf[p] || []) if (Math.abs(k.t - local) < 1 / 120) k.ease = ease;
+  for (const p of ANIM_PROPS) for (const k of kf[p] || []) if (Math.abs(k.t - local) < 1 / 120) { k.ease = ease; delete k.e0; delete k.e1; }
 }
 
 export const clipLen = (c) => Math.max(MIN_CLIP, (c.out - c.in) / (c.kind === 'image' ? 1 : (c.speed || 1)));
 export const audioLen = (a) => Math.max(0.05, a.out - a.in);
+/** Length of an audio track on the timeline: one pass, or (looped) repeated to loopLen / the end of the video. */
+export const audioSpan = (a, total) => !a.loop ? audioLen(a) : Math.max(0.05, a.loopLen > 0 ? a.loopLen : (total ?? 0) - a.start);
+/** Source position of an audio track at sequence time t (handles looping). */
+export function audioSourceTime(a, t) {
+  const local = Math.max(0, t - a.start), L = audioLen(a);
+  if (!a.loop) return a.in + Math.min(local, L);
+  return a.in + ((local + (a.phase || 0)) % L);
+}
+/** Loop seams (sequence times where a looped track jumps back to its in-point). */
+export function loopSeams(a, total) {
+  if (!a.loop) return [];
+  const L = audioLen(a), span = audioSpan(a, total), out = [];
+  for (let s = L - ((a.phase || 0) % L); s < span - 1e-3 && out.length < 10000; s += L) if (s > 1e-3) out.push(a.start + s);
+  return out;
+}
 
 /** Compute timeline placement for clips (magnetic main track with overlapping crossfades). */
 export function layout(project) {
@@ -268,7 +348,7 @@ export function clipGain(it, t) {
   return g;
 }
 /** Intervals where clip audio is audible (for ducking). */
-export function speechIntervals(lay, project) {
+export function speechIntervals(lay, project, excludeId) {
   const iv = [];
   for (const it of lay.items) {
     const c = it.clip;
@@ -276,7 +356,8 @@ export function speechIntervals(lay, project) {
   }
   if (project) {
     for (const o of project.overlays || []) if (o.kind === 'video' && !o.muted && o.hasAudio && o.volume > 0.02) iv.push([o.start, o.start + overlayLen(o)]);
-    for (const a of project.audio || []) if (a.voice && a.volume > 0.02) iv.push([a.start, a.start + audioLen(a)]);
+    // a voice track drives ducking of OTHER tracks only: never of itself
+    for (const a of project.audio || []) if (a.voice && a.volume > 0.02 && a.id !== excludeId) iv.push([a.start, a.start + audioSpan(a, lay.total)]);
   }
   // merge
   iv.sort((a, b) => a[0] - b[0]);
@@ -295,12 +376,20 @@ export function duckFactor(intervals, t, level) {
   }
   return f;
 }
+/** Speech intervals that duck audio track `a` (its own audio excluded). */
+export function duckIntervalsFor(a, lay, project, shared) {
+  return a.voice ? speechIntervals(lay, project, a.id) : (shared || speechIntervals(lay, project));
+}
 /** Music gain at sequence time t */
 export function musicGain(a, t, intervals, total) {
-  const len = audioLen(a);
+  const len = audioSpan(a, total);
   if (t < a.start || t > a.start + len) return 0;
   const local = t - a.start, rem = Math.min(a.start + len, total ?? Infinity) - t;
   let g = a.volume * Math.min(ramp(local, a.fadeIn), ramp(rem, a.fadeOut));
+  if (a.loop) { // 12 ms dip at each loop seam so the jump back to the in-point doesn't click
+    const L = audioLen(a), ph = (local + (a.phase || 0)) % L, d = Math.min(ph, L - ph);
+    if (local > 0.02 && rem > 0.02 && L > 0.1) g *= ramp(d, 0.012);
+  }
   if (a.duck && intervals) g *= duckFactor(intervals, t, a.duckLevel ?? 0.3);
   return Math.max(0, g);
 }
@@ -356,15 +445,82 @@ export function splitAt(project, t) {
   b.id = uid('clip');
   b.transition = { type: 'cut', duration: c.transition.duration };
   if (c.kind === 'image') {
-    c.out = c.in + local; b.in = 0; b.out = it.len - local;
+    b.in = c.in + local; b.out = c.out; c.out = c.in + local; // image in-point = animation (GIF) time offset
   } else {
     const s = c.in + local * c.speed;
     c.out = s; b.in = s;
   }
   b.fadeIn = 0; c.fadeOut = 0;
-  // Ken Burns continuity is approximated: both halves keep the same motion setting
+  // keyframes: first half ends at the interpolated value, second half continues from it
+  const kf = c.keyframes || {};
+  c.keyframes = rebaseKeyframes(kf, 0, local);
+  b.keyframes = rebaseKeyframes(kf, local);
+  // Ken Burns: each half covers its share of the original motion range
+  const tr = c.transform || {};
+  if (tr.kenBurns && tr.kenBurns !== 'none') {
+    const f0 = tr.kbFrom ?? 0, f1 = tr.kbTo ?? 1, m = f0 + (f1 - f0) * (local / it.len);
+    c.transform.kbTo = m; b.transform.kbFrom = m; b.transform.kbTo = f1;
+  }
   project.clips.splice(it.index + 1, 0, b);
   return b;
+}
+
+/**
+ * Split the item `sel` ({type, id}) at sequence time t. Works for clips, text layers, audio tracks and overlays.
+ * Returns the new (second) item or null (with .reason) when t isn't safely inside the item.
+ */
+export function splitItem(project, sel, t) {
+  const fail = (reason) => ({ fail: true, reason });
+  if (!sel || sel.type === 'clip') {
+    if (sel) { const it = layout(project).items.find(i => i.clip.id === sel.id); if (it && (t <= it.start + MIN_CLIP - 1e-9 || t >= it.end - MIN_CLIP + 1e-9)) return fail('Move the playhead inside the selected clip (not at its edge) to split it.'); }
+    const nb = splitAt(project, t);
+    return nb ? { type: 'clip', item: nb } : fail('Move the playhead inside a clip (not at its edge) to split.');
+  }
+  if (sel.type === 'text') {
+    const a = project.texts.find(x => x.id === sel.id); if (!a) return fail('Nothing to split.');
+    const u = t - a.start;
+    if (u < MIN_CLIP || a.end - t < MIN_CLIP) return fail('Move the playhead inside the selected text (not at its edge) to split it.');
+    const b = deepClone(a); b.id = uid('txt');
+    const kf = a.keyframes || {};
+    a.keyframes = rebaseKeyframes(kf, 0, u); b.keyframes = rebaseKeyframes(kf, u);
+    a.end = t; b.start = t;
+    a.fadeOut = 0; b.fadeIn = 0;
+    a.anim = { ...(a.anim || {}), out: 'none' }; b.anim = { ...(b.anim || {}), in: 'none' };
+    project.texts.push(b);
+    return { type: 'text', item: b };
+  }
+  if (sel.type === 'audio') {
+    const a = project.audio.find(x => x.id === sel.id); if (!a) return fail('Nothing to split.');
+    const total = layout(project).total, span = audioSpan(a, total), u = t - a.start;
+    if (u < MIN_CLIP || span - u < MIN_CLIP) return fail('Move the playhead inside the selected audio track (not at its edge) to split it.');
+    const b = deepClone(a); b.id = uid('aud'); b.start = t;
+    if (a.loop) {
+      const L = audioLen(a);
+      b.phase = ((a.phase || 0) + u) % L;
+      b.loopLen = a.loopLen > 0 ? a.loopLen - u : 0;
+      a.loopLen = u;
+    } else {
+      a.out = a.in + u; b.in = a.in + u;
+    }
+    a.fadeOut = 0; b.fadeIn = 0;
+    project.audio.splice(project.audio.indexOf(a) + 1, 0, b);
+    return { type: 'audio', item: b };
+  }
+  if (sel.type === 'overlay') {
+    const o = (project.overlays || []).find(x => x.id === sel.id); if (!o) return fail('Nothing to split.');
+    const len = overlayLen(o), u = t - o.start;
+    if (u < MIN_CLIP || len - u < MIN_CLIP) return fail('Move the playhead inside the selected overlay (not at its edge) to split it.');
+    const b = deepClone(o); b.id = uid('ovl'); b.start = t;
+    const sp = o.kind === 'image' ? 1 : (o.speed || 1);
+    const s = o.in + u * sp;
+    o.out = s; b.in = s;
+    o.fadeOut = 0; b.fadeIn = 0;
+    const kf = o.keyframes || {};
+    o.keyframes = rebaseKeyframes(kf, 0, u); b.keyframes = rebaseKeyframes(kf, u);
+    project.overlays.splice(project.overlays.indexOf(o) + 1, 0, b);
+    return { type: 'overlay', item: b };
+  }
+  return fail('Markers can’t be split. Select a clip, text, overlay or audio track.');
 }
 
 export function removeClip(project, id, ripple) {

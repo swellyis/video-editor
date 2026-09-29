@@ -1,5 +1,5 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
-import { layout, clipLen, audioLen, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes } from './model.js';
+import { layout, clipLen, audioLen, audioSpan, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes } from './model.js';
 import { clamp, fmt, el, icon } from './util.js';
 
 const HANDLE = 14;
@@ -66,7 +66,7 @@ export class Timeline {
     const p = this.project, lay = layout(p), pts = [0, lay.total, this.app.player.t];
     for (const it of lay.items) { pts.push(it.start, it.end); }
     for (const t of p.texts) if (t.id !== exclude) pts.push(t.start, t.end);
-    for (const a of p.audio) if (a.id !== exclude) pts.push(a.start, a.start + audioLen(a));
+    for (const a of p.audio) if (a.id !== exclude) pts.push(a.start, a.start + audioSpan(a, lay.total));
     for (const m of p.markers) if (m.id !== exclude) pts.push(m.time);
     for (const o of p.overlays || []) if (o.id !== exclude) pts.push(o.start, o.start + overlayLen(o));
     return pts;
@@ -92,7 +92,7 @@ export class Timeline {
     const p = this.project, lay = layout(p);
     this._gen = (this._gen || 0) + 1;
     const sel = this.app.selection || {};
-    const width = Math.max(this.scroll.clientWidth, this.x(Math.max(lay.total, ...p.audio.map(a => a.start + audioLen(a)), ...p.texts.map(t => t.end), ...(p.overlays || []).map(o => o.start + overlayLen(o)))) + 240);
+    const width = Math.max(this.scroll.clientWidth, this.x(Math.max(lay.total, ...p.audio.map(a => a.start + audioSpan(a, lay.total)), ...p.texts.map(t => t.end), ...(p.overlays || []).map(o => o.start + overlayLen(o)))) + 240);
     this.content.style.width = width + 'px';
     // ruler ticks
     const secs = width / this.pps;
@@ -190,23 +190,27 @@ export class Timeline {
       this.renderKfs(n, t, t.start, t.end - t.start);
     }
     // audio lanes
-    const al = this.lanes(p.audio.map(a => ({ id: a.id, s: a.start, e: a.start + audioLen(a) })));
+    const al = this.lanes(p.audio.map(a => ({ id: a.id, s: a.start, e: a.start + audioSpan(a, lay.total) })));
     this.aTrack.style.height = Math.max(42, al.count * 38 + 6) + 'px';
     for (const a of p.audio) {
       const n = this._node('a:' + a.id, () => {
-        const d = el('div', { class: 'tl-item tl-audioitem' }, el('canvas', { class: 'wave' }), el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
+        const d = el('div', { class: 'tl-item tl-audioitem' }, el('canvas', { class: 'wave' }), el('div', { class: 'seams' }), el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'audio', d._id));
         return d;
       }, this.aTrack);
       n._id = a.id; n.dataset.id = a.id;
-      const w = Math.max(8, audioLen(a) * this.pps);
+      const span = audioSpan(a, lay.total);
+      const w = Math.max(8, span * this.pps);
       n.style.left = this.x(a.start) + 'px'; n.style.width = w + 'px';
       n.style.top = (3 + al.lane.get(a.id) * 38) + 'px';
-      n.querySelector('span').textContent = (a.voice ? '🎙 ' : '♪ ') + a.name + (a.duck ? ' · duck' : '');
+      n.querySelector('span').textContent = (a.voice ? '🎙 ' : '♪ ') + a.name + (a.loop ? ' · loop' : '') + (a.duck ? ' · duck' : '');
       n.classList.toggle('voice', !!a.voice);
+      n.classList.toggle('loop', !!a.loop);
+      const seams = n.querySelector('.seams'), sk = a.loop ? loopSeams(a, lay.total).map(t => ((t - a.start) * this.pps).toFixed(1)).join(',') : '';
+      if (seams._key !== sk) { seams._key = sk; seams.replaceChildren(...(sk ? sk.split(',').slice(0, 400).map(x => { const i = document.createElement('i'); i.style.left = x + 'px'; return i; }) : [])); }
       n.classList.toggle('sel', sel.type === 'audio' && sel.id === a.id);
       n.classList.toggle('offline', !this.app.media.peek(a.mediaId));
-      this.renderWave(n.querySelector('.wave'), a, w);
+      this.renderWave(n.querySelector('.wave'), a, w, null, 30, 1, span);
     }
     // remove stale
     for (const [k, n] of this.nodes) if (n._seen !== this._gen) { n.remove(); this.nodes.delete(k); }
@@ -266,12 +270,13 @@ export class Timeline {
     const o = (p.overlays || []).find(x => x.id === id); if (o) return { sel: { type: 'overlay', id }, start: o.start };
     return null;
   }
-  renderWave(cv, a, w, recIn, Hh = 30, speed = 1) {
+  renderWave(cv, a, w, recIn, Hh = 30, speed = 1, span = null) {
     if (!a) { if (cv._key !== 'none') { cv._key = 'none'; cv.width = 0; cv.style.display = 'none'; } return; }
     const rec = recIn || this.app.media.peek(a.mediaId);
     const peaks = rec && rec.peaks;
     const W = Math.min(4000, Math.round(w)), H = Hh;
-    const key = [W, a.in, a.out, !!peaks, a.muted, a.volume].join('|');
+    const loopLen = a.loop && span ? span : 0;
+    const key = [W, a.in, a.out, !!peaks, a.muted, a.volume, loopLen, a.phase || 0].join('|');
     if (cv._key === key) return; cv._key = key;
     cv.style.display = peaks ? '' : 'none';
     cv.width = W; cv.height = H; cv.style.width = W + 'px';
@@ -280,7 +285,7 @@ export class Timeline {
     x.fillStyle = Hh < 30 ? (a.muted ? 'rgba(255,255,255,.25)' : 'rgba(140,220,255,.85)') : 'rgba(255,255,255,.35)';
     const len = a.out - a.in;
     for (let px = 0; px < W; px += 2) {
-      const t = a.in + (px / W) * len;
+      const t = loopLen ? a.in + (((px / W) * loopLen + (a.phase || 0)) % len) : a.in + (px / W) * len; // looped tracks repeat
       const v = (peaks.data[Math.floor(t * peaks.rate)] || 0) / 255;
       const h = Math.max(1, v * H);
       x.fillRect(px, (H - h) / 2, 1.5, h);
@@ -364,7 +369,8 @@ export class Timeline {
 
     if (type === 'clip') {
       const idx = p.clips.findIndex(c => c.id === id), c = p.clips[idx], it0 = lay0.items[idx];
-      const orig = { in: c.in, out: c.out };
+      const orig = { in: c.in, out: c.out, kf: JSON.parse(JSON.stringify(c.keyframes || {})) };
+      const keyed = hasKeyframes(c);
       d.onMove = (ev) => {
         const dt = dtOf(ev);
         if (!moved && Math.abs(dt * this.pps) < 4) return;
@@ -372,6 +378,8 @@ export class Timeline {
         if (handle === 'l') {
           if (c.kind === 'image') c.out = clamp(orig.out - dt, MIN_CLIP, 3600);
           else c.in = clamp(orig.in + dt * c.speed, 0, orig.out - MIN_CLIP * c.speed);
+          // keep keyframes on the same content: trimming the start shifts them by the trimmed amount
+          if (keyed) c.keyframes = rebaseKeyframes(orig.kf, c.kind === 'image' ? (orig.out - c.out) : (c.in - orig.in) / c.speed);
           tip((c.kind === 'image' ? 'Length ' : 'In ') + (c.kind === 'image' ? fmt(c.out) : c.in.toFixed(2) + 's'), it0.start);
           this.app.liveUpdate({ previewAt: it0.start });
         } else if (handle === 'r') {
@@ -403,7 +411,8 @@ export class Timeline {
         this.app.commit('Trim clip');
       };
     } else if (type === 'text') {
-      const t0 = p.texts.find(t => t.id === id); const o = { s: t0.start, e: t0.end };
+      const t0 = p.texts.find(t => t.id === id); const o = { s: t0.start, e: t0.end, kf: JSON.parse(JSON.stringify(t0.keyframes || {})) };
+      const keyed = hasKeyframes(t0);
       d.onMove = (ev) => {
         const dt = dtOf(ev);
         if (!moved && Math.abs(dt * this.pps) < 4) return;
@@ -415,6 +424,7 @@ export class Timeline {
         } else if (handle === 'l') {
           let s = clamp(o.s + dt, 0, o.e - 0.2); const sn = this.snap(s, id); if (sn.snapped) { s = clamp(sn.t, 0, o.e - 0.2); this.showSnap(s); }
           t0.start = s; tip('Start ' + fmt(s), s);
+          if (keyed) t0.keyframes = rebaseKeyframes(o.kf, s - o.s);
         } else {
           let e2 = Math.max(o.s + 0.2, o.e + dt); const sn = this.snap(e2, id); if (sn.snapped) { e2 = Math.max(o.s + 0.2, sn.t); this.showSnap(e2); }
           t0.end = e2; tip('End ' + fmt(e2), e2);
@@ -423,7 +433,7 @@ export class Timeline {
       };
       d.onUp = () => { if (moved) this.app.commit('Move text'); };
     } else if (type === 'audio') {
-      const a = p.audio.find(x => x.id === id); const o = { s: a.start, i: a.in, out: a.out };
+      const a = p.audio.find(x => x.id === id); const o = { s: a.start, i: a.in, out: a.out, span: audioSpan(a, lay0.total), ll: a.loopLen };
       d.onMove = (ev) => {
         const dt = dtOf(ev);
         if (!moved && Math.abs(dt * this.pps) < 4) return;
@@ -435,15 +445,22 @@ export class Timeline {
         } else if (handle === 'l') {
           const dd = clamp(dt, -Math.min(o.i, o.s), (o.out - o.i) - 0.2);
           a.in = o.i + dd; a.start = o.s + dd; tip('Trim in ' + a.in.toFixed(1) + 's', a.start);
+          if (a.loop && o.ll > 0) a.loopLen = Math.max(0.2, o.ll - dd); // keep the looped end in place
         } else {
-          let end = o.s + (o.out - o.i) + dt; const sn = this.snap(end, id); if (sn.snapped) { end = sn.t; this.showSnap(end); }
-          a.out = clamp(o.i + (end - o.s), o.i + 0.2, a.srcDuration || 1e9); tip('Ends ' + fmt(a.start + audioLen(a)), a.start + audioLen(a));
+          if (a.loop) { // looped: the right edge sets how long it repeats
+            let end = o.s + o.span + dt; const sn = this.snap(end, id); if (sn.snapped) { end = sn.t; this.showSnap(end); }
+            a.loopLen = Math.max(0.2, end - a.start); tip('Loops until ' + fmt(a.start + a.loopLen), a.start + a.loopLen);
+          } else {
+            let end = o.s + (o.out - o.i) + dt; const sn = this.snap(end, id); if (sn.snapped) { end = sn.t; this.showSnap(end); }
+            a.out = clamp(o.i + (end - o.s), o.i + 0.2, a.srcDuration || 1e9); tip('Ends ' + fmt(a.start + audioLen(a)), a.start + audioLen(a));
+          }
         }
         this.app.liveUpdate({ keepTime: true });
       };
       d.onUp = () => { if (moved) this.app.commit('Edit music'); };
     } else if (type === 'overlay') {
-      const o = p.overlays.find(x => x.id === id); const or = { s: o.start, i: o.in, out: o.out };
+      const o = p.overlays.find(x => x.id === id); const or = { s: o.start, i: o.in, out: o.out, kf: JSON.parse(JSON.stringify(o.keyframes || {})) };
+      const keyed = hasKeyframes(o);
       const sp = o.kind === 'image' ? 1 : (o.speed || 1);
       d.onMove = (ev) => {
         const dt = dtOf(ev);
@@ -458,6 +475,7 @@ export class Timeline {
           const dd = clamp(dt, o.kind === 'image' ? -or.s : -Math.min(or.i / sp, or.s), len0 - MIN_CLIP);
           if (o.kind === 'image') { o.out = or.out - dd; } else o.in = or.i + dd * sp;
           o.start = or.s + dd; tip('Starts ' + fmt(o.start), o.start);
+          if (keyed) o.keyframes = rebaseKeyframes(or.kf, dd);
         } else {
           let end = or.s + len0 + dt; const sn = this.snap(end, id); if (sn.snapped) { end = sn.t; this.showSnap(end); }
           const len = Math.max(MIN_CLIP, end - or.s);

@@ -360,3 +360,17 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .item .item-ico .ico,.item .item-ico{width:15px;height:15px}
 .tl-item span .item-ico{width:13px;height:13px;vertical-align:-2px}
 .badges .badge-ico{width:11px;height:11px;vertical-align:-1px;filter:drop-shadow(0 1px 2px #000)}
+/* music loop toggle */
+.loop-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 2px}
+.loop-row .hint{flex:1 1 180px;margin:0}
+.switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13px;color:var(--ink);min-height:32px}
+.switch input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.switch-ui{position:relative;width:40px;height:23px;border-radius:12px;background:var(--surface-3);border:1px solid var(--line);transition:background .15s;flex:none}
+.switch-ui::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s}
+.switch input:checked+.switch-ui{background:var(--accent);border-color:var(--accent)}
+.switch input:checked+.switch-ui::after{transform:translateX(17px)}
+.switch input:focus-visible+.switch-ui{outline:3px solid color-mix(in srgb,var(--accent) 48%,transparent);outline-offset:2px}
+/* looped audio on the timeline: dashed ticks where the track jumps back to its in-point */
+.tl-audioitem .seams{position:absolute;inset:0;pointer-events:none}
+.tl-audioitem .seams i{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed rgba(255,255,255,.55)}
+#saveToDiskRow{margin:10px 0 0}

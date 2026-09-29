@@ -1,17 +1,18 @@
 // Video Editor Pro — main controller
 import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, isMac, deepClone, blobToDataURL, dataURLToBlob, uid } from './util.js';
 import { db, mediaIdsOf } from './db.js';
-import { media, kindOf } from './media.js';
+import { media, kindOf, isHeic } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, splitAt, removeClip, duplicateClip,
   moveClip, rippleShift, chapters, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, ANIM_PROPS, EASES, normalizeClip,
+  splitItem, audioSpan, rebaseKeyframes,
 } from './model.js';
 import { Compositor, ensureFonts, drawText, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { Timeline } from './timeline.js';
-import { runExport, capabilities, ExportCancelled } from './exporter.js';
+import { runExport, capabilities, ExportCancelled, createSink, canStreamToOPFS, cleanupExports, bitrateFor } from './exporter.js';
 
 const app = {
   project: newProject(),
@@ -241,6 +242,7 @@ function afterSet(path, obj, old, before) {
   }
   if (path === 'ovl.in' || path === 'ovl.out') { const mx = obj.kind === 'image' ? 3600 : (obj.srcDuration || 1e9); obj.in = clamp(obj.in, 0, mx - MIN_CLIP); obj.out = clamp(obj.out, obj.in + MIN_CLIP, mx); }
   if (path === 'ovl.start') obj.start = Math.max(0, obj.start);
+  if (path === 'ovl.speed') obj.speed = clamp(Number(obj.speed) || 1, 0.25, 4);
   if (path === 'text.anim.in' || path === 'text.anim.out') { const t = selected('text'); const d = t.end - t.start; if (t.anim.inDur + t.anim.outDur > d) { t.anim.inDur = Math.min(t.anim.inDur, d * 0.6); t.anim.outDur = Math.min(t.anim.outDur, d * 0.35); } }
   if (path === 'proj.settings.ratio' || path === 'proj.settings.res') sizeStage();
   if (path === 'proj.youtube.title' || path === 'proj.youtube.tags') updateCounts();
@@ -339,6 +341,7 @@ function fillInspector() {
   if (o) {
     if (document.activeElement !== $('ovlLenInput')) $('ovlLenInput').value = overlayLen(o).toFixed(2);
     $('ovlTrimRow').hidden = o.kind === 'image';
+    $('ovlSpeedSection').hidden = o.kind === 'image';
     $('ovlSoundSection').hidden = o.kind === 'image' || !o.hasAudio;
     $('ovlOfflineBanner').hidden = media.has(o.mediaId);
   }
@@ -346,7 +349,11 @@ function fillInspector() {
   $('textPanel').hidden = !t; $('textEmptyHint').hidden = p.texts.length > 0;
   const a = selected('audio');
   $('audioPanel').hidden = !a; $('audioEmptyHint').hidden = p.audio.length > 0;
-  if (a && document.activeElement !== $('audioLenInput')) $('audioLenInput').value = audioLen(a).toFixed(2);
+  if (a && document.activeElement !== $('audioLenInput')) $('audioLenInput').value = audioSpan(a, layout(p).total).toFixed(2);
+  if (a) {
+    $('audioLenLabel').textContent = a.loop ? 'Length on timeline (s)' : 'Length (s)';
+    $('loopHint').textContent = a.loop ? (a.loopLen > 0 ? `Repeats the ${fmt(audioLen(a))} trimmed section for ${fmt(a.loopLen)}.` : `Repeats the ${fmt(audioLen(a))} trimmed section until the video ends. Set a length to stop earlier.`) : 'Turn on to repeat a short track under the whole video.';
+  }
   $('logoPanel').hidden = !p.logo; $('logoHint').hidden = !!p.logo;
   const sel = !!app.selection;
   qsa('.tl-toolbar [data-action=duplicate], .tl-toolbar [data-action=delete]').forEach(b => b.disabled = !sel);
@@ -373,7 +380,7 @@ function renderLists(light) {
   const al = $('audioList'); al.replaceChildren();
   p.audio.forEach(a => {
     al.append(el('div', { class: 'item' + (sel.type === 'audio' && sel.id === a.id ? ' selected' : ''), onclick: () => app.select({ type: 'audio', id: a.id }) },
-      el('span', { text: a.voice ? '🎙' : '♪' }), el('span', { class: 'grow', text: a.name }), el('span', { class: 't', text: fmt(a.start) + ' · ' + fmt(audioLen(a)) })));
+      el('span', { text: a.voice ? '🎙' : '♪' }), el('span', { class: 'grow', text: a.name + (a.loop ? ' (loop)' : '') }), el('span', { class: 't', text: fmt(a.start) + ' · ' + fmt(audioSpan(a, layout(p).total)) })));
   });
   const ol = $('overlayList'); ol.replaceChildren();
   (p.overlays || []).forEach(o => {
@@ -403,8 +410,11 @@ function trimFrom(source) {
   e = clamp(Number.isFinite(e) ? e : c.srcDuration, min, c.srcDuration);
   if (e - s < min) { if (source === 'end') s = Math.max(0, e - min); else e = Math.min(c.srcDuration, s + min); }
   const before = layout(app.project), it0 = before.items.find(i => i.clip.id === c.id);
+  app._pendingTrimRipple = app._pendingTrimRipple || { end: it0.end, total: before.total, kf: deepClone(c.keyframes || {}), in0: c.in };
   c.in = s; c.out = e;
-  app._pendingTrimRipple = app._pendingTrimRipple || { end: it0.end, total: before.total };
+  // keyframes stay on the same frames of the source when the start is trimmed
+  const P = app._pendingTrimRipple;
+  if (hasKeyframes({ keyframes: P.kf })) c.keyframes = rebaseKeyframes(P.kf, (s - P.in0) / (c.speed || 1));
   const it = layout(app.project).items.find(i => i.clip.id === c.id);
   return { it, source };
 }
@@ -420,22 +430,31 @@ $('clipIn').addEventListener('change', () => { if (trimFrom('inputs')) trimCommi
 $('clipOut').addEventListener('change', () => { if (trimFrom('inputs')) trimCommit(); });
 $('imageDur').addEventListener('input', () => { const c = selected('clip'); if (!c) return; const b = layout(app.project); app._pendingTrimRipple = app._pendingTrimRipple || { end: b.items.find(i => i.clip.id === c.id).end, total: b.total }; c.out = c.in + parseFloat($('imageDur').value); app.liveUpdate(); });
 $('imageDur').addEventListener('change', trimCommit);
-$('audioLenInput').addEventListener('change', () => { const a = selected('audio'); if (!a) return; const l = parseFloat($('audioLenInput').value); if (l > 0) { a.out = clamp(a.in + l, a.in + 0.2, a.srcDuration || 1e9); app.commit('Audio length'); } });
+$('audioLenInput').addEventListener('change', () => {
+  const a = selected('audio'); if (!a) return; const l = parseFloat($('audioLenInput').value); if (!(l > 0)) return;
+  if (a.loop) a.loopLen = Math.max(0.2, l); // looped: how long it repeats on the timeline
+  else a.out = clamp(a.in + l, a.in + 0.2, a.srcDuration || 1e9);
+  app.commit('Audio length');
+});
 $('textPosPresets').addEventListener('click', (e) => { const b = e.target.closest('button'); const t = selected('text'); if (!b || !t) return; t.y = parseFloat(b.dataset.y); t.x = 0.5; app.commit('Text position'); });
 
 // ---------------------------------------------------------------- actions
 const actions = {
   split() {
-    const nb = splitAt(app.project, player.t);
-    if (!nb) return toast('Move the playhead inside a clip (not at its edge) to split.');
-    app.selection = { type: 'clip', id: nb.id };
-    app.commit('Split'); toast('Split at ' + fmtPrecise(player.t, app.project.settings.fps));
+    // Splits the selected item on any track (clip, text, overlay, music/voice); with nothing (or a marker) selected,
+    // splits the main video track at the playhead.
+    const s = app.selection && app.selection.type !== 'marker' ? app.selection : null;
+    const r = splitItem(app.project, s, player.t);
+    if (!r || r.fail) return toast(r ? r.reason : 'Nothing to split here.');
+    app.selection = { type: r.type, id: r.item.id };
+    const what = { clip: 'Clip', text: 'Text', audio: 'Audio', overlay: 'Overlay' }[r.type];
+    app.commit('Split'); toast(what + ' split at ' + fmtPrecise(player.t, app.project.settings.fps));
   },
   duplicate() {
     const s = app.selection; if (!s) return toast('Select something to duplicate.');
     if (s.type === 'clip') { const b = duplicateClip(app.project, s.id, app.rippleEnabled); if (b) app.selection = { type: 'clip', id: b.id }; }
     else if (s.type === 'text') return actions.duplicateText();
-    else if (s.type === 'audio') { const a = selected('audio'); const b = deepClone(a); b.id = uid('aud'); b.start = a.start + audioLen(a); app.project.audio.push(b); app.selection = { type: 'audio', id: b.id }; }
+    else if (s.type === 'audio') { const a = selected('audio'); const b = deepClone(a); b.id = uid('aud'); b.start = a.start + audioSpan(a, layout(app.project).total); app.project.audio.push(b); app.selection = { type: 'audio', id: b.id }; }
     else if (s.type === 'overlay') { const o = selected('overlay'); const b = deepClone(o); b.id = uid('ovl'); b.start = o.start + overlayLen(o); app.project.overlays.push(b); app.selection = { type: 'overlay', id: b.id }; }
     else return;
     app.commit('Duplicate');
@@ -562,9 +581,10 @@ async function importOverlay(f) {
   const kind = kindOf(f);
   if (!['video', 'image'].includes(kind)) return toast('Choose a video or image for the overlay.');
   const p = app.project, total = layout(p).total;
-  setSaveState('Importing ' + f.name + '…');
+  setSaveState((isHeic(f) ? 'Converting HEIC photo ' : 'Importing ') + f.name + '…');
   try {
     const m = await media.importFile(f);
+    mediaNotes(m);
     const start = total > 0.5 ? clamp(player.t, 0, total - 0.5) : 0;
     const o = newOverlay(m, start, p.settings);
     if (o.kind === 'image' && total > 0) o.out = o.in + Math.min(o.out - o.in, Math.max(1, total - start));
@@ -734,6 +754,9 @@ voice = (() => {
 app.voice = voice;
 
 // ---------------------------------------------------------------- import
+function mediaNotes(m) {
+  if (m && m.gifStill) toast('This browser can’t play GIF animation here, so “' + m.name + '” is used as a still image.', 4500);
+}
 async function importFiles(files, where = 'auto') {
   files = [...files];
   if (!files.length) return;
@@ -748,9 +771,10 @@ async function importFiles(files, where = 'auto') {
   const sel = selected('clip');
   let insertAt = sel ? p.clips.indexOf(sel) + 1 : p.clips.length;
   for (const f of vis) {
-    setSaveState('Importing ' + f.name + '…');
+    setSaveState((isHeic(f) ? 'Converting HEIC photo ' : 'Importing ') + f.name + '…');
     try {
       const m = await media.importFile(f);
+      mediaNotes(m);
       const c = newClipFromMedia(m, p.settings);
       p.clips.splice(insertAt++, 0, c); added++;
       app.selection = { type: 'clip', id: c.id };
@@ -1171,6 +1195,21 @@ $('exportBtn').onclick = async () => {
   const missing = [...p.clips, ...(p.overlays || [])].filter(c => !media.has(c.mediaId));
   if (missing.length) return toast('Relink missing media before exporting (red clips).');
   if (voice.busy) return toast('Finish the voiceover recording first.');
+  const fmtWanted = p.settings.format === 'auto' ? 'mp4' : p.settings.format;
+  const name0 = safeName(p.youtube.title || p.name) + '.' + fmtWanted;
+  // "Save straight to a file": the picker must open before any other await (it needs the click's user activation)
+  let handle = null;
+  if ($('saveToDisk').checked && window.showSaveFilePicker) {
+    try {
+      handle = await window.showSaveFilePicker({ suggestedName: name0, types: [fmtWanted === 'webm' ? { description: 'WebM video', accept: { 'video/webm': ['.webm'] } } : { description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } }] });
+    } catch (e) { if (e.name === 'AbortError') return; console.warn('Save picker unavailable', e); handle = null; }
+  }
+  const lay = layout(p), estBytes = bitrateFor(...Object.values(outputDims(p)), p.settings.fps, p.settings.quality) * lay.total / 8;
+  const streams = !!handle || canStreamToOPFS();
+  const lowMem = (navigator.deviceMemory || 8) <= 4;
+  if (!streams && (lay.total > 20 * 60 || estBytes > 1.5e9 || (lowMem && (lay.total > 8 * 60 || estBytes > 4e8)))) {
+    toast(`Heads-up: this browser builds the ${fmtBytes(estBytes)} file in memory. On a phone a ${fmt(lay.total)} export may run out of memory — try 720p, split it into parts, or use Chrome.`, 8000);
+  }
   player.pause();
   exporting = true; updateSummary();
   abort = new AbortController();
@@ -1179,9 +1218,12 @@ $('exportBtn').onclick = async () => {
   const t0 = performance.now();
   try { await navigator.wakeLock?.request('screen').then(l => (app._wake = l)); } catch { }
   try {
+    if (lastExport) { URL.revokeObjectURL(lastExport.url); lastExport = null; app.lastExport = null; }
     const res = await runExport(JSON.parse(JSON.stringify(p)), media, {
-      format: p.settings.format === 'auto' ? 'mp4' : p.settings.format,
+      format: fmtWanted,
       signal: abort.signal,
+      makeSink: (ext) => createSink({ handle, ext }), // disk-backed output (picked file or private temp file) when possible
+      onWarn: (msg) => toast(msg, 6000),
       onFallback: (why) => toast('Using real-time recording (' + why + ')', 4000),
       onProgress: ({ frac, stage, eta, speed }) => {
         $('progressBar').style.width = (frac * 100).toFixed(1) + '%';
@@ -1190,22 +1232,22 @@ $('exportBtn').onclick = async () => {
         $('progressEta').textContent = (eta != null ? 'ETA ' + fmtDuration(eta) : 'ETA —') + (speed ? ` · ${speed.toFixed(1)}× real time` : '');
       },
     });
-    const name = safeName(p.youtube.title || p.name) + '.' + res.ext;
-    download(res.blob, name);
-    if (lastExport) URL.revokeObjectURL(lastExport.url);
+    const name = handle ? handle.name : safeName(p.youtube.title || p.name) + '.' + res.ext;
+    if (res.streamed !== 'file') download(res.blob, name); // a picked file is already saved on disk
     lastExport = { ...res, name, url: URL.createObjectURL(res.blob) };
     app.lastExport = lastExport;
     const took = (performance.now() - t0) / 1000;
     $('progressBar').style.width = '100%'; $('progressPercent').textContent = '100%';
     $('progressStatus').textContent = 'Done'; $('progressEta').textContent = 'Took ' + fmtDuration(took);
-    $('exportResultText').innerHTML = `<b>${name}</b> · ${res.width}×${res.height} · ${res.fps} fps · ${fmt(res.duration)} · ${fmtBytes(res.blob.size)}<br><span class="hint">${res.method} · rendered in ${fmtDuration(took)}. Upload it in YouTube Studio.</span>`;
+    const where = res.streamed === 'file' ? ' · saved directly to your disk' : res.streamed === 'opfs' ? ' · streamed to disk while rendering' : '';
+    $('exportResultText').innerHTML = `<b>${name}</b> · ${res.width}×${res.height} · ${res.fps} fps · ${fmt(res.duration)} · ${fmtBytes(res.blob.size)}<br><span class="hint">${res.method}${where} · rendered in ${fmtDuration(took)}. Upload it in YouTube Studio.</span>`;
     $('downloadAgain').href = lastExport.url; $('downloadAgain').download = name;
     const file = new File([res.blob], name, { type: res.mime });
     $('shareExport').hidden = !(navigator.canShare && navigator.canShare({ files: [file] }));
     $('shareExport').onclick = () => navigator.share({ files: [file], title: p.youtube.title || p.name }).catch(() => { });
     $('exportResult').hidden = false;
     $('outputNote').textContent = 'Export complete.'; $('outputNote').classList.add('status-good');
-    toast('Video exported: ' + name);
+    toast((res.streamed === 'file' ? 'Video saved: ' : 'Video exported: ') + name);
   } catch (e) {
     if (e instanceof ExportCancelled || e.name === 'ExportCancelled') { $('progressStatus').textContent = 'Export cancelled.'; toast('Export cancelled'); }
     else { console.error(e); $('progressStatus').textContent = 'Export failed: ' + (e.message || e); toast('The export could not finish: ' + (e.message || e), 5000); }
@@ -1361,6 +1403,8 @@ async function boot() {
     history.replaceState(null, '', location.pathname);
   }
   db.gc(app.history.mediaIds()).catch(() => { });
+  cleanupExports().catch(() => { }); // temporary export files from earlier sessions
+  $('saveToDiskRow').hidden = !window.showSaveFilePicker;
   app.ready = true;
   document.documentElement.dataset.ready = '1';
 }

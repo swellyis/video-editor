@@ -1,5 +1,5 @@
 // Real-time preview engine: plays the whole sequence across clips with a shared clock.
-import { layout, sourceTime, clipGain, musicGain, speechIntervals, audioLen, overlayLen, overlaySourceTime, overlayGain } from './model.js';
+import { layout, sourceTime, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioSpan, audioSourceTime, overlayLen, overlaySourceTime, overlayGain } from './model.js';
 import { clamp } from './util.js';
 
 const POOL_MAX = 8;
@@ -20,6 +20,8 @@ export class Player {
   invalidate() {
     const p = this.getProject();
     this.lay = layout(p); this.speech = speechIntervals(this.lay, p);
+    this.duck = new Map(); // per voice track: ducking driven only by OTHER speech sources
+    for (const a of p.audio) if (a.voice) this.duck.set(a.id, duckIntervalsFor(a, this.lay, p, this.speech));
     const live = new Set([...p.clips.map(c => c.id), ...(p.overlays || []).map(o => o.id)]), liveA = new Set(p.audio.map(a => a.id));
     for (const [id, v] of this.videos) {
       const c = p.clips.find(x => x.id === id) || (p.overlays || []).find(x => x.id === id);
@@ -169,34 +171,34 @@ export class Player {
     }
     // music
     for (const a of p.audio) {
-      const len = audioLen(a);
+      const len = audioSpan(a, this.total);
       const active = t >= a.start && t < a.start + len && t < this.total;
       const pre = !active && fwd && a.start > t && a.start - t < 1.5;
       if (!active && !pre) { const e = this.audios.get(a.id); if (e) { if (!e.el.paused) e.el.pause(); this._setGain(e, 0); } continue; }
       const e = this._getAudio(a); if (!e) continue;
-      const desired = active ? a.in + (t - a.start) : a.in;
+      const desired = active ? audioSourceTime(a, t) : audioSourceTime(a, a.start);
       if (active && fwd) {
         if (Math.abs(e.el.playbackRate - this.rate) > 1e-3) e.el.playbackRate = this.rate;
         if (e.el.paused) { if (Math.abs(e.el.currentTime - desired) > 0.04) e.el.currentTime = desired; e.el.play().catch(() => { }); }
-        else if (Math.abs(e.el.currentTime - desired) > 0.3) e.el.currentTime = desired;
+        else if (Math.abs(e.el.currentTime - desired) > 0.3 || (a.loop && e.el.currentTime >= a.out - 0.02)) e.el.currentTime = desired; // loops jump back to the in-point
       } else {
         if (!e.el.paused) e.el.pause();
         if (Math.abs(e.el.currentTime - desired) > 0.05) e.el.currentTime = desired;
       }
-      this._setGain(e, active && fwd && this.rate === 1 ? musicGain(a, t, this.speech, this.total) : 0);
+      this._setGain(e, active && fwd && this.rate === 1 ? musicGain(a, t, this.duck.get(a.id) || this.speech, this.total) : 0);
     }
     return ready;
   }
 
   getSource = (it) => {
     const c = it.clip;
-    if (c.kind === 'image') { const im = this.media.imageSync(c.mediaId); return im ? { img: im.img, w: im.w, h: im.h } : null; }
+    if (c.kind === 'image') return this.media.imageSourceAt(c.mediaId, (this.t - it.start) + (c.in || 0), () => this.requestRender());
     const v = this.videos.get(c.id);
     if (!v || !v.el.videoWidth || (v.el.readyState < 2 && !v.el._hasFrame)) return null;
     return { img: v.el, w: v.el.videoWidth, h: v.el.videoHeight };
   };
   getOverlaySource = (o) => {
-    if (o.kind === 'image') { const im = this.media.imageSync(o.mediaId); return im ? { img: im.img, w: im.w, h: im.h } : null; }
+    if (o.kind === 'image') return this.media.imageSourceAt(o.mediaId, (this.t - o.start) + (o.in || 0), () => this.requestRender());
     const v = this.videos.get(o.id);
     if (!v || !v.el.videoWidth || (v.el.readyState < 2 && !v.el._hasFrame)) return null;
     return { img: v.el, w: v.el.videoWidth, h: v.el.videoHeight };

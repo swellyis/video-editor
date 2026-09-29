@@ -77,7 +77,7 @@
           <h2>Start with your footage</h2>
           <p>Add MP4, MOV or WebM clips and JPG/PNG images. Everything stays on this device and is saved automatically.</p>
           <label class="btn primary" for="videoInput">Choose clips &amp; images</label>
-          <input id="videoInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,.mov,.mp4,.m4v,.webm" multiple />
+          <input id="videoInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.heic,.heif,.gif,.mov,.mp4,.m4v,.webm" multiple />
           <small>Or drag files here · <button class="linkish" id="dropTemplates" type="button">start from a template</button></small>
         </div>
         <div class="stage-wrap" id="stageWrap" hidden>
@@ -107,7 +107,7 @@
       <!-- CLIP -->
       <div class="tab-panel active" id="tab-clip">
         <section class="section">
-          <div class="section-head"><h2>Media</h2><label class="btn ghost" for="addInput">＋ Add clips</label><input id="addInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,.mov,.mp4,.m4v,.webm" multiple /></div>
+          <div class="section-head"><h2>Media</h2><label class="btn ghost" for="addInput">＋ Add clips</label><input id="addInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.heic,.heif,.gif,.mov,.mp4,.m4v,.webm" multiple /></div>
           <p class="hint" id="clipEmptyHint">Select a clip on the timeline to trim it, change speed, volume, transition, framing and color. Images become title cards.</p>
         </section>
         <div id="clipPanel" hidden>
@@ -129,7 +129,7 @@
               <div class="slider-row"><label>Duration</label><input type="range" id="imageDur" min="0.5" max="30" step="0.5" /><output id="imageDurOut">4s</output></div>
             </div>
             <div class="button-row" style="margin-top:12px">
-              <button class="btn secondary" data-action="split" type="button" title="Split at playhead (S)">✂ Split</button>
+              <button class="btn secondary" data-action="split" type="button" title="Split the selected item at the playhead (S)">✂ Split</button>
               <button class="btn secondary" data-action="duplicate" type="button" title="Duplicate (Ctrl+D)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3.5V3a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 2 3v6a1.5 1.5 0 0 0 1.5 1.5H4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg> Duplicate</button>
               <button class="btn secondary" data-action="moveLeft" type="button" aria-label="Move earlier">←</button>
               <button class="btn secondary" data-action="moveRight" type="button" aria-label="Move later">→</button>
@@ -270,12 +270,13 @@
             <label><span class="label">Name</span><input class="field" data-bind="audio.name" data-commit="change" /></label>
             <div class="field-row" style="margin-top:10px">
               <label><span class="label">Starts at (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="audio.start" data-commit="change" /></label>
-              <label><span class="label">Length (s)</span><input class="field mono" type="number" min="0.2" step="0.1" id="audioLenInput" /></label>
+              <label><span class="label" id="audioLenLabel">Length (s)</span><input class="field mono" type="number" min="0.2" step="0.1" id="audioLenInput" /></label>
             </div>
             <div class="field-row" style="margin-top:10px">
               <label><span class="label">Trim in (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="audio.in" data-commit="change" /></label>
               <label><span class="label">Trim out (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="audio.out" data-commit="change" /></label>
             </div>
+            <div class="loop-row"><label class="switch"><input type="checkbox" data-bind="audio.loop" id="audioLoop" /><span class="switch-ui" aria-hidden="true"></span> <span class="switch-label">Loop</span></label><span class="hint" id="loopHint"></span></div>
             <div class="slider-row"><label>Volume</label><input type="range" min="0" max="1.5" step="0.01" data-bind="audio.volume" /><output data-out="audio.volume" data-fmt="pct"></output></div>
             <div class="field-row" style="margin-top:10px">
               <label><span class="label">Fade in (s)</span><input class="field mono" type="number" min="0" max="20" step="0.1" data-bind="audio.fadeIn" data-commit="change" /></label>
@@ -292,12 +293,12 @@
       <!-- PIP -->
       <div class="tab-panel" id="tab-pip">
         <section class="section">
-          <div class="section-head"><h2>Picture-in-picture</h2><label class="btn primary small" for="overlayInput">＋ Add overlay</label><input id="overlayInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,.mov,.mp4,.m4v,.webm" /></div>
+          <div class="section-head"><h2>Picture-in-picture</h2><label class="btn primary small" for="overlayInput">＋ Add overlay</label><input id="overlayInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.heic,.heif,.gif,.mov,.mp4,.m4v,.webm" /></div>
           <div class="item-list" id="overlayList"></div>
           <p class="hint" id="overlayEmptyHint">Place a second video or image over the main clip — a face-cam, a Bible page, a logo reveal or a green-screen shot. It starts at the playhead.</p>
         </section>
         <div id="overlayPanel" hidden>
-          <div class="offline-banner" id="ovlOfflineBanner" hidden><p><b>Media missing.</b> Relink this overlay:</p><label class="btn secondary" for="ovlRelinkInput">Choose file…</label><input id="ovlRelinkInput" type="file" accept="video/*,image/*" /></div>
+          <div class="offline-banner" id="ovlOfflineBanner" hidden><p><b>Media missing.</b> Relink this overlay:</p><label class="btn secondary" for="ovlRelinkInput">Choose file…</label><input id="ovlRelinkInput" type="file" accept="video/*,image/*,.heic,.heif" /></div>
           <section class="section">
             <label><span class="label">Name</span><input class="field" data-bind="ovl.name" data-commit="change" maxlength="80" /></label>
             <div class="field-row" style="margin-top:10px">
@@ -309,6 +310,12 @@
               <label><span class="label">Trim out (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="ovl.out" data-commit="change" /></label>
             </div>
             <div class="button-row" style="margin-top:10px"><button class="btn secondary" data-action="ovlStartHere" type="button">Start at playhead</button><button class="btn secondary" data-action="duplicate" type="button">Duplicate</button><button class="btn ghost danger" data-action="deleteOverlay" type="button">Delete</button></div>
+          </section>
+          <section class="section" id="ovlSpeedSection">
+            <h2 class="sh">Speed</h2>
+            <div class="segmented six" data-bind="ovl.speed" data-num="1" id="ovlSpeedPresets"><button data-value="0.25" type="button">¼×</button><button data-value="0.5" type="button">½×</button><button data-value="1" type="button">1×</button><button data-value="1.5" type="button">1.5×</button><button data-value="2" type="button">2×</button><button data-value="4" type="button">4×</button></div>
+            <div class="slider-row"><label>Fine speed</label><input type="range" min="0.25" max="4" step="0.05" data-bind="ovl.speed" id="ovlSpeed" /><output data-out="ovl.speed" data-fmt="x"></output></div>
+            <p class="hint">Changes the overlay’s length on the timeline. Its sound keeps its pitch.</p>
           </section>
           <section class="section">
             <h2 class="sh">Position &amp; look</h2>
@@ -416,7 +423,7 @@
 
     <div class="timeline-panel">
       <div class="tl-toolbar" role="toolbar" aria-label="Timeline tools">
-        <button class="tool" data-action="split" type="button" title="Split at playhead (S)">✂<span>Split</span></button>
+        <button class="tool" data-action="split" type="button" title="Split the selected item at the playhead (S)">✂<span>Split</span></button>
         <button class="tool" data-action="duplicate" type="button" title="Duplicate selected (Ctrl+D)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3.5V3a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 2 3v6a1.5 1.5 0 0 0 1.5 1.5H4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>Duplicate</span></button>
         <button class="tool" data-action="delete" type="button" title="Delete selected (Del)">🗑<span>Delete</span></button>
         <i class="sep"></i>
@@ -459,6 +466,7 @@
       <p id="exportResultText"></p>
       <div class="button-row"><a class="btn primary" id="downloadAgain" download>Download again</a><button class="btn secondary" id="shareExport" type="button" hidden>Share / Save to Photos</button></div>
     </div>
+    <label class="check" id="saveToDiskRow" hidden><input type="checkbox" id="saveToDisk" /> Save straight to a file I choose (best for long videos)</label>
     <p class="caps hint" id="capsNote"></p>
   </section>
 </main>
@@ -488,7 +496,7 @@
     <div><kbd>←</kbd> <kbd>→</kbd><span>Step one frame (Shift: 1 second)</span></div>
     <div><kbd>↑</kbd> <kbd>↓</kbd><span>Previous / next edit point</span></div>
     <div><kbd>Home</kbd> <kbd>End</kbd><span>Go to start / end</span></div>
-    <div><kbd>S</kbd><span>Split clip at playhead</span></div>
+    <div><kbd>S</kbd><span>Split the selected item at the playhead</span></div>
     <div><kbd>Del</kbd> / <kbd>⌫</kbd><span>Delete selected</span></div>
     <div><kbd>Ctrl/⌘</kbd>+<kbd>D</kbd><span>Duplicate selected</span></div>
     <div><kbd>T</kbd><span>Add text at playhead</span></div>
