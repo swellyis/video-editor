@@ -36,7 +36,7 @@ export function newProject(name = 'Untitled project') {
     color: defaultColor(),
     clips: [], overlays: [], texts: [], audio: [], markers: [],
     logo: null,
-    thumb: { time: null, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow' },
+    thumb: { time: null, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow', format: 'auto', fit: 'cover', type: 'jpg', pip: true, logo: true },
   };
 }
 
@@ -70,6 +70,10 @@ export function sanitizeProject(p) {
   s.bg = oneOf(s.bg, ['black', 'blur', 'white', 'color'], 'black');
   s.imageDuration = num(s.imageDuration, 0.1, 3600, 4); s.endFade = num(s.endFade, 0, 30, 0);
   if (p.thumb.time !== null) p.thumb.time = num(p.thumb.time, 0, 1e6, null);
+  const T = p.thumb;
+  T.format = oneOf(T.format, ['auto', ...Object.keys(THUMB_FORMATS)], 'auto'); T.fit = oneOf(T.fit, ['cover', 'contain'], 'cover');
+  T.type = oneOf(T.type, ['jpg', 'png'], 'jpg'); T.position = oneOf(T.position, ['left', 'center', 'right', 'top', 'bottom'], 'left');
+  T.pip = T.pip !== false; T.logo = T.logo !== false;
   for (const c of p.clips) {
     c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
     c.srcDuration = num(c.srcDuration, 0, 1e6, 1); c.in = num(c.in, 0, 1e6, 0); c.out = num(c.out, c.in + 0.01, 1e6, c.in + 1);
@@ -450,6 +454,27 @@ export function effectiveColor(project, clip) {
   return out;
 }
 export const colorIsNeutral = (c) => !c.brightness && !c.contrast && !c.saturation && !c.temperature && !c.vignette && !c.sepia && !c.fade;
+
+/** Thumbnail formats: YouTube landscape, Shorts (vertical) and square. */
+export const THUMB_FORMATS = {
+  '16:9': { key: '16:9', label: 'YouTube 16:9', short: 'youtube', width: 1280, height: 720 },
+  '9:16': { key: '9:16', label: 'Shorts 9:16', short: 'shorts', width: 1080, height: 1920 },
+  '1:1': { key: '1:1', label: 'Square 1:1', short: 'square', width: 1080, height: 1080 },
+};
+/** The thumbnail format for a choice ('auto' follows the project's aspect ratio). */
+export function thumbFormat(project, choice) {
+  let k = choice || (project.thumb && project.thumb.format) || 'auto';
+  if (!THUMB_FORMATS[k]) {
+    const r = project.settings.ratio;
+    if (r === '9:16') k = '9:16';
+    else if (r === '1:1' || r === '4:5') k = '1:1';
+    else if (r === 'original') {
+      const first = project.clips.find(c => c.width && c.height), a = first ? first.width / first.height : 16 / 9;
+      k = a < 0.8 ? '9:16' : a < 1.25 ? '1:1' : '16:9';
+    } else k = '16:9';
+  }
+  return THUMB_FORMATS[k];
+}
 
 /** Output dimensions */
 export function outputDims(project, overrideRes) {

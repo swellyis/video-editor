@@ -507,15 +507,22 @@
 <dialog class="sheet wide" id="thumbDialog" aria-labelledby="thumbTitle">
   <div class="sheet-head"><h2 id="thumbTitle">Thumbnail maker · 1280×720</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
   <div class="thumb-grid">
-    <canvas id="thumbCanvas" width="1280" height="720"></canvas>
+    <div class="thumb-stage">
+      <canvas id="thumbCanvas" width="1280" height="720"></canvas>
+      <div id="thumbSafe" class="thumb-safe" aria-hidden="true"></div>
+    </div>
     <div class="thumb-controls">
+      <div class="field-row">
+        <label><span class="label">Format</span><select id="thumbFormat"><option value="auto">Auto · match project</option><option value="16:9">YouTube 16:9 · 1280×720</option><option value="9:16">Shorts 9:16 · 1080×1920</option><option value="1:1">Square 1:1 · 1080×1080</option></select></label>
+        <label><span class="label">Frame fit</span><select id="thumbFit"><option value="cover">Fill (crop)</option><option value="contain">Fit (blurred edges)</option></select></label>
+      </div>
       <div class="slider-row wide"><label>Frame</label><input type="range" id="thumbTime" min="0" max="1" step="0.01" /><output id="thumbTimeOut">00:00</output></div>
       <button class="btn ghost small" id="thumbUsePlayhead" type="button">Use playhead frame</button>
       <label style="display:block;margin-top:10px"><span class="label">Headline</span><textarea id="thumbText" rows="2" maxlength="80" placeholder="BIG BOLD WORDS"></textarea></label>
       <label style="display:block;margin-top:8px"><span class="label">Small line</span><input class="field" id="thumbSub" maxlength="80" placeholder="Episode 3 · Psalm 23" /></label>
       <div class="field-row" style="margin-top:8px">
         <label><span class="label">Font</span><select id="thumbFont"></select></label>
-        <label><span class="label">Layout</span><select id="thumbPos"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option><option value="bottom">Bottom band</option></select></label>
+        <label><span class="label">Layout</span><select id="thumbPos"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option><option value="top">Top band</option><option value="bottom">Bottom band</option></select></label>
       </div>
       <div class="field-row" style="margin-top:8px">
         <label><span class="label">Text color</span><input class="field color" type="color" id="thumbColor" value="#ffffff" /></label>
@@ -523,6 +530,12 @@
       </div>
       <div class="slider-row wide"><label>Darken</label><input type="range" id="thumbDarken" min="0" max="0.8" step="0.02" value="0.25" /><output id="thumbDarkenOut">25%</output></div>
       <div class="slider-row wide"><label>Text size</label><input type="range" id="thumbSize" min="60" max="220" step="2" value="128" /><output id="thumbSizeOut">128</output></div>
+      <label class="check" id="thumbPipRow"><input type="checkbox" id="thumbPip" checked /> Include picture-in-picture overlays</label>
+      <label class="check" id="thumbLogoRow"><input type="checkbox" id="thumbLogo" checked /> Include logo</label>
+      <label class="check"><input type="checkbox" id="thumbGuides" checked /> Show safe area (not saved in the image)</label>
+      <div class="field-row" style="margin-top:10px">
+        <label><span class="label">File type (JPG is kept under 2 MB)</span><select id="thumbType"><option value="jpg">JPG</option><option value="png">PNG</option></select></label>
+      </div>
       <button class="btn primary" id="thumbSave" type="button" style="margin-top:12px;width:100%">Download JPG</button>
     </div>
   </div>

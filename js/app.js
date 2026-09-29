@@ -7,9 +7,9 @@ import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, ANIM_PROPS, normalizeClip,
-  splitItem, audioSpan, rebaseKeyframes,
+  splitItem, audioSpan, rebaseKeyframes, overlaysAt, overlaySourceTime, thumbFormat,
 } from './model.js';
-import { Compositor, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
+import { Compositor, drawLogo, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { Timeline } from './timeline.js';
@@ -1037,6 +1037,8 @@ function releaseUnusedMedia() {
   const keep = new Set([...mediaIdsOf(app.project), ...app.history.mediaIds()]);
   media.retain(keep);
   if (thumb.v) { thumb.v.removeAttribute('src'); thumb.v.load(); delete thumb.v.dataset.url; }
+  for (const v of thumb.ov.values()) { v.removeAttribute('src'); v.load(); }
+  thumb.ov.clear(); thumb.logo = null; thumb.key = '';
   thumbBg = null;
 }
 async function flushPendingSave() {
@@ -1191,14 +1193,35 @@ $('themeBtn').onclick = async () => {
 };
 
 // ---------------------------------------------------------------- thumbnail maker
-const thumb = { canvas: $('thumbCanvas'), comp: new Compositor(), v: null };
-async function thumbFrame(t) {
-  // Render the sequence frame at time t at 1280x720 (fill), independent of the project aspect ratio.
+// Formats: YouTube 16:9 (1280x720), Shorts 9:16 (1080x1920) and square 1:1 (1080x1080). "Auto" follows the project's aspect.
+// Text and the logo are laid out inside a per-format safe area (Shorts keeps clear of the app's bottom UI and the top bar).
+const THUMB_SAFE = {
+  '16:9': { x: 70, y: 60, w: 1140, h: 600, side: 0.63, lines: 4 },
+  '1:1': { x: 70, y: 70, w: 940, h: 940, side: 0.78, lines: 5 },
+  '9:16': { x: 80, y: 150, w: 920, h: 1410, side: 1, lines: 6 },
+};
+const thumb = { canvas: $('thumbCanvas'), comp: new Compositor(), v: null, ov: new Map(), logo: null, key: '', seq: 0 };
+const thumbFmt = () => thumbFormat(app.project, app.project.thumb.format);
+async function thumbVideoAt(v, url, t) {
+  if (v.dataset.url !== url) {
+    v.src = url; v.dataset.url = url;
+    await Promise.race([new Promise(r => { v.onloadeddata = r; v.onerror = r; }), new Promise(r => setTimeout(r, 8000))]);
+  }
+  if (v.error || v.readyState < 1) return null; // can't decode this video here
+  await seekVideo(v, Math.max(0.01, t)); // has a timeout, never hangs
+  return { img: v, w: v.videoWidth, h: v.videoHeight };
+}
+async function thumbFrame(t, F) {
+  // Render the sequence frame at time t at the chosen thumbnail size (independent of the project aspect ratio).
+  const P = app.project.thumb;
   const p = deepClone(app.project);
-  p.settings.ratio = '16:9'; p.texts = []; p.settings.fit = 'cover';
+  p.settings.ratio = F.key; p.texts = []; p.settings.fit = P.fit; p.settings.bg = P.fit === 'contain' ? 'blur' : 'black';
+  for (const c of p.clips) { c.fit = 'inherit'; c.bg = 'inherit'; }
+  if (!P.pip) p.overlays = [];
+  for (const o of p.overlays) { o.fadeIn = 0; o.fadeOut = 0; } // a thumbnail shows overlays fully visible, not mid-fade
   const lay = layout(p);
   const it = clipAt(lay, t);
-  const c = document.createElement('canvas'); c.width = 1280; c.height = 720;
+  const c = document.createElement('canvas'); c.width = F.width; c.height = F.height;
   if (!it) return c;
   let src = null;
   if (it.clip.kind === 'image') {
@@ -1209,51 +1232,77 @@ async function thumbFrame(t) {
     const url = media.url(it.clip.mediaId);
     if (!url) return c;
     if (!thumb.v) { thumb.v = document.createElement('video'); thumb.v.muted = true; thumb.v.playsInline = true; thumb.v.preload = 'auto'; }
-    const v = thumb.v;
-    if (v.dataset.url !== url) {
-      v.src = url; v.dataset.url = url;
-      await Promise.race([new Promise(r => { v.onloadeddata = r; v.onerror = r; }), new Promise(r => setTimeout(r, 8000))]);
-    }
-    if (v.error || v.readyState < 1) return c; // can't decode this video here
-    await seekVideo(v, Math.max(0.01, it.clip.in + (t - it.start) * it.clip.speed)); // has a timeout, never hangs
-    src = { img: v, w: v.videoWidth, h: v.videoHeight };
+    src = await thumbVideoAt(thumb.v, url, it.clip.in + (t - it.start) * it.clip.speed);
+    if (!src) return c;
+  }
+  // picture-in-picture overlays at this moment (each video overlay gets its own hidden <video>)
+  const tt = it.start + 0.0001 + Math.max(0, t - it.start);
+  const ovSrc = new Map();
+  for (const o of overlaysAt(p, tt)) {
+    try {
+      if (o.kind === 'image') { await media.image(o.mediaId); const s = media.imageSourceAt(o.mediaId, 0, () => { }); if (s) ovSrc.set(o.id, s); continue; }
+      const url = media.url(o.mediaId); if (!url) continue;
+      let v = thumb.ov.get(o.id);
+      if (!v) { v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; thumb.ov.set(o.id, v); }
+      const s = await thumbVideoAt(v, url, overlaySourceTime(o, tt));
+      if (s && s.w) ovSrc.set(o.id, s);
+    } catch { /* an overlay that can't be decoded is left out */ }
   }
   const single = { ...lay, items: [{ ...it, xIn: 0, fadeInBlack: 0, fadeOutBlack: 0 }] };
-  thumb.comp.render(c.getContext('2d'), 1280, 720, p, single, it.start + 0.0001 + Math.max(0, t - it.start), () => src, {});
+  thumb.comp.render(c.getContext('2d'), F.width, F.height, p, single, tt, () => src, { getOverlaySource: (o) => ovSrc.get(o.id) || null });
   return c;
 }
 let thumbBg = null;
 async function thumbRefresh(refetch) {
-  const P = app.project.thumb;
-  if (refetch || !thumbBg) thumbBg = await thumbFrame(P.time);
+  const P = app.project.thumb, F = thumbFmt(), W = F.width, H = F.height, S = THUMB_SAFE[F.key], sc = W / 1280;
+  const seq = ++thumb.seq;
+  const key = [P.time, F.key, P.fit, P.pip, P.logo && app.project.logo ? app.project.logo.mediaId : ''].join('|');
+  if (refetch || !thumbBg || key !== thumb.key || thumbBg.width !== W) {
+    const bg = await thumbFrame(P.time, F);
+    let lg = null;
+    if (P.logo && app.project.logo) lg = await media.image(app.project.logo.mediaId).catch(() => null);
+    if (seq !== thumb.seq) return; // a newer refresh took over
+    thumbBg = bg; thumb.logo = lg; thumb.key = key;
+  }
+  if (thumb.canvas.width !== W || thumb.canvas.height !== H) { thumb.canvas.width = W; thumb.canvas.height = H; }
   const x = thumb.canvas.getContext('2d');
   x.drawImage(thumbBg, 0, 0);
   const dark = parseFloat($('thumbDarken').value);
   if (dark > 0) {
-    const g = x.createLinearGradient(P.position === 'right' ? 1280 : 0, 0, P.position === 'right' ? 0 : 1280, 0);
-    if (P.position === 'center' || P.position === 'bottom') { x.fillStyle = `rgba(0,0,0,${dark})`; x.fillRect(0, 0, 1280, 720); }
-    else { g.addColorStop(0, `rgba(0,0,0,${Math.min(1, dark * 2.2)})`); g.addColorStop(0.65, `rgba(0,0,0,${dark * 0.4})`); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, 1280, 720); }
+    const g = x.createLinearGradient(P.position === 'right' ? W : 0, 0, P.position === 'right' ? 0 : W, 0);
+    if (['center', 'bottom', 'top'].includes(P.position)) { x.fillStyle = `rgba(0,0,0,${dark})`; x.fillRect(0, 0, W, H); }
+    else { g.addColorStop(0, `rgba(0,0,0,${Math.min(1, dark * 2.2)})`); g.addColorStop(0.65, `rgba(0,0,0,${dark * 0.4})`); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H); }
   }
-  const size = parseFloat($('thumbSize').value);
   const text = $('thumbText').value.trim(), sub = $('thumbSub').value.trim();
+  const band = P.position === 'center' || P.position === 'bottom' || P.position === 'top';
+  const maxW = band ? S.w : S.w * S.side;
   x.save();
-  x.font = fontCss(P.font, size);
-  const maxW = P.position === 'center' || P.position === 'bottom' ? 1140 : 720;
-  const lines = text ? wrapLines(x, text, maxW).slice(0, 4) : [];
-  const lh = size * 1.02;
-  const subSize = Math.round(size * 0.34);
-  const blockH = lines.length * lh + (sub ? subSize * 1.8 : 0);
+  // start at the chosen size, then shrink until the words fit the width and the block fits the safe area
+  let size = parseFloat($('thumbSize').value) * sc, lines = [], subSize = 0, blockH = 0, lh = 0;
+  for (let i = 0; i < 40; i++) {
+    x.font = fontCss(P.font, size);
+    lines = text ? wrapLines(x, text, maxW) : [];
+    lh = size * 1.02; subSize = Math.round(size * 0.34);
+    blockH = lines.length * lh + (sub ? subSize * 1.8 : 0);
+    const widest = lines.reduce((m, l) => Math.max(m, x.measureText(l).width), 0);
+    if ((lines.length <= S.lines && widest <= maxW + 1 && blockH <= S.h) || size <= 24 * sc) break;
+    size *= 0.94;
+  }
+  lines = lines.slice(0, S.lines);
   let ax, align;
-  if (P.position === 'left') { ax = 70; align = 'left'; } else if (P.position === 'right') { ax = 1210; align = 'right'; } else { ax = 640; align = 'center'; }
-  let y = P.position === 'bottom' ? 720 - 60 - blockH : (720 - blockH) / 2;
-  if (P.position === 'bottom' && (lines.length || sub)) { x.fillStyle = 'rgba(0,0,0,.62)'; x.fillRect(0, y - 30, 1280, blockH + 60); }
+  if (P.position === 'left') { ax = S.x; align = 'left'; } else if (P.position === 'right') { ax = S.x + S.w; align = 'right'; } else { ax = S.x + S.w / 2; align = 'center'; }
+  let y;
+  if (P.position === 'bottom') y = S.y + S.h - blockH;
+  else if (P.position === 'top') y = S.y;
+  else y = S.y + (S.h - blockH) * (F.key === '9:16' ? 0.55 : 0.5);
+  if ((P.position === 'bottom' || P.position === 'top') && (lines.length || sub)) { x.fillStyle = 'rgba(0,0,0,.62)'; x.fillRect(0, y - 30 * sc, W, blockH + 60 * sc); }
   x.textAlign = align; x.textBaseline = 'top';
   if (sub) {
     x.font = `700 ${subSize}px "IBM Plex Sans", sans-serif`;
-    const w = x.measureText(sub.toUpperCase()).width;
+    const w = Math.min(S.w, x.measureText(sub.toUpperCase()).width);
     const bx = align === 'left' ? ax : align === 'right' ? ax - w : ax - w / 2;
-    x.fillStyle = P.accent; x.fillRect(bx - 12, y - 6, w + 24, subSize + 14);
-    x.fillStyle = '#fff'; x.fillText(sub.toUpperCase(), ax, y + 1);
+    x.fillStyle = P.accent; x.fillRect(bx - 12 * sc, y - 6 * sc, w + 24 * sc, subSize + 14 * sc);
+    x.fillStyle = '#fff'; x.fillText(sub.toUpperCase(), ax, y + 1, S.w);
     y += subSize * 1.8;
   }
   x.font = fontCss(P.font, size);
@@ -1266,12 +1315,29 @@ async function thumbRefresh(refetch) {
     y += lh;
   }
   x.restore();
+  // logo / watermark, placed by the project's logo settings but kept inside the safe area
+  if (thumb.logo && app.project.logo) {
+    x.save(); x.translate(S.x, S.y);
+    drawLogo(x, S.w, S.h, app.project.logo, thumb.logo);
+    x.restore();
+  }
 }
 function thumbSyncInputs() {
-  const P = app.project.thumb;
+  const P = app.project.thumb, F = thumbFmt(), p = app.project;
   $('thumbText').value = P.text || ''; $('thumbSub').value = P.sub || '';
   $('thumbFont').value = P.font; $('thumbPos').value = P.position; $('thumbColor').value = P.color; $('thumbAccent').value = P.accent;
-  $('thumbTime').max = Math.max(0.01, layout(app.project).total - 0.01); $('thumbTime').value = P.time; $('thumbTimeOut').textContent = fmt(P.time);
+  $('thumbTime').max = Math.max(0.01, layout(p).total - 0.01); $('thumbTime').value = P.time; $('thumbTimeOut').textContent = fmt(P.time);
+  const auto = thumbFormat(p, 'auto');
+  $('thumbFormat').options[0].textContent = `Auto · ${auto.label.split(' ')[0]}`;
+  $('thumbFormat').value = P.format; $('thumbFit').value = P.fit; $('thumbType').value = P.type;
+  $('thumbPip').checked = P.pip; $('thumbLogo').checked = P.logo;
+  $('thumbPipRow').hidden = !(p.overlays || []).length; $('thumbLogoRow').hidden = !p.logo;
+  $('thumbTitle').textContent = `Thumbnail maker · ${F.width}×${F.height}`;
+  $('thumbSave').textContent = 'Download ' + (P.type === 'png' ? 'PNG' : 'JPG');
+  const S = THUMB_SAFE[F.key], g = $('thumbSafe');
+  g.style.cssText = `left:${S.x / F.width * 100}%;top:${S.y / F.height * 100}%;width:${S.w / F.width * 100}%;height:${S.h / F.height * 100}%`;
+  g.hidden = !$('thumbGuides').checked;
+  $('thumbCanvas').dataset.format = F.key;
 }
 async function openThumb() {
   if (!app.project.clips.length) return toast('Add a clip first.');
@@ -1290,15 +1356,40 @@ for (const id of ['thumbText', 'thumbSub', 'thumbFont', 'thumbPos', 'thumbColor'
     thumbInput(); scheduleSave();
   });
 }
+// options that change the picture itself (or the output size) re-render the frame
+for (const id of ['thumbFormat', 'thumbFit', 'thumbPip', 'thumbLogo', 'thumbType']) {
+  $(id).addEventListener('change', () => {
+    const P = app.project.thumb;
+    P.format = $('thumbFormat').value; P.fit = $('thumbFit').value; P.pip = $('thumbPip').checked; P.logo = $('thumbLogo').checked; P.type = $('thumbType').value;
+    thumbSyncInputs(); thumbRefresh(true); scheduleSave();
+  });
+}
+$('thumbGuides').addEventListener('change', () => { $('thumbSafe').hidden = !$('thumbGuides').checked; });
 $('thumbTime').addEventListener('input', debounce(() => { app.project.thumb.time = parseFloat($('thumbTime').value); $('thumbTimeOut').textContent = fmt(app.project.thumb.time); thumbRefresh(true); scheduleSave(); }, 60));
 $('thumbUsePlayhead').onclick = () => { app.project.thumb.time = player.t; thumbSyncInputs(); thumbRefresh(true); };
+const YT_THUMB_LIMIT = 2 * 1024 * 1024;
 $('thumbSave').onclick = async () => {
   await thumbRefresh(false);
-  let q = 0.92, blob;
-  do { blob = await new Promise(r => thumb.canvas.toBlob(r, 'image/jpeg', q)); q -= 0.08; } while (blob && blob.size > 2 * 1024 * 1024 && q > 0.4);
+  const P = app.project.thumb, F = thumbFmt();
+  const toBlob = (cv, type, q) => new Promise(r => cv.toBlob(r, type, q));
+  let blob, note = '';
+  if (P.type === 'png') {
+    blob = await toBlob(thumb.canvas, 'image/png');
+    if (blob && blob.size > YT_THUMB_LIMIT) note = ' PNG is over YouTube\'s 2 MB limit; use JPG for upload.';
+  } else {
+    // JPG: lower the quality (then the size a little) until it is under YouTube's 2 MB limit
+    let cv = thumb.canvas, q = 0.92;
+    for (let i = 0; i < 12; i++) {
+      blob = await toBlob(cv, 'image/jpeg', q);
+      if (!blob || blob.size <= YT_THUMB_LIMIT) break;
+      if (q > 0.45) q -= 0.08;
+      else { const s = document.createElement('canvas'); s.width = Math.round(cv.width * 0.85); s.height = Math.round(cv.height * 0.85); s.getContext('2d').drawImage(cv, 0, 0, s.width, s.height); cv = s; }
+    }
+    if (blob && (cv.width !== F.width)) note = ` Reduced to ${cv.width}×${cv.height} to stay under 2 MB.`;
+  }
   if (!blob) return toast('Could not create thumbnail.');
-  download(blob, exportBaseName(app.project) + '-thumbnail.jpg');
-  toast('Thumbnail saved (' + fmtBytes(blob.size) + ', 1280×720).');
+  download(blob, `${exportBaseName(app.project)}-thumbnail-${F.short}-${F.width}x${F.height}.${P.type === 'png' ? 'png' : 'jpg'}`);
+  toast(`${F.label} thumbnail saved (${fmtBytes(blob.size)}, ${F.width}×${F.height}).${note}`);
 };
 app.thumbRefresh = thumbRefresh;
 

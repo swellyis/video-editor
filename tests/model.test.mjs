@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { newProject, migrate, layout, splitItem, rebaseKeyframes, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen } from '../js/model.js';
+import { newProject, migrate, layout, splitItem, rebaseKeyframes, normalizeClip, newText, sanitizeProject, SCHEMA, clipLen, thumbFormat, THUMB_FORMATS } from '../js/model.js';
 import { safeName, tarBlob, isTar, readTar, dataURLToBlob, fmt } from '../js/util.js';
 
 const clip = (id, out, extra = {}) => normalizeClip({ id, mediaId: 'm_' + id, name: id, kind: 'video', srcDuration: 60, in: 0, out, ...extra });
@@ -93,4 +93,17 @@ test('migrate upgrades old projects and sanitizeProject clamps bad values', () =
 
 test('fmt formats times', () => {
   assert.equal(fmt(0), '00:00'); assert.equal(fmt(61.9), '01:01'); assert.equal(fmt(3725), '1:02:05'); assert.equal(fmt(NaN), '00:00');
+});
+
+test('thumbnail formats: sizes, auto follows the project aspect, old projects and bad values are repaired', () => {
+  assert.deepEqual([THUMB_FORMATS['16:9'].width, THUMB_FORMATS['16:9'].height], [1280, 720]);
+  assert.deepEqual([THUMB_FORMATS['9:16'].width, THUMB_FORMATS['9:16'].height], [1080, 1920]);
+  assert.deepEqual([THUMB_FORMATS['1:1'].width, THUMB_FORMATS['1:1'].height], [1080, 1080]);
+  const p = newProject('x'); assert.equal(thumbFormat(p).key, '16:9');
+  p.settings.ratio = '9:16'; assert.equal(thumbFormat(p).key, '9:16'); assert.equal(thumbFormat(p, '1:1').key, '1:1');
+  p.settings.ratio = '4:5'; assert.equal(thumbFormat(p).key, '1:1');
+  const old = JSON.parse(JSON.stringify(newProject('o'))); delete old.thumb.format; delete old.thumb.type; old.thumb.text = 'Hi';
+  const m = migrate(old); assert.equal(m.thumb.format, 'auto'); assert.equal(m.thumb.type, 'jpg'); assert.equal(m.thumb.text, 'Hi');
+  const bad = JSON.parse(JSON.stringify(newProject('b'))); bad.thumb.format = 'x'; bad.thumb.type = 'gif';
+  const mb = migrate(bad); assert.equal(mb.thumb.format, 'auto'); assert.equal(mb.thumb.type, 'jpg');
 });

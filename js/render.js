@@ -279,6 +279,19 @@ export function drawText(ctx, W, H, tl, alpha = 1, local = 1e6) {
   return { id: tl.id, type: 'text', x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh };
 }
 
+/** Draw the logo / watermark with the project's placement settings (shared by preview, export and thumbnails). */
+export function drawLogo(ctx, W, H, L, lg) {
+  const base = Math.min(W, H);
+  const lw = base * (L.size || 0.14), lh = lw * lg.h / lg.w, m = base * (L.margin ?? 0.035);
+  const pos = L.position || 'tr';
+  const col = { tl: 'l', bl: 'l', tr: 'r', br: 'r' }[pos] || 'c', row = { tl: 't', tr: 't', bl: 'b', br: 'b' }[pos] || 'm'; // 'center' contains an 'r'
+  const x = col === 'l' ? m : col === 'r' ? W - lw - m : (W - lw) / 2;
+  const y = row === 't' ? m : row === 'b' ? H - lh - m : (H - lh) / 2;
+  ctx.globalAlpha = L.opacity ?? 0.85;
+  ctx.drawImage(lg.img, x, y, lw, lh);
+  ctx.globalAlpha = 1;
+}
+
 export class Compositor {
   constructor() {
     this.layer = document.createElement('canvas');
@@ -449,17 +462,7 @@ export class Compositor {
     }
     // logo / watermark
     const lg = project.logo && opts.getLogo ? opts.getLogo() : null;
-    if (lg) {
-      const L = project.logo, base = Math.min(W, H);
-      const lw = base * (L.size || 0.14), lh = lw * lg.h / lg.w, m = base * (L.margin ?? 0.035);
-      const pos = L.position || 'tr';
-      const col = { tl: 'l', bl: 'l', tr: 'r', br: 'r' }[pos] || 'c', row = { tl: 't', tr: 't', bl: 'b', br: 'b' }[pos] || 'm'; // 'center' contains an 'r'
-      const x = col === 'l' ? m : col === 'r' ? W - lw - m : (W - lw) / 2;
-      const y = row === 't' ? m : row === 'b' ? H - lh - m : (H - lh) / 2;
-      ctx.globalAlpha = L.opacity ?? 0.85;
-      ctx.drawImage(lg.img, x, y, lw, lh);
-      ctx.globalAlpha = 1;
-    }
+    if (lg) drawLogo(ctx, W, H, project.logo, lg);
     ctx.restore();
     return { boxes, missing, active: act };
   }
