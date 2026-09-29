@@ -25,7 +25,10 @@
     "action": "./share-target",
     "method": "POST",
     "enctype": "multipart/form-data",
-    "params": { "files": [ { "name": "media", "accept": ["video/*", "image/*", "audio/*"] } ] }
+    "params": {
+      "title": "title", "text": "text", "url": "url",
+      "files": [ { "name": "media", "accept": ["video/*", "image/*", "audio/*", ".mp4", ".mov", ".m4v", ".webm", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".mp3", ".m4a", ".wav", ".aac", ".ogg"] } ]
+    }
   },
   "related_applications": [
     { "platform": "webapp", "url": "manifest.webmanifest", "id": "https://swellyis.github.io/" }

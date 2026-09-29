@@ -1,5 +1,7 @@
 // Video Editor Pro — main controller
 import { initInstall } from './install.js';
+import { initConnect } from './connect-ui.js';
+import { shareOrDownload } from './connect.js';
 import { BUILD } from './build.js';
 import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar } from './util.js';
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
@@ -1586,8 +1588,9 @@ $('thumbGuides').addEventListener('change', () => { $('thumbSafe').hidden = !$('
 $('thumbTime').addEventListener('input', debounce(() => { app.project.thumb.time = parseFloat($('thumbTime').value); $('thumbTimeOut').textContent = fmt(app.project.thumb.time); thumbRefreshSafe(true); scheduleSave(); }, 60));
 $('thumbUsePlayhead').onclick = () => { app.project.thumb.time = player.t; thumbSyncInputs(); thumbRefreshSafe(true); };
 const YT_THUMB_LIMIT = 2 * 1024 * 1024;
-$('thumbSave').onclick = async () => {
-  try { await thumbRefresh(false); } catch (e) { return toast('Could not create thumbnail: ' + (e && e.message || 'error')); }
+/** Render the thumbnail to a file (JPG kept under YouTube's 2 MB, or PNG). Returns { blob, note, name, F } or null after a toast. */
+async function makeThumbFile() {
+  try { await thumbRefresh(false); } catch (e) { toast('Could not create thumbnail: ' + (e && e.message || 'error')); return null; }
   const P = app.project.thumb, F = thumbFmt();
   const toBlob = (cv, type, q) => new Promise(r => cv.toBlob(r, type, q));
   let blob, note = '';
@@ -1605,9 +1608,19 @@ $('thumbSave').onclick = async () => {
     }
     if (blob && (cv.width !== F.width)) note = ` Reduced to ${cv.width}×${cv.height} to stay under 2 MB.`;
   }
-  if (!blob) return toast('Could not create thumbnail.');
-  download(blob, `${exportBaseName(app.project)}-thumbnail-${F.short}-${F.width}x${F.height}.${P.type === 'png' ? 'png' : 'jpg'}`);
-  toast(`${F.label} thumbnail saved (${fmtBytes(blob.size)}, ${F.width}×${F.height}).${note}`);
+  if (!blob) { toast('Could not create thumbnail.'); return null; }
+  return { blob, note, F, name: `${exportBaseName(app.project)}-thumbnail-${F.short}-${F.width}x${F.height}.${P.type === 'png' ? 'png' : 'jpg'}` };
+}
+$('thumbSave').onclick = async () => {
+  const t = await makeThumbFile(); if (!t) return;
+  download(t.blob, t.name);
+  toast(`${t.F.label} thumbnail saved (${fmtBytes(t.blob.size)}, ${t.F.width}×${t.F.height}).${t.note}`);
+};
+$('thumbShare').onclick = async () => {
+  const t = await makeThumbFile(); if (!t) return;
+  const r = await shareOrDownload([new File([t.blob], t.name, { type: t.blob.type })], { title: t.name, download });
+  if (r === 'downloaded') toast(`Sharing is not available here, so the thumbnail was saved instead (${fmtBytes(t.blob.size)}).${t.note}`, 4000);
+  else if (r === 'shared') toast('Thumbnail shared');
 };
 app.thumbRefresh = thumbRefresh;
 
@@ -1699,8 +1712,10 @@ $('exportBtn').onclick = async () => {
       el('span', { class: 'hint', text: `${res.method}${where} · rendered in ${fmtDuration(took)}. Ready to upload.` }));
     $('downloadAgain').href = lastExport.url; $('downloadAgain').download = name;
     const file = new File([res.blob], name, { type: res.mime });
-    $('shareExport').hidden = !(navigator.canShare && navigator.canShare({ files: [file] }));
-    $('shareExport').onclick = () => navigator.share({ files: [file], title: p.name }).catch(() => { });
+    $('shareExport').onclick = async () => {
+      const r = await shareOrDownload([file], { title: p.name, download });
+      if (r === 'downloaded') toast('Sharing is not available here, so the video was saved instead.', 4000); else if (r === 'shared') toast('Video shared');
+    };
     $('exportResult').hidden = false;
     $('outputNote').textContent = 'Export complete.'; $('outputNote').classList.add('status-good');
     if (!handleUnused) toast((res.streamed === 'file' ? 'Video saved: ' : 'Video exported: ') + name);
@@ -1823,6 +1838,35 @@ window.addEventListener('resize', debounce(() => { sizeStage(); if (timeline.aut
 window.addEventListener('pagehide', () => { scheduleSave.flush(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { player.pause(); scheduleSave.flush(); } });
 
+// ---------------------------------------------------------------- Connect tab + files shared from other apps
+const connect = initConnect({ importFiles, showTab, toast, openDialog, closeDialog });
+app.connect = connect;
+let inboxBusy = null;
+/** Take what the service worker stored from the OS share sheet (files, or a link) and put it into the project. */
+function consumeInbox() {
+  if (inboxBusy) return inboxBusy;
+  inboxBusy = (async () => {
+    const inbox = await db.inboxAll().catch(() => []);
+    if (!inbox.length) return;
+    const files = inbox.filter(x => x.blob).map(x => new File([x.blob], x.name || 'shared', { type: x.type || x.blob.type || '' }));
+    const link = inbox.find(x => x.link);
+    if (files.length) { showTab('clip'); toast(`Received ${files.length} shared file${files.length > 1 ? 's' : ''}…`, 2500); await importFiles(files); }
+    if (link && connect.receiveLink(link.link)) toast('A link was shared. Tap Import in the Connect tab to download it.', 5000);
+    await db.inboxDelete(inbox.map(x => x.id)).catch(() => { });
+  })().catch(e => { console.warn(e); toast('The shared files could not be added: ' + (e.message || e), 5000); }).finally(() => { inboxBusy = null; });
+  return inboxBusy;
+}
+// The installed app can stay open while another app shares to it (service worker tells us), or be launched with the files (launchQueue).
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (e) => { if (e.data && e.data.type === 'SHARED') consumeInbox(); });
+if ('launchQueue' in window) {
+  const seen = new Set();
+  window.launchQueue.setConsumer(async (lp) => {
+    if (!lp || !lp.files || !lp.files.length) return;
+    const fs = []; for (const h of lp.files) { try { const f = await h.getFile(); const k = f.name + f.size + f.lastModified; if (!seen.has(k)) { seen.add(k); fs.push(f); } } catch { /* unreadable handle */ } }
+    if (fs.length) { showTab('clip'); await importFiles(fs); }
+  });
+}
+
 async function boot() {
   const theme = await db.kvGet('theme').catch(() => null); if (theme) applyTheme(theme);
   const ripple = await db.kvGet('ripple').catch(() => null); if (ripple === false) { app.rippleEnabled = false; $('rippleBtn').setAttribute('aria-pressed', 'false'); }
@@ -1836,11 +1880,10 @@ async function boot() {
   if (!onboarded) { if (app.project.clips.length) db.kvSet('onboarded', true).catch(() => { }); else $('onboard').hidden = false; }
   // files shared to the installed app (Android share sheet → share_target)
   if (new URLSearchParams(location.search).get('shared') === 'error') {
-    toast('The shared files could not be received. Open them with “Add clips” instead.', 6000);
+    toast('Nothing usable was shared, or it could not be received. Open your files with “Add clips” instead.', 6000);
     history.replaceState(null, '', location.pathname);
   } else if (new URLSearchParams(location.search).has('shared')) {
-    const inbox = await db.inboxAll().catch(() => []);
-    if (inbox.length) { await importFiles(inbox.map(x => new File([x.blob], x.name, { type: x.type }))); await db.inboxClear(); }
+    await consumeInbox();
     history.replaceState(null, '', location.pathname);
   }
   db.gc(app.history.mediaIds()).catch(() => { });

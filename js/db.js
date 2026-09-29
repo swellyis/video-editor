@@ -53,6 +53,7 @@ export const db = {
   },
   inboxAll: () => tx('inbox', 'readonly', s => reqP(s.getAll())),
   inboxClear: () => tx('inbox', 'readwrite', s => { s.clear(); }),
+  inboxDelete: (ids) => tx('inbox', 'readwrite', s => { for (const id of ids) s.delete(id); }),
   kvGet: (k) => tx('kv', 'readonly', s => reqP(s.get(k))),
   kvSet: (k, v) => tx('kv', 'readwrite', s => { s.put(v, k); }),
   /**

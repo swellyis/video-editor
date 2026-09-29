@@ -1,10 +1,10 @@
 /* Video Editor service worker: offline app shell (versioned cache) + share target inbox. */
-const VERSION = 'vdec0332c30';
+const VERSION = 'ved197f7e7e';
 const CACHE = 'video-editor-shell-' + VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css', './css/fonts.css',
-  './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/render.js', './js/blur.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/exporter.js', './js/templates.js', './js/install.js', './js/install-early.js', './js/build.js',
+  './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/render.js', './js/blur.js', './js/connect.js', './js/connect-ui.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/exporter.js', './js/templates.js', './js/install.js', './js/install-early.js', './js/build.js',
   './js/heic-worker.js',
   './vendor/mediabunny.min.mjs', './vendor/gifuct.min.mjs', './vendor/libheif/libheif.js', './vendor/libheif/libheif.wasm',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-192.png', './icons/maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png',
@@ -55,8 +55,16 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
       try {
         const form = await req.formData();
-        const files = form.getAll('media').filter((f) => f && typeof f === 'object');
-        await idbPutInbox(files.map((f, i) => ({ id: 'in_' + Date.now() + '_' + i, name: f.name, type: f.type, blob: f })));
+        const files = form.getAll('media').filter((f) => f && typeof f === 'object' && f.size > 0);
+        const items = files.map((f, i) => ({ id: 'in_' + Date.now() + '_' + i, name: f.name, type: f.type, blob: f }));
+        // a shared link (a "Share" from a browser or another app): text fields only, never fetched here
+        const text = ['url', 'text', 'title'].map((k) => String(form.get(k) || '')).join(' ');
+        const m = /https:\/\/[^\s<>"']+/i.exec(text);
+        if (m) items.push({ id: 'in_' + Date.now() + '_link', link: m[0].replace(/[).,;!?]+$/, '') });
+        if (!items.length) return Response.redirect('./?shared=error', 303);
+        await idbPutInbox(items);
+        // an editor window that stays open (launch_handler focus-existing) is told directly; a fresh one reads the inbox on start
+        for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ type: 'SHARED', count: items.length });
       } catch (e) {
         return Response.redirect('./?shared=error', 303); // the app explains instead of silently showing nothing
       }
