@@ -455,10 +455,10 @@ export function effectiveColor(project, clip) {
 }
 export const colorIsNeutral = (c) => !c.brightness && !c.contrast && !c.saturation && !c.temperature && !c.vignette && !c.sepia && !c.fade;
 
-/** Thumbnail formats: YouTube landscape, Shorts (vertical) and square. */
+/** Thumbnail formats: widescreen (1280x720), vertical for Shorts (1080x1920) and square. */
 export const THUMB_FORMATS = {
-  '16:9': { key: '16:9', label: 'YouTube 16:9', short: 'youtube', width: 1280, height: 720 },
-  '9:16': { key: '9:16', label: 'Shorts 9:16', short: 'shorts', width: 1080, height: 1920 },
+  '16:9': { key: '16:9', label: 'Widescreen 16:9', short: 'widescreen', width: 1280, height: 720 },
+  '9:16': { key: '9:16', label: 'Vertical 9:16 (Shorts)', short: 'shorts', width: 1080, height: 1920 },
   '1:1': { key: '1:1', label: 'Square 1:1', short: 'square', width: 1080, height: 1080 },
 };
 /** The thumbnail format for a choice ('auto' follows the project's aspect ratio). */

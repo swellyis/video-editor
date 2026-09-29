@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="ve-build" content="v9ded6b5dc5" />
+  <meta name="ve-build" content="v1573cc3754" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
@@ -378,7 +378,7 @@
         <section class="section">
           <h2 class="sh">Canvas</h2>
           <span class="label">Aspect ratio</span>
-          <div class="segmented five" data-bind="proj.settings.ratio"><button data-value="original" type="button">Original</button><button data-value="16:9" type="button">YouTube</button><button data-value="9:16" type="button">Shorts</button><button data-value="1:1" type="button">1:1</button><button data-value="4:5" type="button">4:5</button></div>
+          <div class="segmented ratio-seg" data-bind="proj.settings.ratio"><button data-value="original" type="button">Original</button><button data-value="16:9" type="button" title="Landscape">Widescreen 16:9</button><button data-value="9:16" type="button" title="Portrait, for Shorts and Reels">Vertical 9:16</button><button data-value="1:1" type="button" title="Square">Square 1:1</button><button data-value="4:5" type="button" title="Portrait feed post">Portrait 4:5</button></div>
           <div class="field-row" style="margin-top:10px">
             <label><span class="label">Fit</span><select data-bind="proj.settings.fit"><option value="contain">Show full clip</option><option value="cover">Fill &amp; crop</option></select></label>
             <label><span class="label">Background</span><select data-bind="proj.settings.bg"><option value="black">Black</option><option value="blur">Blurred video</option><option value="white">White</option><option value="color">Custom color</option></select></label>
@@ -514,7 +514,7 @@
     </div>
     <div class="thumb-controls">
       <div class="field-row">
-        <label><span class="label">Format</span><select id="thumbFormat"><option value="auto">Auto · match project</option><option value="16:9">YouTube 16:9 · 1280×720</option><option value="9:16">Shorts 9:16 · 1080×1920</option><option value="1:1">Square 1:1 · 1080×1080</option></select></label>
+        <label><span class="label">Format</span><select id="thumbFormat"><option value="auto">Auto · match project</option><option value="16:9">Widescreen 16:9 · 1280×720</option><option value="9:16">Vertical 9:16 (Shorts) · 1080×1920</option><option value="1:1">Square 1:1 · 1080×1080</option></select></label>
         <label><span class="label">Frame fit</span><select id="thumbFit"><option value="cover">Fill (crop)</option><option value="contain">Fit (blurred edges)</option></select></label>
       </div>
       <div class="slider-row wide"><label>Frame</label><input type="range" id="thumbTime" min="0" max="1" step="0.01" /><output id="thumbTimeOut">00:00</output></div>

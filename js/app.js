@@ -321,6 +321,16 @@ function fillOutputs() {
     o.textContent = v == null ? '' : (FMT[o.dataset.fmt] || FMT.int)(v);
   }
 }
+// What to tell the user when a toolbar action can't apply to the current selection.
+const TOOL_HINT = {
+  duplicate: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Duplicate.' },
+  delete: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Delete.' },
+  addKeyframe: {
+    none: 'Nothing selected. Tap a clip, text or overlay on the timeline first, then tap Keyframe.',
+    audio: 'Music and voice tracks have no keyframes. Use Volume, Fade in/out and ducking in the Audio tab. To animate, select a clip, text or overlay.',
+    marker: 'A marker can\'t be keyframed. Select a clip, text or overlay on the timeline, then tap Keyframe.',
+  },
+};
 function fillInspector() {
   const p = app.project;
   for (const inp of qsa('[data-bind]')) {
@@ -380,14 +390,14 @@ function fillInspector() {
     $('loopHint').textContent = a.loop ? (a.loopLen > 0 ? `Repeats the ${fmt(audioLen(a))} trimmed section for ${fmt(a.loopLen)}.` : `Repeats the ${fmt(audioLen(a))} trimmed section until the video ends. Set a length to stop earlier.`) : 'Turn on to repeat a short track under the whole video.';
   }
   $('logoPanel').hidden = !p.logo; $('logoHint').hidden = !!p.logo;
-  const sel = !!app.selection;
-  qsa('.tl-toolbar [data-action=duplicate], .tl-toolbar [data-action=delete]').forEach(b => b.disabled = !sel);
-  // Keyframes only exist for things that animate visually (clip, text, overlay) - not music, voice or markers.
-  const kfOk = !!app.selection && ['clip', 'text', 'overlay'].includes(app.selection.type);
-  qsa('.tl-toolbar [data-action=addKeyframe]').forEach(b => {
-    b.disabled = !kfOk;
-    b.title = kfOk ? 'Keyframe the selected clip, text or overlay at the playhead (Shift+K)' : 'Select a clip, text or overlay to keyframe (music uses fades, volume and ducking instead)';
-  });
+  // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
+  // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
+  const st = app.selection && selected(app.selection.type) ? app.selection.type : null;
+  const kfOk = st === 'clip' || st === 'text' || st === 'overlay';
+  const setState = (sel, ok, tipOk, tipNo) => qsa(sel).forEach(b => { b.disabled = false; b.setAttribute('aria-disabled', ok ? 'false' : 'true'); b.classList.toggle('is-off', !ok); b.title = ok ? tipOk : tipNo; });
+  setState('.tl-toolbar [data-action=duplicate]', !!st, 'Duplicate selected (Ctrl+D)', TOOL_HINT.duplicate.none);
+  setState('.tl-toolbar [data-action=delete]', !!st, 'Delete selected (Del)', TOOL_HINT.delete.none);
+  setState('.tl-toolbar [data-action=addKeyframe]', kfOk, 'Keyframe the selected clip, text or overlay at the playhead (Shift+K)', TOOL_HINT.addKeyframe[st || 'none'] || TOOL_HINT.addKeyframe.none);
 }
 // Side-panel lists: rebuilt only when what they show changed (they're refreshed on every slider input event).
 const listKeys = {};
@@ -469,23 +479,33 @@ const actions = {
     app.commit('Split'); toast(what + ' split at ' + fmtPrecise(player.t, app.project.settings.fps));
   },
   duplicate() {
-    const s = app.selection; if (!s) return toast('Select something to duplicate.');
-    if (s.type === 'clip') { const b = duplicateClip(app.project, s.id, app.rippleEnabled); if (b) app.selection = { type: 'clip', id: b.id }; }
-    else if (s.type === 'text') return actions.duplicateText();
-    else if (s.type === 'audio') { const a = selected('audio'); const b = deepClone(a); b.id = uid('aud'); b.start = a.start + audioSpan(a, layout(app.project).total); app.project.audio.push(b); app.selection = { type: 'audio', id: b.id }; }
-    else if (s.type === 'overlay') { const o = selected('overlay'); const b = deepClone(o); b.id = uid('ovl'); b.start = o.start + overlayLen(o); app.project.overlays.push(b); app.selection = { type: 'overlay', id: b.id }; }
-    else return;
-    app.commit('Duplicate');
+    const s = app.selection, item = s && selected(s.type);
+    if (!s || !item) return toast(TOOL_HINT.duplicate.none);
+    if (s.type === 'clip') { const b = duplicateClip(app.project, s.id, app.rippleEnabled); if (!b) return toast('Could not duplicate this clip.'); app.selection = { type: 'clip', id: b.id }; }
+    else if (s.type === 'text') { const b = deepClone(item); b.id = uid('txt'); b.start = item.end; b.end = item.end + (item.end - item.start); app.project.texts.push(b); app.selection = { type: 'text', id: b.id }; }
+    else if (s.type === 'audio') { const b = deepClone(item); b.id = uid('aud'); b.start = item.start + audioSpan(item, layout(app.project).total); app.project.audio.push(b); app.selection = { type: 'audio', id: b.id }; }
+    else if (s.type === 'overlay') { const b = deepClone(item); b.id = uid('ovl'); b.start = item.start + overlayLen(item); app.project.overlays.push(b); app.selection = { type: 'overlay', id: b.id }; }
+    else if (s.type === 'marker') {
+      // a copy of the marker at the playhead (or a second later when the playhead is already on it)
+      const total = layout(app.project).total, here = Math.abs(player.t - item.time) > 0.05 ? player.t : Math.min(total, item.time + 1);
+      const b = { ...deepClone(item), id: uid('mk'), time: here, name: 'Marker ' + (app.project.markers.length + 1) };
+      app.project.markers.push(b); app.selection = { type: 'marker', id: b.id };
+    } else return toast(TOOL_HINT.duplicate.none);
+    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', marker: 'Marker' }[s.type];
+    app.commit('Duplicate'); toast(what + ' duplicated.');
   },
   delete() {
-    const s = app.selection; if (!s) return;
+    const s = app.selection, item = s && selected(s.type);
+    if (!s || !item) return toast(TOOL_HINT.delete.none);
     const p = app.project;
     if (s.type === 'clip') removeClip(p, s.id, app.rippleEnabled);
-    if (s.type === 'text') p.texts = p.texts.filter(t => t.id !== s.id);
-    if (s.type === 'audio') p.audio = p.audio.filter(t => t.id !== s.id);
-    if (s.type === 'marker') p.markers = p.markers.filter(t => t.id !== s.id);
-    if (s.type === 'overlay') p.overlays = p.overlays.filter(t => t.id !== s.id);
-    app.selection = null; app.commit('Delete');
+    else if (s.type === 'text') p.texts = p.texts.filter(t => t.id !== s.id);
+    else if (s.type === 'audio') p.audio = p.audio.filter(t => t.id !== s.id);
+    else if (s.type === 'marker') p.markers = p.markers.filter(t => t.id !== s.id);
+    else if (s.type === 'overlay') p.overlays = p.overlays.filter(t => t.id !== s.id);
+    else return toast(TOOL_HINT.delete.none);
+    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', marker: 'Marker' }[s.type];
+    app.selection = null; app.commit('Delete'); toast(what + ' deleted. Undo (Ctrl+Z) brings it back.');
   },
   moveLeft() { const c = selected('clip'); if (!c) return; const i = app.project.clips.indexOf(c); if (i > 0) { moveClip(app.project, i, i - 1); app.commit('Move clip'); } },
   moveRight() { const c = selected('clip'); if (!c) return; const i = app.project.clips.indexOf(c); if (i < app.project.clips.length - 1) { moveClip(app.project, i, i + 1); app.commit('Move clip'); } },
@@ -518,13 +538,17 @@ const actions = {
   deleteOverlay() { const o = selected('overlay'); if (!o) return; app.project.overlays = app.project.overlays.filter(x => x !== o); app.selection = null; app.commit('Delete overlay'); },
   ovlStartHere() { const o = selected('overlay'); if (!o) return; o.start = Math.max(0, player.t); app.commit('Move overlay'); },
   addKeyframe() {
-    const k = kfTarget();
-    if (!k) return toast('Select a clip, text or overlay first, then add a keyframe.');
-    if (!k.inside) return toast('Move the playhead over the selected item first.');
+    let k = kfTarget();
+    if (!k) { const t = app.selection && selected(app.selection.type) ? app.selection.type : 'none'; return toast(TOOL_HINT.addKeyframe[t] || TOOL_HINT.addKeyframe.none, 4500); }
+    let moved = false;
+    if (!k.inside) { // the playhead is elsewhere: jump to the nearest point of the selected item instead of refusing
+      player.pause(); player.setTime(k.start + clamp(k.raw, 0.02, Math.max(0.02, k.len - 0.02))); moved = true;
+      k = kfTarget(); if (!k || !k.inside) return toast('Could not place a keyframe on this item. Tap the timeline above it, then tap Keyframe.', 4500);
+    }
     const vals = animated(k.type, k.item, k.local);
     for (const pr of ANIM_PROPS) setKeyframe(k.item, pr, k.local, vals[pr]);
     app.commit('Add keyframe');
-    toast('◆ Keyframe at ' + fmtPrecise(player.t, app.project.settings.fps) + ' — move to another time and change position, scale, rotation or opacity.', 3500);
+    toast('◆ Keyframe at ' + fmtPrecise(player.t, app.project.settings.fps) + (moved ? ' (playhead moved onto the item)' : '') + ' — move to another time and change position, scale, rotation or opacity.', 3500);
   },
   kfPrev() { const k = kfTarget(); if (!k) return; const ts = kfTimes(k.item).filter(x => x < k.raw - 1e-3); if (ts.length) { player.pause(); player.setTime(k.start + ts[ts.length - 1] + 1e-4); } },
   kfNext() { const k = kfTarget(); if (!k) return; const ts = kfTimes(k.item).filter(x => x > k.raw + 1e-3); if (ts.length) { player.pause(); player.setTime(k.start + ts[0] + 1e-4); } },
