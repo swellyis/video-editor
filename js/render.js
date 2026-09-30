@@ -1,5 +1,5 @@
 // Frame compositor shared by preview, thumbnail maker and export.
-import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasKeyframes, overlaysAt, EASES, blurAt } from './model.js';
+import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasMotion, overlaysAt, EASES, blurAt } from './model.js';
 import { clamp } from './util.js';
 import { BlurFX } from './blur.js';
 
@@ -420,7 +420,7 @@ export class Compositor {
       let c = it.clip;
       const bg = c.bg && c.bg !== 'inherit' ? bgOf(c.bg) : projBg;
       let kOpacity = c.opacity ?? 1;
-      if (hasKeyframes(c)) {
+      if (hasMotion(c)) {
         const A = animated('clip', c, t - it.start);
         c = { ...c, transform: { ...c.transform, x: A.x, y: A.y, zoom: Math.max(0.05, A.scale), angle: A.rotation } };
         kOpacity = A.opacity;

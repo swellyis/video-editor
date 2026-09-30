@@ -1,9 +1,10 @@
 // Real-time preview engine: plays the whole sequence across clips with a shared clock.
-import { layout, sourceTime, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioSpan, audioSourceTime, overlayLen, overlaySourceTime, overlayGain } from './model.js';
+import { layout, sourceTime, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioSpan, audioSpeed, audioSourceTime, overlayLen, overlaySourceTime, overlayGain, hasKeyframes } from './model.js';
 import { clamp } from './util.js';
 
 const POOL_MAX = 8;
 
+const LOOK_AHEAD = 0.1; // seconds of gain-ramp lookahead for items with a volume envelope
 export class Player {
   constructor({ canvas, getProject, media, compositor, onTime, onState, audio = true }) {
     this.canvas = canvas; this.ctx = canvas.getContext('2d');
@@ -53,11 +54,18 @@ export class Player {
       entry.gain = g; entry.el.muted = false; entry.el.volume = 1;
     } catch (e) { console.warn('Could not route media audio', e); }
   }
-  _setGain(entry, v) {
+  /** Set an element's gain. With `later` (the gain LOOK_AHEAD seconds from now, for items with a volume envelope) the gain follows a
+   *  WebAudio linear ramp toward it, re-planned every tick, so envelope changes are smooth instead of stepping once per frame. */
+  _setGain(entry, v, later) {
     v = this.muteAll ? 0 : Math.max(0, v);
     if (entry.gain) {
-      const now = this.ac.currentTime;
-      if (Math.abs(entry.gain.gain.value - v) > 0.001) entry.gain.gain.setTargetAtTime(v, now, 0.02);
+      const now = this.ac.currentTime, g = entry.gain.gain;
+      if (later != null && !this.muteAll) {
+        const cur = g.value; g.cancelScheduledValues(now); g.setValueAtTime(cur, now); g.linearRampToValueAtTime(Math.max(0, later), now + LOOK_AHEAD);
+        entry.ramped = true; return;
+      }
+      if (entry.ramped) { entry.ramped = false; g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); }
+      if (Math.abs(g.value - v) > 0.001) g.setTargetAtTime(v, now, 0.02);
     } else if (this.audioEnabled && this.ac && !this.muteAll) {
       entry.el.muted = v <= 0.001; entry.el.volume = clamp(v, 0, 1);
     } else entry.el.muted = true;
@@ -137,7 +145,7 @@ export class Player {
         if (Math.abs(el.currentTime - desired) > 0.015 && !el.seeking) el.currentTime = desired;
         if (active && (el.readyState < 2 || el.seeking)) ready = false;
       }
-      this._setGain(v, active && fwd && this.rate === 1 ? clipGain(it, t) : 0);
+      this._setGain(v, active && fwd && this.rate === 1 ? clipGain(it, t) : 0, active && fwd && this.rate === 1 && hasKeyframes(c, 'volume') ? clipGain(it, Math.min(it.end, t + LOOK_AHEAD)) : null);
     }
     for (const o of p.overlays || []) {
       const len = overlayLen(o);
@@ -158,7 +166,7 @@ export class Player {
         if (!el.paused) el.pause();
         if (Math.abs(el.currentTime - desired) > 0.015 && !el.seeking) el.currentTime = desired;
       }
-      this._setGain(v, active && fwd && this.rate === 1 ? overlayGain(o, t) : 0);
+      this._setGain(v, active && fwd && this.rate === 1 ? overlayGain(o, t) : 0, active && fwd && this.rate === 1 && hasKeyframes(o, 'volume') ? overlayGain(o, Math.min(o.start + len, t + LOOK_AHEAD)) : null);
     }
     for (const [id, v] of this.videos) {
       if (needed.has(id)) continue;
@@ -178,14 +186,16 @@ export class Player {
       const e = this._getAudio(a); if (!e) continue;
       const desired = active ? audioSourceTime(a, t) : audioSourceTime(a, a.start);
       if (active && fwd) {
-        if (Math.abs(e.el.playbackRate - this.rate) > 1e-3) e.el.playbackRate = this.rate;
+        const arate = clamp(audioSpeed(a) * this.rate, 0.0625, 16);
+        if (Math.abs(e.el.playbackRate - arate) > 1e-3) e.el.playbackRate = arate;
         if (e.el.paused) { if (Math.abs(e.el.currentTime - desired) > 0.04) e.el.currentTime = desired; e.el.play().catch(() => { }); }
         else if (Math.abs(e.el.currentTime - desired) > 0.3 || (a.loop && e.el.currentTime >= a.out - 0.02)) e.el.currentTime = desired; // loops jump back to the in-point
       } else {
         if (!e.el.paused) e.el.pause();
         if (Math.abs(e.el.currentTime - desired) > 0.05) e.el.currentTime = desired;
       }
-      this._setGain(e, active && fwd && this.rate === 1 ? musicGain(a, t, this.duck.get(a.id) || this.speech, this.total) : 0);
+      const iv = this.duck.get(a.id) || this.speech;
+      this._setGain(e, active && fwd && this.rate === 1 ? musicGain(a, t, iv, this.total) : 0, active && fwd && this.rate === 1 && hasKeyframes(a, 'volume') ? musicGain(a, Math.min(a.start + len, t + LOOK_AHEAD), iv, this.total) : null);
     }
     return ready;
   }

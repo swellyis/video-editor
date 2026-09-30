@@ -9,8 +9,8 @@ import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
-  newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, ANIM_PROPS, normalizeClip,
-  splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
+  newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
+  splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, MOTION_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
 import { Compositor, drawLogo, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
@@ -150,11 +150,12 @@ function selected(type) {
 }
 /** Selected animatable item with its timeline start/length and the playhead's local time. */
 function kfTarget(type) {
-  const s = app.selection; if (!s || !['clip', 'text', 'overlay', 'blur'].includes(s.type) || (type && s.type !== type)) return null;
+  const s = app.selection; if (!s || !['clip', 'text', 'overlay', 'blur', 'audio'].includes(s.type) || (type && s.type !== type)) return null;
   const item = selected(s.type); if (!item) return null;
   let start, len;
   if (s.type === 'clip') { const it = layout(app.project).items.find(i => i.clip.id === item.id); if (!it) return null; start = it.start; len = it.len; }
   else if (s.type === 'text' || s.type === 'blur') { start = item.start; len = item.end - item.start; }
+  else if (s.type === 'audio') { start = item.start; len = audioSpan(item, layout(app.project).total); }
   else { start = item.start; len = overlayLen(item); }
   const raw = player.t - start;
   return { type: s.type, item, start, len, raw, local: clamp(raw, 0, len), inside: raw >= -1e-4 && raw <= len + 1e-4 };
@@ -269,13 +270,16 @@ function afterSet(path, obj, old, before) {
     if (app.rippleEnabled) { const it = before.items.find(i => i.clip.id === obj.id); if (it) rippleShift(p, it.end - 1e-3, layout(p).total - before.total); }
   }
   if (path === 'text.start' || path === 'text.end') { obj.start = Math.max(0, obj.start); if (obj.end < obj.start + 0.1) obj.end = obj.start + 0.1; }
-  if (path === 'audio.in' || path === 'audio.out') { obj.in = clamp(obj.in, 0, (obj.srcDuration || 1e9) - 0.2); obj.out = clamp(obj.out, obj.in + 0.2, obj.srcDuration || 1e9); }
+  if (path === 'audio.in' || path === 'audio.out') {
+    obj.in = clamp(obj.in, 0, (obj.srcDuration || 1e9) - 0.2); obj.out = clamp(obj.out, obj.in + 0.2, obj.srcDuration || 1e9);
+    if (path === 'audio.in' && hasKeyframes(obj)) obj.keyframes = rebaseKeyframes(obj.keyframes, (obj.in - old) / audioSpeed(obj)); // the volume envelope stays on the same sound
+  }
   if (path === 'audio.start') obj.start = Math.max(0, obj.start);
   if (path.startsWith('clip.fade')) obj[path.split('.')[1]] = clamp(obj[path.split('.')[1]], 0, 10);
   if (path === 'proj.settings.ratio' && obj.ratio === '9:16' && p.settings.bg === 'black') {
     p.settings.bg = 'blur'; toast('Shorts: background set to a blurred copy of your clip (Look tab to change).', 3500);
   }
-  if (path === 'ovl.in' || path === 'ovl.out') { const mx = obj.kind === 'image' ? 3600 : (obj.srcDuration || 1e9); obj.in = clamp(obj.in, 0, mx - MIN_CLIP); obj.out = clamp(obj.out, obj.in + MIN_CLIP, mx); }
+  if (path === 'ovl.in' || path === 'ovl.out') { const mx = obj.kind === 'image' ? 3600 : (obj.srcDuration || 1e9); obj.in = clamp(obj.in, 0, mx - MIN_CLIP); obj.out = clamp(obj.out, obj.in + MIN_CLIP, mx); if (path === 'ovl.in' && obj.kind !== 'image' && hasKeyframes(obj)) obj.keyframes = rebaseKeyframes(obj.keyframes, (obj.in - old) / (obj.speed || 1)); }
   if (path === 'ovl.start') obj.start = Math.max(0, obj.start);
   if (path.startsWith('blur.') || path.startsWith('clip.blur.')) { if (path === 'blur.start' || path === 'blur.end') { obj.start = Math.max(0, obj.start); if (obj.end < obj.start + 0.1) obj.end = obj.start + 0.1; } if (path.startsWith('blur.')) cleanBlur(obj); else cleanClipBlur(obj); }
   if (path === 'ovl.speed') obj.speed = clamp(Number(obj.speed) || 1, 0.25, 4);
@@ -336,9 +340,8 @@ const TOOL_HINT = {
   duplicate: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Duplicate.' },
   delete: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Delete.' },
   addKeyframe: {
-    none: 'Nothing selected. Tap a clip, text or overlay on the timeline first, then tap Keyframe.',
-    audio: 'Music and voice tracks have no keyframes. Use Volume, Fade in/out and ducking in the Audio tab. To animate, select a clip, text or overlay.',
-    marker: 'A marker can\'t be keyframed. Select a clip, text or overlay on the timeline, then tap Keyframe.',
+    none: 'Nothing selected. Tap a clip, text, overlay, music or voice track on the timeline first, then tap Keyframe.',
+    marker: 'A marker can\'t be keyframed. Select a clip, text, overlay, music or voice track on the timeline, then tap Keyframe.',
   },
 };
 function fillInspector() {
@@ -391,6 +394,12 @@ function fillInspector() {
   stage.classList.toggle('text-edit', !!t || !!o);
   $('blurPanel').hidden = !bl; $('blurEmptyHint').hidden = (p.blurs || []).length > 0;
   if (bl) $('blurRadiusRow').hidden = bl.shape === 'ellipse';
+  for (const [row, item, isClip] of [['detachClip', c, true], ['detachOvl', o, false]]) {
+    const btn = $(row + 'Btn'), hint = $(row + 'Hint'); if (!btn || !hint) continue; // (a stale cached page without the button: nothing to update)
+    const can = !!item && item.kind === 'video' && item.hasAudio !== false;
+    btn.parentElement.hidden = !can;
+    if (can) { const off = isClip && item.muted; btn.setAttribute('aria-disabled', off ? 'true' : 'false'); btn.classList.toggle('is-off', off); hint.textContent = off ? 'Muted, so there is no sound to detach. Unmute it first, or its audio may already be detached (Audio tab).' : 'Copies this video’s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.'; }
+  }
   const cbl = c && c.blur; $('clipBlurBody').hidden = !(cbl && cbl.enabled); $('clipBlurKeep').hidden = !(cbl && cbl.enabled && cbl.keep);
   syncBlurBox();
   $('overlayPanel').hidden = !o; $('overlayEmptyHint').hidden = (p.overlays || []).length > 0;
@@ -414,11 +423,11 @@ function fillInspector() {
   // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
   // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
   const st = app.selection && selected(app.selection.type) ? app.selection.type : null;
-  const kfOk = st === 'clip' || st === 'text' || st === 'overlay' || st === 'blur';
+  const kfOk = st === 'clip' || st === 'text' || st === 'overlay' || st === 'blur' || st === 'audio';
   const setState = (sel, ok, tipOk, tipNo) => qsa(sel).forEach(b => { b.disabled = false; b.setAttribute('aria-disabled', ok ? 'false' : 'true'); b.classList.toggle('is-off', !ok); b.title = ok ? tipOk : tipNo; });
   setState('.tl-toolbar [data-action=duplicate]', !!st, 'Duplicate selected (Ctrl+D)', TOOL_HINT.duplicate.none);
   setState('.tl-toolbar [data-action=delete]', !!st, 'Delete selected (Del)', TOOL_HINT.delete.none);
-  setState('.tl-toolbar [data-action=addKeyframe]', kfOk, 'Keyframe the selected clip, text or overlay at the playhead (Shift+K)', TOOL_HINT.addKeyframe[st || 'none'] || TOOL_HINT.addKeyframe.none);
+  setState('.tl-toolbar [data-action=addKeyframe]', kfOk, 'Keyframe the selected item at the playhead (Shift+K). On a music or voice track it adds a volume keyframe.', TOOL_HINT.addKeyframe[st || 'none'] || TOOL_HINT.addKeyframe.none);
 }
 // Side-panel lists: rebuilt only when what they show changed (they're refreshed on every slider input event).
 const listKeys = {};
@@ -485,7 +494,7 @@ $('imageDur').addEventListener('change', trimCommit);
 $('audioLenInput').addEventListener('change', () => {
   const a = selected('audio'); if (!a) return; const l = parseFloat($('audioLenInput').value); if (!(l > 0)) return;
   if (a.loop) a.loopLen = Math.max(0.2, l); // looped: how long it repeats on the timeline
-  else a.out = clamp(a.in + l, a.in + 0.2, a.srcDuration || 1e9);
+  else a.out = clamp(a.in + l * audioSpeed(a), a.in + 0.2 * audioSpeed(a), a.srcDuration || 1e9);
   app.commit('Audio length');
 });
 $('textPosPresets').addEventListener('click', (e) => { const b = e.target.closest('button'); const t = selected('text'); if (!b || !t) return; t.y = parseFloat(b.dataset.y); t.x = 0.5; app.commit('Text position'); });
@@ -584,13 +593,30 @@ const actions = {
       k = kfTarget(); if (!k || !k.inside) return toast('Could not place a keyframe on this item. Tap the timeline above it, then tap Keyframe.', 4500);
     }
     const vals = animated(k.type, k.item, k.local);
-    for (const pr of animPropsOf(k.type)) setKeyframe(k.item, pr, k.local, vals[pr]);
-    app.commit('Add keyframe');
+    for (const pr of animPropsOf(k.type, k.item)) setKeyframe(k.item, pr, k.local, vals[pr]);
+    app.commit(k.type === 'audio' ? 'Add volume keyframe' : 'Add keyframe');
+    if (k.type === 'audio') return toast('◆ Volume keyframe at ' + fmtPrecise(player.t, app.project.settings.fps) + (moved ? ' (playhead moved onto the track)' : '') + ' — move to another time and set its level in the list below, or drag the point on the track.', 5000);
     toast('◆ Keyframe at ' + fmtPrecise(player.t, app.project.settings.fps) + (moved ? ' (playhead moved onto the item)' : '') + (k.type === 'blur' ? ' — move to another time and drag the box or change its size so it follows the subject.' : ' — move to another time and change position, scale, rotation or opacity.'), 3500);
   },
   kfPrev() { const k = kfTarget(); if (!k) return; const ts = kfTimes(k.item).filter(x => x < k.raw - 1e-3); if (ts.length) { player.pause(); player.setTime(k.start + ts[ts.length - 1] + 1e-4); } },
   kfNext() { const k = kfTarget(); if (!k) return; const ts = kfTimes(k.item).filter(x => x > k.raw + 1e-3); if (ts.length) { player.pause(); player.setTime(k.start + ts[0] + 1e-4); } },
-  kfClear() { const k = kfTarget(); if (!k) return; k.item.keyframes = {}; app.commit('Clear keyframes'); toast('Keyframes cleared'); },
+  detachAudio() {
+    const s = app.selection;
+    if (!s || (s.type !== 'clip' && s.type !== 'overlay') || !selected(s.type)) return toast('Select a video clip or overlay first, then tap Detach audio.', 4000);
+    const r = detachAudio(app.project, s);
+    if (r.fail) return toast(r.reason, 4500);
+    app.selection = { type: 'audio', id: r.audio.id };
+    app.commit('Detach audio'); showTab('audio');
+    toast('Audio detached onto its own track (Audio tab). The video is muted; move, trim, fade or keyframe the audio separately.', 5000);
+  },
+  addVolumeKey() {
+    let k = kfTarget(); if (!k || !['clip', 'overlay', 'audio'].includes(k.type)) return;
+    if (!k.inside) { player.pause(); player.setTime(k.start + clamp(k.raw, 0.02, Math.max(0.02, k.len - 0.02))); k = kfTarget(); if (!k || !k.inside) return; }
+    setKeyframe(k.item, 'volume', k.local, volumeEnv(k.item, k.local), 'linear');
+    app.commit('Add volume keyframe'); toast('◆ Volume keyframe at ' + fmtPrecise(player.t, app.project.settings.fps) + ' — set its level in the list, or drag the point on the timeline item.', 4000);
+  },
+  volClear() { const k = kfTarget(); if (!k || !k.item.keyframes) return; delete k.item.keyframes.volume; app.commit('Clear volume keyframes'); toast('Volume keyframes cleared'); },
+  kfClear() { const k = kfTarget(); if (!k) return; if (k.type === 'audio') return actions.volClear(); const vol = k.item.keyframes && k.item.keyframes.volume; k.item.keyframes = {}; if (vol) k.item.keyframes.volume = vol; app.commit('Clear keyframes'); toast('Keyframes cleared'); },
 };
 app.actions = actions;
 
@@ -600,33 +626,62 @@ function renderKfPanels() {
     const type = panel.dataset.kf;
     const k = kfTarget(type);
     if (!k) { if (panel._key) { panel._key = ''; panel.replaceChildren(); } continue; }
-    const times = kfTimes(k.item);
-    const eases = times.map(lt => { for (const pr of ANIM_PROPS) { const f = (k.item.keyframes[pr] || []).find(x => Math.abs(x.t - lt) < 1 / 120); if (f) return f.ease; } return 'linear'; });
-    const key = [type, k.item.id, k.start.toFixed(3), times.join(','), eases.join(',')].join('|');
+    const motion = type !== 'audio';
+    const times = motion ? kfTimes(k.item, false) : [];
+    const eases = times.map(lt => { for (const pr of MOTION_PROPS) { const f = (k.item.keyframes[pr] || []).find(x => Math.abs(x.t - lt) < 1 / 120); if (f) return f.ease; } return 'linear'; });
+    const vol = (k.item.keyframes && k.item.keyframes.volume) || [];
+    const showVol = type === 'audio' || ((type === 'clip' || type === 'overlay') && hasSound(k.item) && k.item.kind !== 'image');
+    const key = [type, k.item.id, k.start.toFixed(3), times.join(','), eases.join(','), showVol ? JSON.stringify(vol) : ''].join('|');
     if (panel._key !== key) {
       panel._key = key;
-      const head = el('div', { class: 'section-head' }, el('h2', { text: 'Keyframes' }), el('span', { class: 'hint mono', text: times.length ? times.length + ' ◆' : 'none' }));
-      const btns = el('div', { class: 'button-row' },
-        el('button', { class: 'btn primary small', type: 'button', 'data-action': 'addKeyframe', text: '◆ Keyframe at playhead' }),
-        el('button', { class: 'btn secondary small', type: 'button', 'data-action': 'kfPrev', 'aria-label': 'Previous keyframe', text: '◀ ◆' }),
-        el('button', { class: 'btn secondary small', type: 'button', 'data-action': 'kfNext', 'aria-label': 'Next keyframe', text: '◆ ▶' }),
-        times.length ? el('button', { class: 'btn ghost danger small', type: 'button', 'data-action': 'kfClear', text: 'Clear all' }) : null);
-      const list = el('div', { class: 'item-list kf-list' });
-      times.forEach((lt, i) => {
-        const sel = el('select', { class: 'mini-select', 'aria-label': 'Easing' });
-        for (const [v, l] of [['linear', 'Linear'], ['easeIn', 'Ease in'], ['easeOut', 'Ease out'], ['easeInOut', 'Ease in/out'], ['hold', 'Hold']]) sel.append(el('option', { value: v, text: l }));
-        sel.value = eases[i];
-        sel.addEventListener('change', () => { const kk = kfTarget(type); if (!kk) return; setEaseAt(kk.item, lt, sel.value); app.commit('Keyframe easing'); });
-        list.append(el('div', { class: 'item kf-row', 'data-lt': String(lt) },
-          el('button', { type: 'button', class: 't', text: '◆ ' + fmtPrecise(k.start + lt, app.project.settings.fps), title: 'Jump to keyframe', onclick: () => { player.pause(); player.setTime(k.start + lt + 1e-4); } }),
-          el('span', { class: 'grow' }), sel,
-          el('button', { type: 'button', text: '✕', 'aria-label': 'Delete keyframe', onclick: () => { const kk = kfTarget(type); if (!kk) return; removeKeyframesAt(kk.item, lt); app.commit('Delete keyframe'); } })));
-      });
-      const hint = el('p', { class: 'hint', text: times.length ? (type === 'blur' ? 'Position and size are animated. Move the playhead to where the subject has moved, then drag the box (or its handles) on the preview to set another keyframe. Easing applies from a keyframe to the next.' : 'Position, scale, rotation and opacity are animated. Move the playhead and drag a slider (or the item on the preview) to set another keyframe. Easing applies from a keyframe to the next.') : (type === 'blur' ? 'Animate the box: add a keyframe, move the playhead, then drag the box or its handles so it follows the face or object.' : 'Animate position, scale, rotation and opacity: add a keyframe, move the playhead, then change a value.') });
-      panel.replaceChildren(head, btns, list, hint);
+      const parts = [];
+      if (motion) {
+        const head = el('div', { class: 'section-head' }, el('h2', { text: 'Keyframes' }), el('span', { class: 'hint mono', text: times.length ? times.length + ' ◆' : 'none' }));
+        const btns = el('div', { class: 'button-row' },
+          el('button', { class: 'btn primary small', type: 'button', 'data-action': 'addKeyframe', text: '◆ Keyframe at playhead' }),
+          el('button', { class: 'btn secondary small', type: 'button', 'data-action': 'kfPrev', 'aria-label': 'Previous keyframe', text: '◀ ◆' }),
+          el('button', { class: 'btn secondary small', type: 'button', 'data-action': 'kfNext', 'aria-label': 'Next keyframe', text: '◆ ▶' }),
+          times.length ? el('button', { class: 'btn ghost danger small', type: 'button', 'data-action': 'kfClear', text: 'Clear all' }) : null);
+        const list = el('div', { class: 'item-list kf-list' });
+        times.forEach((lt, i) => {
+          const sel = easeSelect(eases[i], (v) => { const kk = kfTarget(type); if (!kk) return; setEaseAt(kk.item, lt, v, MOTION_PROPS); app.commit('Keyframe easing'); });
+          list.append(el('div', { class: 'item kf-row', 'data-lt': String(lt) },
+            el('button', { type: 'button', class: 't', text: '◆ ' + fmtPrecise(k.start + lt, app.project.settings.fps), title: 'Jump to keyframe', onclick: () => { player.pause(); player.setTime(k.start + lt + 1e-4); } }),
+            el('span', { class: 'grow' }), sel,
+            el('button', { type: 'button', text: '✕', 'aria-label': 'Delete keyframe', onclick: () => { const kk = kfTarget(type); if (!kk) return; removeKeyframesAt(kk.item, lt, MOTION_PROPS); app.commit('Delete keyframe'); } })));
+        });
+        const hint = el('p', { class: 'hint', text: times.length ? (type === 'blur' ? 'Position and size are animated. Move the playhead to where the subject has moved, then drag the box (or its handles) on the preview to set another keyframe. Easing applies from a keyframe to the next.' : 'Move the playhead to another time, then change position, scale, rotation or opacity to set another keyframe. Easing applies from a keyframe to the next.') : (type === 'blur' ? 'Add a keyframe, move the playhead to where the subject has moved, then drag the box so it follows.' : 'Add a keyframe, move to another time and change something: it animates between them.') });
+        parts.push(head, btns, list, hint);
+      }
+      if (showVol) {
+        const head = el('div', { class: 'section-head vol-head' }, el('h2', { text: motion ? 'Volume envelope' : 'Volume keyframes' }), el('span', { class: 'hint mono', text: vol.length ? vol.length + ' ◆' : 'none' }));
+        const btns = el('div', { class: 'button-row' },
+          el('button', { class: 'btn primary small', type: 'button', 'data-action': 'addVolumeKey', text: motion ? '◆ Volume keyframe at playhead' : '◆ Keyframe at playhead' }),
+          vol.length ? el('button', { class: 'btn ghost danger small', type: 'button', 'data-action': 'volClear', text: 'Clear volume keys' }) : null);
+        const list = el('div', { class: 'item-list kf-list vol-list' });
+        vol.forEach((kv) => {
+          const num = el('input', { class: 'field mono vol-input', type: 'number', min: '0', max: String(VOL_KEY_MAX * 100), step: '5', inputmode: 'numeric', 'aria-label': 'Volume at ' + fmt(k.start + kv.t) + ' (percent of the slider)' });
+          num.value = String(Math.round(kv.v * 100));
+          num.addEventListener('change', () => { const kk = kfTarget(type); if (!kk) return; const n = parseFloat(num.value); if (!Number.isFinite(n)) { num.value = String(Math.round(kv.v * 100)); return; } setKeyframe(kk.item, 'volume', kv.t, clamp(n / 100, 0, VOL_KEY_MAX)); app.commit('Volume keyframe'); });
+          const sel = easeSelect(kv.ease || 'linear', (v) => { const kk = kfTarget(type); if (!kk) return; setEaseAt(kk.item, kv.t, v, ['volume']); app.commit('Volume keyframe easing'); });
+          list.append(el('div', { class: 'item kf-row vol-row', 'data-lt': String(kv.t) },
+            el('button', { type: 'button', class: 't', text: '◆ ' + fmtPrecise(k.start + kv.t, app.project.settings.fps), title: 'Jump to keyframe', onclick: () => { player.pause(); player.setTime(k.start + kv.t + 1e-4); } }),
+            el('span', { class: 'grow' }), num, el('span', { class: 'hint', text: '%' }), sel,
+            el('button', { type: 'button', text: '✕', 'aria-label': 'Delete volume keyframe', onclick: () => { const kk = kfTarget(type); if (!kk) return; removeKeyframesAt(kk.item, kv.t, ['volume']); app.commit('Delete volume keyframe'); } })));
+        });
+        const hint = el('p', { class: 'hint', text: vol.length ? 'The line on the track is a multiplier of the Volume slider (the middle is 100%, the top 200%). Fades and ducking apply on top. Drag a point on the selected track to move it; hold Shift for fine steps.' : 'Add a keyframe, move to another time and add another with a different level to fade or swell the sound. The Volume slider above stays the overall level.' });
+        parts.push(head, btns, list, hint);
+      }
+      panel.replaceChildren(...parts);
     }
     for (const row of panel.querySelectorAll('.kf-row')) row.classList.toggle('selected', Math.abs(parseFloat(row.dataset.lt) - k.raw) < 1 / 60);
   }
+}
+function easeSelect(value, onChange) {
+  const sel = el('select', { class: 'mini-select', 'aria-label': 'Easing' });
+  for (const [v, l] of [['linear', 'Linear'], ['easeIn', 'Ease in'], ['easeOut', 'Ease out'], ['easeInOut', 'Ease in/out'], ['hold', 'Hold']]) sel.append(el('option', { value: v, text: l }));
+  sel.value = value; sel.addEventListener('change', () => onChange(sel.value));
+  return sel;
 }
 let animRefreshQueued = false;
 function refreshAnimated() {

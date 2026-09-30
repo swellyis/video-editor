@@ -1,5 +1,5 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
-import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes } from './model.js';
+import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX } from './model.js';
 import { clamp, fmt, el, icon, toast } from './util.js';
 
 function muteBadge(title, extra = '') {
@@ -162,7 +162,7 @@ export class Timeline {
       const c = it.clip;
       const n = this._node('c:' + c.id, () => {
         const d = el('div', { class: 'tl-clip' },
-          el('div', { class: 'strip' }), el('div', { class: 'xfade' }), el('div', { class: 'kfs' }),
+          el('div', { class: 'strip' }), el('div', { class: 'xfade' }), el('div', { class: 'kfs' }), el('div', { class: 'volenv' }),
           el('div', { class: 'meta' }, el('b'), el('span')),
           el('div', { class: 'badges' }),
           el('div', { class: 'h-l', 'aria-label': 'Trim start' }), el('div', { class: 'h-r', 'aria-label': 'Trim end' }));
@@ -193,6 +193,7 @@ export class Timeline {
       xf.style.width = (it.xIn * this.pps) + 'px'; xf.style.display = it.xIn > 0 ? 'block' : 'none';
       this.renderStrip(n.querySelector('.strip'), c, rec, w);
       this.renderKfs(n, c, it.start, it.len);
+      this.renderVolEnv(n, c, 'clip', it.start, it.len, 60, sel.type === 'clip' && sel.id === c.id && hasSound(c));
     }
     // picture-in-picture overlays
     const ovs = p.overlays || [];
@@ -201,7 +202,7 @@ export class Timeline {
     this.oTrack.classList.toggle('empty', !ovs.length);
     for (const o of ovs) {
       const n = this._node('o:' + o.id, () => {
-        const d = el('div', { class: 'tl-item tl-ovlitem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
+        const d = el('div', { class: 'tl-item tl-ovlitem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'volenv' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'overlay', d._id));
         this.keyable(d, 'overlay');
         return d;
@@ -215,6 +216,7 @@ export class Timeline {
       n.setAttribute('aria-label', `Overlay ${o.name}${om ? ' (muted)' : ''}, ${fmt(o.start)} to ${fmt(o.start + overlayLen(o))}`);
       n.classList.toggle('offline', !this.app.media.peek(o.mediaId));
       this.renderKfs(n, o, o.start, overlayLen(o));
+      this.renderVolEnv(n, o, 'overlay', o.start, overlayLen(o), 26, sel.type === 'overlay' && sel.id === o.id && hasSound(o));
     }
     // text lanes
     const tl = this.lanes(p.texts.map(t => ({ id: t.id, s: t.start, e: t.end })));
@@ -263,7 +265,7 @@ export class Timeline {
     this.aTrack.style.height = Math.max(44 * (this._audioBtns || 1), al.count * 38 + 6) + 'px';
     for (const a of p.audio) {
       const n = this._node('a:' + a.id, () => {
-        const d = el('div', { class: 'tl-item tl-audioitem' }, el('canvas', { class: 'wave' }), el('div', { class: 'seams' }), el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
+        const d = el('div', { class: 'tl-item tl-audioitem' }, el('canvas', { class: 'wave' }), el('div', { class: 'seams' }), el('div', { class: 'volenv' }), el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'audio', d._id));
         this.keyable(d, 'audio');
         return d;
@@ -284,6 +286,7 @@ export class Timeline {
       n.setAttribute('aria-label', `${a.voice ? 'Voice' : 'Music'} ${a.name}${a.loop ? ' (loop)' : ''}${a.muted ? ' (muted)' : ''}, ${fmt(a.start)} to ${fmt(a.start + span)}`);
       n.classList.toggle('offline', !this.app.media.peek(a.mediaId));
       this.renderWave(n.querySelector('.wave'), a, w, null, 30, 1, span);
+      this.renderVolEnv(n, a, 'audio', a.start, span, 34, sel.type === 'audio' && sel.id === a.id);
     }
     // remove stale
     for (const [k, n] of this.nodes) if (n._seen !== this._gen) { n.remove(); this.nodes.delete(k); }
@@ -341,7 +344,7 @@ export class Timeline {
   }
   renderKfs(n, item, start, len) {
     const box = n.querySelector('.kfs'); if (!box) return;
-    const times = kfTimes(item);
+    const times = kfTimes(item, false); // motion keys (◆); the volume envelope has its own line and dots
     const wpx = (len || 0) * this.pps;
     const key = times.join(',') + '|' + this.pps.toFixed(3) + '|' + wpx.toFixed(0);
     if (box._key === key) return; box._key = key;
@@ -357,6 +360,79 @@ export class Timeline {
       box.appendChild(d);
     }
   }
+  /**
+   * Volume envelope on a timeline item: a line (1× sits in the middle, the top is 200%) and, on the selected item, draggable dots
+   * (drag sideways to move a key in time, up/down to change its level). `full` shows the flat 1× line on a selected item without keys.
+   * Unselected items only show the line + dots as decoration (taps go to the item, so selecting and trimming keep working).
+   */
+  renderVolEnv(n, item, type, start, len, H, full) {
+    const box = n.querySelector('.volenv'); if (!box) return;
+    const keys = (item.keyframes && item.keyframes.volume) || [];
+    const W = Math.max(1, Math.round((len || 0) * this.pps));
+    const show = keys.length > 0 || full;
+    const key = show ? [W, H, full ? 1 : 0, JSON.stringify(keys)].join('|') : '';
+    if (box._key === key) return; box._key = key;
+    box.replaceChildren(); box.classList.toggle('editable', !!full);
+    if (!show) return;
+    const NS = 'http://www.w3.org/2000/svg', pad = type === 'clip' ? 8 : 5;
+    const yOf = (v) => (type === 'clip' ? H - pad - (H * 0.4) * Math.min(v, VOL_KEY_MAX) / VOL_KEY_MAX * 1 : pad + (H - 2 * pad) * (1 - Math.min(v, VOL_KEY_MAX) / VOL_KEY_MAX));
+    const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('aria-hidden', 'true');
+    const pts = [], N = Math.min(600, Math.max(2, Math.round(W / 3)));
+    for (let i = 0; i <= N; i++) { const t = (i / N) * (len || 0); pts.push((i / N * W).toFixed(1) + ',' + yOf(volumeEnv(item, t)).toFixed(1)); }
+    const line = document.createElementNS(NS, 'polyline'); line.setAttribute('points', pts.join(' ')); line.setAttribute('class', 'venv-line' + (keys.length ? '' : ' flat')); svg.append(line);
+    if (full || keys.length) {
+      const one = document.createElementNS(NS, 'line'); one.setAttribute('x1', 0); one.setAttribute('x2', W); one.setAttribute('y1', yOf(1)); one.setAttribute('y2', yOf(1)); one.setAttribute('class', 'venv-unity'); svg.insertBefore(one, line);
+    }
+    box.append(svg);
+    keys.forEach((k, idx) => {
+      const cx = (k.t * this.pps).toFixed(1), cy = yOf(k.v).toFixed(1);
+      if (full) { // an invisible larger circle makes the point easy to grab with a finger (about the height of the item)
+        const h = document.createElementNS(NS, 'circle'); h.setAttribute('cx', cx); h.setAttribute('cy', cy); h.setAttribute('r', '17'); h.setAttribute('class', 'venv-hit');
+        h.addEventListener('pointerdown', (e) => this.onVolDotDown(e, n._id, type, k, yOf, H, len)); svg.append(h);
+      }
+      const d = document.createElementNS(NS, 'circle');
+      d.setAttribute('cx', cx); d.setAttribute('cy', cy); d.setAttribute('r', '5.5'); d.setAttribute('class', 'venv-dot');
+      d.dataset.t = String(k.t); d.dataset.v = String(k.v);
+      d.addEventListener('pointerdown', (e) => this.onVolDotDown(e, n._id, type, k, yOf, H, len));
+      svg.append(d);
+    });
+  }
+  onVolDotDown(e, id, type, key, yOf, H, len) {
+    const box = e.currentTarget.closest('.volenv'); if (!box.classList.contains('editable')) return; // unselected: let the tap select the item
+    e.stopPropagation(); e.preventDefault();
+    const p = this.project, snapshot = JSON.parse(JSON.stringify(p));
+    const x0 = e.clientX, y0 = e.clientY, t0 = key.t, v0 = key.v;
+    const kf = type === 'clip' ? (p.clips.find(c => c.id === id) || {}).keyframes : type === 'overlay' ? ((p.overlays || []).find(c => c.id === id) || {}).keyframes : (p.audio.find(c => c.id === id) || {}).keyframes;
+    if (!kf || !kf.volume) return;
+    const span = type === 'clip' ? H * 0.4 : H - 10; // pixels for 0..200%
+    let moved = false;
+    const tip = (t, v) => { this.tip.textContent = `${fmt(t)} · ${Math.round(v * 100)}%`; this.tip.style.display = 'block'; this.tip.style.left = this.x(this._itemStart(id) + t) + 'px'; };
+    const move = (ev) => {
+      const dx = ev.clientX - x0, dy = ev.clientY - y0;
+      if (!moved && Math.hypot(dx, dy) < 4) return; moved = true;
+      let t = clamp(t0 + dx / this.pps, 0, len), v = clamp(v0 - dy / span * VOL_KEY_MAX, 0, VOL_KEY_MAX);
+      if (!ev.shiftKey) v = Math.round(v * 20) / 20; // 5% steps; hold Shift for fine control
+      if (kf.volume.some(o => o !== key && Math.abs(o.t - t) < 1 / 120)) t = key.t; // never land on another key
+      key.t = Math.round(t * 1000) / 1000; key.v = Math.round(v * 1000) / 1000; kf.volume.sort((a, b) => a.t - b.t);
+      for (const o of kf.volume) { delete o.e0; delete o.e1; }
+      tip(key.t, key.v); this.app.liveUpdate({ keepTime: true });
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', cancel);
+      this.tip.style.display = 'none'; this.drag = null;
+      if (moved) this.app.commit('Move volume keyframe');
+      else { const it = this._itemStartSel(id, type); if (it) this.app.seek(it.start + key.t + 1e-4); }
+    };
+    const cancel = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', cancel); this.tip.style.display = 'none'; this.drag = null; if (moved) this.app.restore(snapshot); };
+    this.drag = { type: 'volkey' };
+    document.addEventListener('pointermove', move); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', cancel);
+  }
+  _itemStart(id) {
+    const p = this.project, it = layout(p).items.find(i => i.clip.id === id); if (it) return it.start;
+    const o = (p.overlays || []).find(x => x.id === id); if (o) return o.start;
+    const a = p.audio.find(x => x.id === id); return a ? a.start : 0;
+  }
+  _itemStartSel(id, type) { return { start: this._itemStart(id) }; }
   _findItem(id) {
     const p = this.project, lay = layout(p);
     const it = lay.items.find(i => i.clip.id === id); if (it) return { sel: { type: 'clip', id }, start: it.start };
@@ -371,7 +447,7 @@ export class Timeline {
     const peaks = rec && rec.peaks;
     const W = Math.min(4000, Math.round(w)), H = Hh;
     const loopLen = a.loop && span ? span : 0;
-    const key = [W, a.in, a.out, !!peaks, a.muted, a.volume, loopLen, a.phase || 0].join('|');
+    const key = [W, a.in, a.out, !!peaks, a.muted, a.volume, loopLen, a.phase || 0, a.speed || 1].join('|');
     if (cv._key === key) return; cv._key = key;
     cv.style.display = peaks ? '' : 'none';
     cv.width = W; cv.height = H; cv.style.width = W + 'px';
@@ -380,7 +456,8 @@ export class Timeline {
     x.fillStyle = Hh < 30 ? (a.muted ? 'rgba(255,255,255,.25)' : 'rgba(140,220,255,.85)') : 'rgba(255,255,255,.35)';
     const len = a.out - a.in;
     for (let px = 0; px < W; px += 2) {
-      const t = loopLen ? a.in + (((px / W) * loopLen + (a.phase || 0)) % len) : a.in + (px / W) * len; // looped tracks repeat
+      const sp = audioSpeed(a), L1 = len / sp; // L1 = one pass on the timeline
+      const t = loopLen ? a.in + (((px / W) * loopLen + (a.phase || 0)) % L1) * sp : a.in + (px / W) * len; // looped tracks repeat
       const v = (peaks.data[Math.floor(t * peaks.rate)] || 0) / 255;
       const h = Math.max(1, v * H);
       x.fillRect(px, (H - h) / 2, 1.5, h);
@@ -532,25 +609,28 @@ export class Timeline {
       };
       d.onUp = () => { if (moved) this.app.commit(type === 'blur' ? 'Move blur region' : 'Move text'); };
     } else if (type === 'audio') {
-      const a = p.audio.find(x => x.id === id); const o = { s: a.start, i: a.in, out: a.out, span: audioSpan(a, lay0.total), ll: a.loopLen };
+      const a = p.audio.find(x => x.id === id); const o = { s: a.start, i: a.in, out: a.out, span: audioSpan(a, lay0.total), ll: a.loopLen, kf: JSON.parse(JSON.stringify(a.keyframes || {})) };
+      const sp = audioSpeed(a), keyed = hasKeyframes(a);
       d.onMove = (ev) => {
         const dt = dtOf(ev);
         if (!gate(ev, dt)) return;
+        const len0 = (o.out - o.i) / sp; // one pass on the timeline
         if (handle === 'body') {
-          let s = Math.max(0, o.s + dt); const len = o.out - o.i;
-          const sn = this.snap(s, id, [0, len]); if (sn.snapped) { s = Math.max(0, sn.t); this.showSnap(s); }
+          let s = Math.max(0, o.s + dt);
+          const sn = this.snap(s, id, [0, len0]); if (sn.snapped) { s = Math.max(0, sn.t); this.showSnap(s); }
           a.start = s; tip('Starts ' + fmt(s), s);
         } else if (handle === 'l') {
-          const dd = clamp(dt, -Math.min(o.i, o.s), (o.out - o.i) - 0.2);
-          a.in = o.i + dd; a.start = o.s + dd; tip('Trim in ' + a.in.toFixed(1) + 's', a.start);
+          const dd = clamp(dt, -Math.min(o.i / sp, o.s), len0 - 0.2);
+          a.in = o.i + dd * sp; a.start = o.s + dd; tip('Trim in ' + a.in.toFixed(1) + 's', a.start);
           if (a.loop && o.ll > 0) a.loopLen = Math.max(0.2, o.ll - dd); // keep the looped end in place
+          if (keyed) a.keyframes = rebaseKeyframes(o.kf, dd); // the volume envelope stays on the same sound
         } else {
           if (a.loop) { // looped: the right edge sets how long it repeats
             let end = o.s + o.span + dt; const sn = this.snap(end, id); if (sn.snapped) { end = sn.t; this.showSnap(end); }
             a.loopLen = Math.max(0.2, end - a.start); tip('Loops until ' + fmt(a.start + a.loopLen), a.start + a.loopLen);
           } else {
-            let end = o.s + (o.out - o.i) + dt; const sn = this.snap(end, id); if (sn.snapped) { end = sn.t; this.showSnap(end); }
-            a.out = clamp(o.i + (end - o.s), o.i + 0.2, a.srcDuration || 1e9); tip('Ends ' + fmt(a.start + audioLen(a)), a.start + audioLen(a));
+            let end = o.s + len0 + dt; const sn = this.snap(end, id); if (sn.snapped) { end = sn.t; this.showSnap(end); }
+            a.out = clamp(o.i + (end - o.s) * sp, o.i + 0.2 * sp, a.srcDuration || 1e9); tip('Ends ' + fmt(a.start + audioLen(a)), a.start + audioLen(a));
           }
         }
         this.app.liveUpdate({ keepTime: true });

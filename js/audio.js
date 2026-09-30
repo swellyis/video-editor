@@ -2,7 +2,7 @@
 // clip audio (speed, fades, transitions) + overlay audio + music/voice tracks (looping, ducking).
 // Sources are decoded on demand with WebCodecs (via Mediabunny) — never whole files — and time-stretched with a
 // streaming WSOLA when a clip's speed isn't 1×.
-import { clipGain, musicGain, speechIntervals, duckIntervalsFor, audioLen, audioSpan, overlayLen, overlayGain } from './model.js';
+import { clipGain, musicGain, speechIntervals, duckIntervalsFor, audioLen, audioSpan, audioSpeed, overlayLen, overlayGain } from './model.js';
 import { loadMediabunny } from './media.js';
 
 export const CHUNK_SEC = 10;
@@ -183,16 +183,31 @@ class Stretcher {
   }
 }
 
-function applyEnvelope(param, t0, t1, fn, step = 0.02) {
-  let lastT = t0, v0 = fn(t0);
+/**
+ * Gain automation for one source in one chunk: the gain function is sampled every `step` seconds and joined with linear ramps
+ * (constant stretches collapse into one ramp). `marks` are times (relative to the chunk) where the curve has a corner or a jump,
+ * i.e. volume-envelope keyframes: they are always sampled, and a point 0.5 ms before each is sampled too, so a "hold" key steps
+ * within half a millisecond and linear segments are exact.
+ */
+export function applyEnvelope(param, t0, t1, fn, step = 0.02, marks = null) {
+  const times = [];
+  for (let t = t0 + step; t < t1 - 1e-9; t += step) times.push(t);
+  times.push(t1);
+  if (marks) for (const m of marks) if (m > t0 + 1e-6 && m < t1 - 1e-6) { times.push(m); if (m - 0.0005 > t0) times.push(m - 0.0005); }
+  times.sort((a, b) => a - b);
+  let lastT = t0; const v0 = fn(t0);
   param.setValueAtTime(v0, Math.max(0, t0));
   let pT = t0, pV = v0;
-  for (let t = t0 + step; t <= t1 + 1e-9; t += step) {
+  for (const t of times) {
+    if (t <= pT + 1e-9) continue;
     const v = fn(Math.min(t, t1));
     if (Math.abs(v - pV) > 1e-5) { if (pT !== lastT) param.linearRampToValueAtTime(pV, pT); param.linearRampToValueAtTime(v, t); lastT = t; }
     pT = t; pV = v;
   }
 }
+
+/** Sequence times of an item's volume-envelope keys (the mixer samples the gain exactly there). */
+const envMarks = (item, start) => (item.keyframes && item.keyframes.volume ? item.keyframes.volume.map(k => start + k.t) : null);
 
 /** Everything audible on the timeline as independent segments (timeline range → source range + gain). */
 export function audioSegments(project, lay) {
@@ -201,23 +216,24 @@ export function audioSegments(project, lay) {
   for (const it of lay.items) {
     const c = it.clip;
     if (c.kind !== 'video' || !c.hasAudio || c.muted || c.volume <= 0) continue;
-    segs.push({ kind: 'clip', mediaId: c.mediaId, name: c.name, t0: it.start, t1: it.end, srcIn: c.in, speed: c.speed || 1, gain: (t) => clipGain(it, t) });
+    segs.push({ kind: 'clip', mediaId: c.mediaId, name: c.name, t0: it.start, t1: it.end, srcIn: c.in, speed: c.speed || 1, gain: (t) => clipGain(it, t), marks: envMarks(c, it.start) });
   }
   for (const o of project.overlays || []) {
     if (o.kind !== 'video' || !o.hasAudio || o.muted || o.volume <= 0 || o.start >= total) continue;
-    segs.push({ kind: 'overlay', mediaId: o.mediaId, name: o.name, t0: o.start, t1: Math.min(total, o.start + overlayLen(o)), srcIn: o.in, speed: o.speed || 1, gain: (t) => overlayGain(o, t) });
+    segs.push({ kind: 'overlay', mediaId: o.mediaId, name: o.name, t0: o.start, t1: Math.min(total, o.start + overlayLen(o)), srcIn: o.in, speed: o.speed || 1, gain: (t) => overlayGain(o, t), marks: envMarks(o, o.start) });
   }
   for (const a of project.audio || []) {
     if (a.muted || a.volume <= 0 || a.start >= total) continue;
     const iv = duckIntervalsFor(a, lay, project, speech);
     const gain = (t) => musicGain(a, t, iv, total);
     const end = Math.min(total, a.start + audioSpan(a, total));
-    if (!a.loop) { segs.push({ kind: 'music', mediaId: a.mediaId, name: a.name, t0: a.start, t1: end, srcIn: a.in, speed: 1, gain }); continue; }
-    const L = audioLen(a);
-    let t = a.start, src = a.in + ((a.phase || 0) % L);
+    const sp = audioSpeed(a), marks = envMarks(a, a.start);
+    if (!a.loop) { segs.push({ kind: 'music', mediaId: a.mediaId, name: a.name, t0: a.start, t1: end, srcIn: a.in, speed: sp, gain, marks }); continue; }
+    const L = audioLen(a); // one pass on the timeline; the source section is L * speed long
+    let t = a.start, src = a.in + ((a.phase || 0) % L) * sp;
     for (let n = 0; t < end - 1e-4 && n < 100000; n++) {
-      const passEnd = Math.min(end, t + (a.in + L - src));
-      segs.push({ kind: 'music', mediaId: a.mediaId, name: a.name, t0: t, t1: passEnd, srcIn: src, speed: 1, gain, loopPass: n, share: 'loop:' + a.id });
+      const passEnd = Math.min(end, t + (a.in + L * sp - src) / sp);
+      segs.push({ kind: 'music', mediaId: a.mediaId, name: a.name, t0: t, t1: passEnd, srcIn: src, speed: sp, gain, marks, loopPass: n, share: 'loop:' + a.id });
       t = passEnd; src = a.in;
     }
   }
@@ -285,7 +301,7 @@ export async function* mixChunks(project, lay, media, { sampleRate = 48000, chun
       const g = ctx.createGain();
       src.connect(g).connect(ctx.destination);
       const rel0 = a - T0;
-      applyEnvelope(g.gain, Math.max(0, rel0), Math.min(T1 - T0, b - T0), (t) => s.gain(t + T0));
+      applyEnvelope(g.gain, Math.max(0, rel0), Math.min(T1 - T0, b - T0), (t) => s.gain(t + T0), 0.02, s.marks && s.marks.map(m => m - T0));
       if (rel0 >= 0) src.start(rel0); else src.start(0, -rel0);
       if (s.t1 <= T1 + M) { /* segment ends in this chunk */ }
     }

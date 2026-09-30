@@ -204,3 +204,44 @@ test('project names: dated default, placeholder migration, cleaning', async () =
   assert.equal(m.cleanProjectName('x'.repeat(200)).length, 80);
   assert.equal(m.cleanProjectName(null), '');
 });
+
+test('volume envelope: gain = slider x envelope x fades, hold/linear, clamp, split continuity, trim shift', async () => {
+  const m = await import('../js/model.js');
+  const a = m.newAudio({ id: 'm', duration: 30, name: 'mus' }, 2); a.volume = 0.8; a.fadeIn = 0; a.fadeOut = 0; a.duck = false;
+  m.setKeyframe(a, 'volume', 0, 1, 'linear'); m.setKeyframe(a, 'volume', 4, 0, 'linear');
+  const G = (t) => m.musicGain(a, 2 + t, null, 60);
+  assert.ok(Math.abs(G(0) - 0.8) < 1e-9 && Math.abs(G(2) - 0.4) < 1e-9 && Math.abs(G(4)) < 1e-9);
+  m.setKeyframe(a, 'volume', 5, 3, 'linear'); assert.equal(a.keyframes.volume.length, 3);
+  m.cleanVolumeKeys(a); assert.equal(a.keyframes.volume[2].v, 2, 'clamped to 2');
+  // hold steps
+  const h = { keyframes: { volume: [{ t: 0, v: 1, ease: 'hold' }, { t: 2, v: 0.1, ease: 'linear' }] } };
+  assert.equal(m.volumeEnv(h, 1.99), 1); assert.equal(m.volumeEnv(h, 2), 0.1);
+  // split at 1 s of a 0..4 fade-out: both sides meet at 0.75
+  const p = m.newProject('T'); const b = m.newAudio({ id: 'm', duration: 30, name: 'x' }, 0); b.keyframes = { volume: [{ t: 0, v: 1, ease: 'linear' }, { t: 4, v: 0, ease: 'linear' }] }; b.in = 0; b.out = 10; p.audio = [b];
+  const r = m.splitItem(p, { type: 'audio', id: b.id }, 1);
+  assert.ok(!r.fail);
+  const [x, y] = p.audio;
+  assert.ok(Math.abs(m.volumeEnv(x, 1) - 0.75) < 1e-9 && Math.abs(m.volumeEnv(y, 0) - 0.75) < 1e-9 && Math.abs(m.volumeEnv(y, 3)) < 1e-9);
+  // audio speed: length and source time
+  const s = m.newAudio({ id: 'm', duration: 30, name: 's' }, 1); s.in = 2; s.out = 12; s.speed = 2;
+  assert.equal(m.audioLen(s), 5); assert.equal(m.audioSourceTime(s, 3), 6);
+  // a split of a sped-up track cuts the source at speed x elapsed
+  const p2 = m.newProject('T'); p2.audio = [s]; const r2 = m.splitItem(p2, { type: 'audio', id: s.id }, 3);
+  assert.ok(!r2.fail && s.out === 6 && r2.item.in === 6);
+});
+
+test('detachAudio: matching item, original muted, refuses twice / muted / no audio, migrates old audio items', async () => {
+  const m = await import('../js/model.js');
+  const p = m.newProject('T');
+  p.clips = [m.normalizeClip({ id: 'a', mediaId: 'ma', out: 5, srcDuration: 5 }), m.normalizeClip({ id: 'b', mediaId: 'mb', name: 'B', in: 1, out: 4.5, srcDuration: 10, speed: 1.5, volume: 0.7 })];
+  const r = m.detachAudio(p, { type: 'clip', id: 'b' });
+  assert.ok(r.audio && p.clips[1].muted && p.audio.length === 1);
+  assert.deepEqual([r.audio.start, r.audio.in, r.audio.out, r.audio.speed, r.audio.volume], [5, 1, 4.5, 1.5, 0.7]);
+  assert.ok(Math.abs(m.audioLen(r.audio) - m.clipLen(p.clips[1])) < 1e-9);
+  assert.ok(m.detachAudio(p, { type: 'clip', id: 'b' }).fail, 'refused when already detached / muted');
+  p.clips[0].hasAudio = false; assert.ok(m.detachAudio(p, { type: 'clip', id: 'a' }).fail, 'no audio track');
+  assert.equal(p.audio.length, 1);
+  const old = m.newProject('Old'); old.audio = [{ id: 'aud1', mediaId: 'x', name: 'M', srcDuration: 20, start: 0, in: 0, out: 10, volume: 0.6 }];
+  const mg = m.migrate(JSON.parse(JSON.stringify(old)));
+  assert.equal(mg.audio[0].speed, 1); assert.deepEqual(mg.audio[0].keyframes, {}); assert.equal(m.SCHEMA, 5);
+});

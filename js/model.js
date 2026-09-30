@@ -121,12 +121,28 @@ export function sanitizeProject(p) {
   for (const a of p.audio) {
     cleanName(a, 'Music'); a.muted = a.muted === true; a.volume = num(a.volume, 0, 2, 0.6); a.duckLevel = num(a.duckLevel, 0, 1, 0.3); a.start = num(a.start, 0, 1e6, 0);
     a.in = num(a.in, 0, 1e6, 0); a.out = num(a.out, a.in + 0.01, 1e6, a.in + 1); a.loopLen = num(a.loopLen, 0, 1e6, 0); a.phase = num(a.phase, 0, 1e6, 0);
-    a.fadeIn = num(a.fadeIn, 0, 60, 0); a.fadeOut = num(a.fadeOut, 0, 60, 0);
+    a.fadeIn = num(a.fadeIn, 0, 60, 0); a.fadeOut = num(a.fadeOut, 0, 60, 0); a.speed = num(a.speed, 0.25, 4, 1);
   }
+  for (const it of [...p.clips, ...p.overlays, ...p.audio]) cleanVolumeKeys(it);
   if (p.logo) { const L = p.logo; L.size = num(L.size, 0.01, 1, 0.14); L.opacity = num(L.opacity, 0, 1, 0.85); L.margin = num(L.margin, 0, 0.5, 0.035); L.position = oneOf(L.position, ['tl', 'tr', 'bl', 'br', 'center'], 'tr'); }
   return p;
 }
 
+
+/** Volume envelope keys (keyframes.volume): finite numbers, level 0..VOL_KEY_MAX, valid easing, sorted; anything else is dropped. */
+export const VOL_KEY_MAX = 2;
+export function cleanVolumeKeys(item) {
+  if (!item.keyframes || typeof item.keyframes !== 'object' || Array.isArray(item.keyframes)) item.keyframes = {};
+  const tr = item.keyframes.volume;
+  if (tr === undefined) return item;
+  const keys = Array.isArray(tr) ? tr.filter(k => k && Number.isFinite(+k.t) && Number.isFinite(+k.v) && k.t !== null && k.v !== null && k.t !== '' && k.v !== '').slice(0, 500).map(k => {
+    const o = { t: clamp(+k.t, 0, 1e6), v: clamp(+k.v, 0, VOL_KEY_MAX), ease: oneOf(k.ease, ['linear', 'easeIn', 'easeOut', 'easeInOut', 'hold'], 'linear') };
+    if (Number.isFinite(+k.e0) && Number.isFinite(+k.e1)) { o.e0 = clamp(+k.e0, 0, 1); o.e1 = clamp(+k.e1, 0, 1); }
+    return o;
+  }).sort((a, b) => a.t - b.t).filter((k, i, all) => i === 0 || k.t - all[i - 1].t >= 1 / 120) : []; // one key per moment
+  if (keys.length) item.keyframes.volume = keys; else delete item.keyframes.volume;
+  return item;
+}
 
 // ---------- blur / privacy regions ----------
 export const BLUR_SHAPES = ['rect', 'ellipse'], BLUR_MODES = ['blur', 'pixelate'];
@@ -217,6 +233,8 @@ export function newAudio(media, start = 0) {
     start, in: 0, out: media.duration, volume: 0.6, muted: false, fadeIn: 1, fadeOut: 2, duck: true, duckLevel: 0.3, loop: false, voice: false,
     loopLen: 0, // looped length on the timeline in seconds (0 = repeat until the end of the video)
     phase: 0, // looped tracks: offset into the loop at the track start (set when a looped track is split)
+    speed: 1, // playback speed (a detached video clip keeps its speed); 1 for ordinary music
+    keyframes: {}, // volume envelope: { volume: [{ t, v, ease }] } (t = seconds from the start of the track, v = multiplier of the Volume slider)
   };
 }
 
@@ -248,7 +266,7 @@ export function overlayGain(o, t) {
   if (local < 0 || local > len) return 0;
   // audio follows the overlay's picture fades (with a short de-click ramp when there is no fade)
   const fi = Math.max(0.05, o.fadeIn || 0), fo = Math.max(0.05, o.fadeOut || 0);
-  return o.volume * Math.min(clamp(local / fi, 0, 1), clamp((len - local) / fo, 0, 1));
+  return o.volume * volumeEnv(o, local) * Math.min(clamp(local / fi, 0, 1), clamp((len - local) / fo, 0, 1));
 }
 
 // ---------- keyframes ----------
@@ -259,9 +277,14 @@ export const EASES = {
   easeInOut: (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
   hold: () => 0,
 };
-export const ANIM_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity', 'w', 'h'];
+export const MOTION_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity', 'w', 'h'];
+export const ANIM_PROPS = [...MOTION_PROPS, 'volume'];
 /** The properties a given item type can animate (blur regions animate position and size). */
-export const animPropsOf = (type) => (type === 'blur' ? ['x', 'y', 'w', 'h'] : ['x', 'y', 'scale', 'rotation', 'opacity']);
+/** Clips and overlays that have an audio track can also animate their volume (a multiplier of the Volume slider); music/voice tracks animate only that. */
+export const hasSound = (item) => !!item && item.kind !== 'image' && item.hasAudio !== false;
+export const animPropsOf = (type, item) => (type === 'blur' ? ['x', 'y', 'w', 'h'] : type === 'audio' ? ['volume']
+  : ['x', 'y', 'scale', 'rotation', 'opacity', ...(item && (type === 'clip' || type === 'overlay') && hasKeyframes(item, 'volume') ? ['volume'] : [])]);
+
 /** Eased progress 0..1 of the segment starting at key `a`. A key may carry an ease window [e0, e1] (set when a
  *  segment is cut by a split or trim) so each piece continues exactly along the original curve. */
 export function easeFrac(a, p) {
@@ -322,6 +345,7 @@ export function rebaseKeyframes(kf, from, to = Infinity) {
 }
 /** base (non-animated) value of a property for an item of a given type */
 export function animBase(type, item, prop) {
+  if (prop === 'volume') return 1; // the envelope is a multiplier of the item's Volume slider
   if (type === 'clip') {
     const tr = item.transform || {};
     return prop === 'x' ? tr.x || 0 : prop === 'y' ? tr.y || 0 : prop === 'scale' ? tr.zoom || 1 : prop === 'rotation' ? tr.angle || 0 : item.opacity ?? 1;
@@ -345,12 +369,22 @@ export function kfValue(track, local, base) {
 }
 export function animated(type, item, local) {
   const kf = item.keyframes || {}, out = {};
-  for (const p of animPropsOf(type)) out[p] = kfValue(kf[p], local, animBase(type, item, p));
+  for (const p of animPropsOf(type, item)) out[p] = kfValue(kf[p], local, animBase(type, item, p));
   return out;
 }
 export function hasKeyframes(item, prop) {
   const kf = item && item.keyframes; if (!kf) return false;
   return prop ? !!(kf[prop] && kf[prop].length) : ANIM_PROPS.some(p => kf[p] && kf[p].length);
+}
+/** True when the item has motion keys (position, scale, rotation, opacity, size); volume keys alone don't count. */
+export function hasMotion(item) {
+  const kf = item && item.keyframes; if (!kf) return false;
+  return MOTION_PROPS.some(p => kf[p] && kf[p].length);
+}
+/** Volume envelope multiplier (1 = the slider's level) at local time `local` seconds from the start of the item. */
+export function volumeEnv(item, local) {
+  const tr = item && item.keyframes && item.keyframes.volume;
+  return tr && tr.length ? Math.max(0, kfValue(tr, local, 1)) : 1;
 }
 export function setKeyframe(item, prop, local, v, ease) {
   item.keyframes = item.keyframes || {};
@@ -359,32 +393,34 @@ export function setKeyframe(item, prop, local, v, ease) {
   if (ex) { ex.v = v; if (ease) { ex.ease = ease; delete ex.e0; delete ex.e1; } }
   else {
     for (const k of tr) if (k.t < local) { delete k.e0; delete k.e1; } // segment shape changes: drop cut windows before the new key
-    tr.push({ t: Math.max(0, local), v, ease: ease || (tr.length ? tr[tr.length - 1].ease : 'easeInOut') || 'easeInOut' }); tr.sort((a, b) => a.t - b.t); }
+    tr.push({ t: Math.max(0, local), v, ease: ease || (tr.length ? tr[tr.length - 1].ease : prop === 'volume' ? 'linear' : 'easeInOut') || 'easeInOut' }); tr.sort((a, b) => a.t - b.t); }
 }
-export function kfTimes(item) {
+export function kfTimes(item, withVolume = true) {
   const s = new Set();
   const kf = item && item.keyframes || {};
-  for (const p of ANIM_PROPS) for (const k of kf[p] || []) s.add(Math.round(k.t * 1000) / 1000);
+  for (const p of ANIM_PROPS) if (withVolume || p !== 'volume') for (const k of kf[p] || []) s.add(Math.round(k.t * 1000) / 1000);
   return [...s].sort((a, b) => a - b);
 }
-export function removeKeyframesAt(item, local) {
+export function removeKeyframesAt(item, local, props = ANIM_PROPS) {
   const kf = item.keyframes || {};
-  for (const p of ANIM_PROPS) if (kf[p]) { kf[p] = kf[p].filter(k => Math.abs(k.t - local) > 1 / 120); if (!kf[p].length) delete kf[p]; }
+  for (const p of props) if (kf[p]) { kf[p] = kf[p].filter(k => Math.abs(k.t - local) > 1 / 120); if (!kf[p].length) delete kf[p]; }
 }
-export function setEaseAt(item, local, ease) {
+export function setEaseAt(item, local, ease, props = ANIM_PROPS) {
   const kf = item.keyframes || {};
-  for (const p of ANIM_PROPS) for (const k of kf[p] || []) if (Math.abs(k.t - local) < 1 / 120) { k.ease = ease; delete k.e0; delete k.e1; }
+  for (const p of props) for (const k of kf[p] || []) if (Math.abs(k.t - local) < 1 / 120) { k.ease = ease; delete k.e0; delete k.e1; }
 }
 
 export const clipLen = (c) => Math.max(MIN_CLIP, (c.out - c.in) / (c.kind === 'image' ? 1 : (c.speed || 1)));
-export const audioLen = (a) => Math.max(0.05, a.out - a.in);
+export const audioSpeed = (a) => a.speed > 0 ? a.speed : 1;
+/** Length on the timeline of one pass of an audio track (its trimmed source section divided by its speed). */
+export const audioLen = (a) => Math.max(0.05, (a.out - a.in) / audioSpeed(a));
 /** Length of an audio track on the timeline: one pass, or (looped) repeated to loopLen / the end of the video. */
 export const audioSpan = (a, total) => !a.loop ? audioLen(a) : Math.max(0.05, a.loopLen > 0 ? a.loopLen : (total ?? 0) - a.start);
 /** Source position of an audio track at sequence time t (handles looping). */
 export function audioSourceTime(a, t) {
   const local = Math.max(0, t - a.start), L = audioLen(a);
-  if (!a.loop) return a.in + Math.min(local, L);
-  return a.in + ((local + (a.phase || 0)) % L);
+  if (!a.loop) return a.in + Math.min(local, L) * audioSpeed(a);
+  return a.in + ((local + (a.phase || 0)) % L) * audioSpeed(a);
 }
 /** Loop seams (sequence times where a looped track jumps back to its in-point). */
 export function loopSeams(a, total) {
@@ -463,7 +499,7 @@ export function clipGain(it, t) {
   if (c.kind !== 'video' || c.muted || !c.hasAudio) return 0;
   if (t < it.start || t > it.end) return 0;
   const local = t - it.start, rem = it.end - t;
-  let g = c.volume;
+  let g = c.volume * volumeEnv(c, local);
   g *= Math.min(ramp(local, c.fadeIn), ramp(rem, c.fadeOut));
   if (it.xIn > 0) g *= ramp(local, it.xIn);
   if (it.xOut > 0) g *= ramp(rem, it.xOut);
@@ -471,17 +507,29 @@ export function clipGain(it, t) {
   if (it.fadeOutBlack > 0) g *= ramp(rem, it.fadeOutBlack);
   return g;
 }
+/** Intervals (sequence time) where `gainOf(t)` stays above the ducking threshold; sampled every 0.1 s only when an envelope is present. */
+function audibleIntervals(t0, t1, item, base, thr, gainOf) {
+  if (!hasKeyframes(item, 'volume')) return base > thr ? [[t0, t1]] : [];
+  const out = []; let open = null;
+  for (let t = t0; t <= t1 + 1e-9; t += 0.1) {
+    const on = gainOf(Math.min(t, t1)) > thr;
+    if (on && open === null) open = Math.min(t, t1);
+    if (!on && open !== null) { out.push([open, Math.min(t, t1)]); open = null; }
+  }
+  if (open !== null) out.push([open, t1]);
+  return out;
+}
 /** Intervals where clip audio is audible (for ducking). */
 export function speechIntervals(lay, project, excludeId) {
   const iv = [];
   for (const it of lay.items) {
     const c = it.clip;
-    if (c.kind === 'video' && !c.muted && c.hasAudio && c.volume > 0.02) iv.push([it.start, it.end]);
+    if (c.kind === 'video' && !c.muted && c.hasAudio && c.volume > 0.02) iv.push(...audibleIntervals(it.start, it.end, c, c.volume, 0.02, (t) => c.volume * volumeEnv(c, t - it.start)));
   }
   if (project) {
-    for (const o of project.overlays || []) if (o.kind === 'video' && !o.muted && o.hasAudio && o.volume > 0.02) iv.push([o.start, o.start + overlayLen(o)]);
+    for (const o of project.overlays || []) if (o.kind === 'video' && !o.muted && o.hasAudio && o.volume > 0.02) iv.push(...audibleIntervals(o.start, o.start + overlayLen(o), o, o.volume, 0.02, (t) => o.volume * volumeEnv(o, t - o.start)));
     // a voice track drives ducking of OTHER tracks only: never of itself
-    for (const a of project.audio || []) if (a.voice && !a.muted && a.volume > 0.02 && a.id !== excludeId) iv.push([a.start, a.start + audioSpan(a, lay.total)]);
+    for (const a of project.audio || []) if (a.voice && !a.muted && a.volume > 0.02 && a.id !== excludeId) iv.push(...audibleIntervals(a.start, a.start + audioSpan(a, lay.total), a, a.volume, 0.02, (t) => a.volume * volumeEnv(a, t - a.start)));
   }
   // merge
   iv.sort((a, b) => a[0] - b[0]);
@@ -510,7 +558,7 @@ export function musicGain(a, t, intervals, total) {
   const len = audioSpan(a, total);
   if (t < a.start || t > a.start + len) return 0;
   const local = t - a.start, rem = Math.min(a.start + len, total ?? Infinity) - t;
-  let g = a.volume * Math.min(ramp(local, a.fadeIn), ramp(rem, a.fadeOut));
+  let g = a.volume * volumeEnv(a, local) * Math.min(ramp(local, a.fadeIn), ramp(rem, a.fadeOut));
   if (a.loop) { // 12 ms dip at each loop seam so the jump back to the in-point doesn't click
     const L = audioLen(a), ph = (local + (a.phase || 0)) % L, d = Math.min(ph, L - ph);
     if (local > 0.02 && rem > 0.02 && L > 0.1) g *= ramp(d, 0.012);
@@ -658,9 +706,11 @@ export function splitItem(project, sel, t) {
       b.loopLen = a.loopLen > 0 ? a.loopLen - u : 0;
       a.loopLen = u;
     } else {
-      a.out = a.in + u; b.in = a.in + u;
+      a.out = a.in + u * audioSpeed(a); b.in = a.out;
     }
     a.fadeOut = 0; b.fadeIn = 0;
+    const kf = a.keyframes || {}; // the volume envelope continues seamlessly across the cut
+    a.keyframes = rebaseKeyframes(kf, 0, u); b.keyframes = rebaseKeyframes(kf, u);
     project.audio.splice(project.audio.indexOf(a) + 1, 0, b);
     return { type: 'audio', item: b };
   }
@@ -679,6 +729,39 @@ export function splitItem(project, sel, t) {
     return { type: 'overlay', item: b };
   }
   return fail('Markers can’t be split. Select a clip, text, overlay, blur region or audio track.');
+}
+
+/**
+ * Detach audio: a new audio-track item carrying the audio of a main clip or a video overlay with the same start, in-point, length,
+ * speed, volume, fades and volume envelope, and the original is muted. After that they are independent (no link kept). Returns
+ * { audio } or { fail, reason }. Nothing is changed when it fails. The new track is flagged as a voice track so music keeps ducking under it.
+ */
+export function detachAudio(project, sel) {
+  const fail = (reason) => ({ fail: true, reason });
+  let src, start, fadeIn, fadeOut, speed, vol;
+  if (sel && sel.type === 'overlay') {
+    src = (project.overlays || []).find(x => x.id === sel.id); if (!src) return fail('Nothing selected to detach.');
+    start = src.start; speed = src.speed || 1; vol = src.volume;
+    fadeIn = Math.max(0.05, src.fadeIn || 0); fadeOut = Math.max(0.05, src.fadeOut || 0); // overlay audio always follows its picture fades
+  } else {
+    const it = sel && layout(project).items.find(i => i.clip.id === sel.id);
+    if (!it) return fail('Select a video clip first, then tap Detach audio.');
+    src = it.clip; start = it.start; speed = src.speed || 1; vol = src.volume;
+    fadeIn = Math.max(src.fadeIn || 0, it.xIn || 0, it.fadeInBlack || 0); fadeOut = Math.max(src.fadeOut || 0, it.xOut || 0, it.fadeOutBlack || 0); // picture transitions become audio fades
+  }
+  if (src.kind !== 'video') return fail('Only video clips have audio to detach.');
+  if (src.hasAudio === false) return fail('This video has no audio track to detach.');
+  if (src.muted && sel.type !== 'overlay') return fail('This clip is muted (its audio may already be detached). Unmute it first if you want to detach its audio again.');
+  if ((project.audio || []).some(x => x.mediaId === src.mediaId && Math.abs(x.start - start) < 0.002 && Math.abs(x.in - src.in) < 0.002 && Math.abs(x.out - src.out) < 0.002)) return fail('This audio is already detached (see the Audio tab).');
+  const a = newAudio({ id: src.mediaId, duration: src.srcDuration, name: src.name }, start);
+  Object.assign(a, {
+    name: ((src.name || 'Video') + ' (audio)').slice(0, NAME_MAX), in: src.in, out: src.out, srcDuration: src.srcDuration, speed, volume: vol, muted: false,
+    fadeIn, fadeOut, duck: false, loop: false, voice: true, keyframes: {},
+  });
+  if (hasKeyframes(src, 'volume')) a.keyframes.volume = deepClone(src.keyframes.volume);
+  project.audio.push(a);
+  src.muted = true;
+  return { audio: a };
 }
 
 export function removeClip(project, id, ripple) {
