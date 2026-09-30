@@ -1303,7 +1303,7 @@ async function renderProjectList() {
           el('button', { class: 'btn primary small', type: 'button', text: p.id === app.project.id ? 'Open (current)' : 'Open', onclick: async () => { await openProject(p.id); closeDialog('projectsDialog'); } }),
           el('button', { class: 'btn secondary small', type: 'button', text: 'Rename', onclick: async () => { const n0 = prompt('Project name', shown); if (n0 === null) return; const n = cleanProjectName(n0) || defaultProjectName(p.created || p.updated); if (p.id === app.project.id) { app.project.name = n; app.commit('Rename project'); await saveNow(); } else { p.name = n; p.updated = Date.now(); await db.saveProject(p); } renderProjectList(); renderAll(); } }),
           el('button', { class: 'btn secondary small', type: 'button', text: 'Duplicate', onclick: async () => { if (p.id === app.project.id) await saveNow(); const src = p.id === app.project.id ? JSON.parse(JSON.stringify(app.project)) : p; const c = { ...deepClone(src), id: uid('prj'), name: src.name + ' copy', created: Date.now(), updated: Date.now() }; await db.saveProject(c); renderProjectList(); toast('Project duplicated'); } }),
-          el('button', { class: 'btn secondary small', type: 'button', text: 'Export', onclick: () => exportProjectFile(p.id) }),
+          el('button', { class: 'btn secondary small', type: 'button', text: 'Back up project', title: 'Save project file (.vedit)', onclick: () => exportProjectFile(p.id) }),
           el('button', { class: 'btn ghost danger small', type: 'button', text: 'Delete', onclick: async () => {
             if (!confirm(`Delete “${p.name}”? Its media is removed from this device unless another project uses it.`)) return;
             await db.deleteProject(p.id);
@@ -1342,7 +1342,7 @@ async function exportProjectFile(id) {
   const base = safeName(p.name, 'project');
   if (embed) download(tarBlob([{ name: 'project.json', data: JSON.stringify(data) }, ...files]), base + '-with-media.vedit');
   else download(new Blob([JSON.stringify(data)], { type: 'application/json' }), base + '.vedit.json');
-  toast(embed ? 'Project exported with media' : 'Project exported (media stays on this device)');
+  toast(embed ? 'Project file saved with media (.vedit)' : 'Project file saved (media stays on this device)');
 }
 app.exportProjectFile = exportProjectFile;
 async function importProjectFile(file) {

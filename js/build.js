@@ -1,2 +1,2 @@
 // Written by bump-version.py. Must equal <meta name="ve-build"> in index.html, or the page reloads itself once.
-export const BUILD = 'v67fe784aeb';
+export const BUILD = 'vad4470e155';
