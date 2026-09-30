@@ -168,7 +168,7 @@ async function exportFast(project, media, { onProgress, signal, format, openSink
   const streamed = !!(sink && sink.writable);
   const output = new mb.Output({
     format: container === 'mp4' ? new mb.Mp4OutputFormat({ fastStart: streamed ? false : 'in-memory' }) : new mb.WebMOutputFormat(),
-    target: streamed ? new mb.StreamTarget(sink.writable, { chunked: true, chunkSize: 8 * 1024 * 1024 }) : new mb.BufferTarget(),
+    target: streamed ? new mb.StreamTarget(sink.writable, { chunked: true, chunkSize: 1024 * 1024 }) : new mb.BufferTarget(),
   });
   const vsrc = new mb.CanvasSource(canvas, { codec: vcodec, bitrate, keyFrameInterval: 2, latencyMode: 'quality' });
   output.addVideoTrack(vsrc, { frameRate: fps });

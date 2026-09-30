@@ -4,20 +4,22 @@
 // streaming WSOLA when a clip's speed isn't 1×.
 import { clipGain, musicGain, speechIntervals, duckIntervalsFor, audioLen, audioSpan, audioSpeed, overlayLen, overlayGain } from './model.js';
 import { loadMediabunny } from './media.js';
+import { yieldToMain } from './util.js';
 
 export const CHUNK_SEC = 10;
 const FALLBACK_DECODE_LIMIT = 80 * 1024 * 1024; // whole-file decodeAudioData fallback only for files up to 80 MB
 
 /** Legacy whole-file decode (small files only; used when WebCodecs can't decode a format). */
-async function decodeWhole(blob) {
+async function decodeWhole(blob, duration) {
   if (blob.size > FALLBACK_DECODE_LIMIT) throw new Error('file too large to decode in memory');
+  if (!(duration > 0) || duration * 48000 * 2 * 4 > 384 * 1024 * 1024) throw new Error('file too long to decode in memory'); // 80 MB of AAC can be hours of PCM
   const ac = new OfflineAudioContext(2, 1, 48000);
   return await ac.decodeAudioData(await blob.arrayBuffer());
 }
 
 /** Sequential, sample-accurate reader of one media file's audio (native sample rate, up to 2 channels). */
 class SourceReader {
-  constructor(blob, name) { this.blob = blob; this.name = name; this.chunks = []; this.it = null; this.done = false; }
+  constructor(blob, name, duration) { this.blob = blob; this.name = name; this.duration = duration; this.chunks = []; this.it = null; this.done = false; }
   async open() {
     try {
       const mb = await loadMediabunny();
@@ -30,7 +32,7 @@ class SourceReader {
     } catch (e) {
       this.input && this.input.dispose && this.input.dispose(); this.input = null;
       if (e.noAudio) throw e; // a file without an audio track is simply silent
-      this.whole = await decodeWhole(this.blob); // throws for large files
+      this.whole = await decodeWhole(this.blob, this.duration); // throws for large / long files
       this.sr = this.whole.sampleRate; this.ch = Math.min(2, this.whole.numberOfChannels);
     }
     return this;
@@ -263,7 +265,7 @@ export async function* mixChunks(project, lay, media, { sampleRate = 48000, chun
       const rec = await media.get(s.mediaId);
       let st = null;
       if (rec && !failed.has(s.mediaId)) {
-        try { st = { reader: await new SourceReader(rec.blob, rec.name).open() }; }
+        try { st = { reader: await new SourceReader(rec.blob, rec.name, rec.duration).open() }; }
         catch (e) {
           failed.add(s.mediaId);
           if (e.noAudio) console.info('No audio track in', rec.name);
@@ -307,6 +309,7 @@ export async function* mixChunks(project, lay, media, { sampleRate = 48000, chun
     }
     onStatus && onStatus(T1 / total);
     const out = await ctx.startRendering();
+    await yieldToMain(); // hand the thread back to the page between chunks (touch, paint) so a long mix never freezes the UI
     // release readers whose segments (all loop passes) are finished
     for (const [key, st] of open) if (lastEnd.get(key) < T1 - M) { st && st.reader.close(); open.delete(key); }
     for (const s of stretchers.keys()) if (s.t1 < T1 - M) stretchers.delete(s);

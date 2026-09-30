@@ -159,3 +159,43 @@ export function icon(name, cls = 'ico') {
   s.innerHTML = ICONS[name] || '';
   return s;
 }
+
+/**
+ * Give the browser a turn (input, paint) before a heavy job continues. Uses scheduler.yield() where there is one; otherwise a
+ * MessageChannel hop (no 4 ms timer clamping), and a real timer when the tab is hidden (message hops still run there).
+ */
+export function yieldToMain() {
+  if (typeof scheduler !== 'undefined' && scheduler.yield) return scheduler.yield();
+  return new Promise((res) => {
+    if (typeof document !== 'undefined' && document.hidden) return setTimeout(res, 0);
+    const ch = new MessageChannel(); ch.port1.onmessage = () => { ch.port1.close(); res(); }; ch.port2.postMessage(0);
+  });
+}
+/** Main-thread health: how long the page has been blocked by long tasks (>50 ms), for the safeguards and for tests. */
+export const perf = { longTasks: 0, longest: 0, lastLong: 0, blockedMs: 0, over1s: 0 };
+export function startLongTaskMonitor() {
+  try {
+    if (typeof PerformanceObserver === 'undefined' || !PerformanceObserver.supportedEntryTypes || !PerformanceObserver.supportedEntryTypes.includes('longtask')) return false;
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        perf.longTasks++; perf.blockedMs += e.duration; perf.longest = Math.max(perf.longest, e.duration); perf.lastLong = performance.now();
+        if (e.duration > 1000) { perf.over1s++; console.info('[perf] the page was blocked for ' + Math.round(e.duration) + ' ms'); }
+      }
+    }).observe({ type: 'longtask', buffered: true });
+    return true;
+  } catch { return false; }
+}
+/**
+ * A "polite" loop helper for heavy background work: call `await slice()` inside the loop. It yields to the browser after ~10 ms of
+ * work, and backs off (sleeps longer) while the page has recently been blocked by long tasks, so a slow phone stays usable.
+ */
+export function politeSlicer(budgetMs = 10) {
+  let t0 = performance.now();
+  return async function slice() {
+    const now = performance.now();
+    if (now - t0 < budgetMs) return;
+    await yieldToMain();
+    if (performance.now() - perf.lastLong < 400) await new Promise(r => setTimeout(r, 30)); // recently janky: leave room for input
+    t0 = performance.now();
+  };
+}

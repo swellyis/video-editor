@@ -3,7 +3,7 @@ import { initInstall } from './install.js';
 import { initConnect } from './connect-ui.js';
 import { shareOrDownload } from './connect.js';
 import { BUILD } from './build.js';
-import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar } from './util.js';
+import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar, perf, startLongTaskMonitor, stripExt } from './util.js';
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
@@ -16,6 +16,7 @@ import { Compositor, drawLogo, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, T
 import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { Timeline } from './timeline.js';
+import { extractAudio, exportTimelineAudio, ExtractCancelled } from './extract.js';
 import { runExport, capabilities, planFormat, ExportCancelled, createSink, canStreamToOPFS, cleanupExports, bitrateFor } from './exporter.js';
 
 // Page/script version check first, before anything else can fail on a mismatched page (see the service worker section).
@@ -48,6 +49,7 @@ const app = {
 };
 // Debug/test handle: only on local development hosts or with ?debug in the URL (not exposed on the public site).
 if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has('debug')) window.__app = app;
+startLongTaskMonitor(); app.perf = perf; // main-thread health (long tasks), used by the polite background jobs and by tests
 let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
 
 // media this tab still needs, reported to other tabs before they garbage-collect stored media
@@ -215,6 +217,7 @@ function updateSummary() {
   const r = p.settings.ratio === 'original' ? 'Orig' : p.settings.ratio;
   $('outputFormat').textContent = r + ' ' + ({ 720: 'HD', 1080: 'FHD', 2160: '4K' }[p.settings.res] || '') + ' ' + p.settings.fps;
   $('exportBtn').disabled = !n || exporting;
+  const xb = $('exportAudioBtn'); if (xb) xb.disabled = !n || exporting || !!extractJob;
   $('thumbBtn').disabled = !n;
   onTime(player.t, true);
 }
@@ -1016,7 +1019,7 @@ async function importFiles(files, where = 'auto') {
       p.clips.splice(insertAt++, 0, c); added++;
       app.selection = { type: 'clip', id: c.id };
       if (added === 1 && !lay0.items.length) { renderAll(); }
-    } catch (e) { console.warn(e); toast('Could not read ' + f.name + ': ' + (e.message || e)); }
+    } catch (e) { (/No video track|Unsupported/i.test(e.message || '') ? console.info : console.warn)('Import failed:', e.message || e); toast('Could not read ' + f.name + ': ' + (e.message || e) + (/No video track|Timed out|Media error|decode/i.test(e.message || '') ? '. This browser can’t show its picture (often iPhone H.265/HEVC on a laptop). Its sound can still be saved: Audio tab → “Extract audio from a video file…”.' : ''), 8000); }
   }
   if (added && sel && app.rippleEnabled) rippleShift(p, layout({ ...p, clips: p.clips.slice(0, p.clips.indexOf(sel) + 1) }).total - 1e-3, layout(p).total - lay0.total);
   for (const f of aud) {
@@ -1840,6 +1843,113 @@ $('exportBtn').onclick = async () => {
 };
 $('cancelExport').onclick = () => { if (abort) abort.abort(); };
 
+// ---------------------------------------------------------------- extract audio (save sound as a file)
+const bind = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); }; // (a stale cached page may lack the element: skip, never throw)
+let extractJob = null; // { abort, kind } while running
+let extractSrc = null; // what the dialog is about: { title, name, run(opts) -> result, trimText? }
+let lastExtract = null;
+function extractSource() {
+  const s = app.selection, item = s && selected(s.type);
+  if (item && ['clip', 'overlay', 'audio'].includes(s.type)) return { item, type: s.type };
+  const items = layout(app.project).items; // nothing usable selected: the clip under the playhead, else the first
+  const it = items.find(i => player.t >= i.start && player.t < i.end) || items[0];
+  return it ? { item: it.clip, type: 'clip' } : null;
+}
+actions.extractAudio = async function extractAudioAction() {
+  if (extractJob) { openDialog('extractDialog'); return; }
+  const src = extractSource();
+  if (!src) return toast('Add a video first, then select it and tap Extract audio.', 4000);
+  const { item } = src;
+  if (item.kind === 'image') return toast('A photo has no audio to extract.', 4000);
+  if (item.hasAudio === false) return toast('This video has no audio, so there is nothing to extract.', 5000);
+  const rec = await media.get(item.mediaId);
+  if (!rec || !rec.blob) return toast('This clip’s media is missing (red clip). Relink it first, then extract its audio.', 5000);
+  const trimmed = item.in > 0.01 || (item.srcDuration && item.out < item.srcDuration - 0.05);
+  extractSrc = {
+    title: item.name || rec.name || 'audio', blob: rec.blob, trim: trimmed ? { start: item.in, end: item.out } : null,
+    text: (rec.kind === 'audio' ? 'Audio file' : 'Video') + ' “' + (item.name || rec.name) + '” · ' + fmt(item.srcDuration || rec.duration || 0) + ' · ' + fmtBytes(rec.size || rec.blob.size),
+    trimText: trimmed ? 'Only the trimmed part (' + fmt(item.in) + ' – ' + fmt(item.out) + ')' : '',
+    run: (o) => extractAudio(rec.blob, o),
+  };
+  openExtractDialog();
+};
+function openExtractDialog() {
+  const S = extractSrc;
+  if (!$('extractDialog') || !$('exGo')) return toast('This copy of the page is out of date. Reload it (or close and reopen the app) to use Extract audio.', 6000);
+  $('exSource').textContent = S.text;
+  $('exTrimRow').hidden = !S.trimText; $('exTrimText').textContent = S.trimText; $('exTrim').checked = true;
+  $('exFormat').disabled = false;
+  resetExtractUI();
+  openDialog('extractDialog');
+}
+function resetExtractUI() {
+  $('exProgress').classList.remove('show'); $('exResult').hidden = true; $('exBar').style.width = '0%'; $('exPercent').textContent = '0%'; $('exStatus').textContent = 'Starting…';
+  $('exGo').disabled = false; $('exGo').textContent = 'Extract audio'; $('exGo').classList.remove('busy'); $('exCancel').textContent = 'Close';
+}
+bind('extractFileInput', 'change', (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  if (extractJob) return openDialog('extractDialog');
+  if (!kindOf(f) || kindOf(f) === 'image') return toast('Pick a video or audio file.', 4000);
+  extractSrc = { title: stripExt(f.name) || 'audio', blob: f, trim: null, trimText: '', text: 'File “' + f.name + '” · ' + fmtBytes(f.size), run: (o) => extractAudio(f, o) };
+  openExtractDialog();
+});
+bind('exGo', 'click', async () => {
+  if (extractJob || !extractSrc) return; // double taps: one job
+  const S = extractSrc;
+  const ctl = new AbortController();
+  extractJob = { abort: () => ctl.abort() }; updateSummary();
+  $('exGo').disabled = true; $('exGo').textContent = 'Extracting…'; $('exGo').classList.add('busy'); $('exFormat').disabled = true; $('exCancel').textContent = 'Cancel';
+  $('exProgress').classList.add('show'); $('exResult').hidden = true; $('exStatus').textContent = 'Reading the audio…';
+  const t0 = performance.now();
+  const setP = (f, txt) => { $('exBar').style.width = (f * 100).toFixed(1) + '%'; $('exPercent').textContent = Math.floor(f * 100) + '%'; if (txt) $('exStatus').textContent = txt; };
+  try { await navigator.wakeLock?.request('screen').then(l => (app._wakeX = l)); } catch { /* optional */ }
+  try {
+    const res = await S.run({
+      format: $('exFormat').value, trim: !S.trimText || $('exTrim').checked ? S.trim : null, signal: ctl.signal,
+      makeSink: (ext) => createSink({ ext }),
+      onProgress: (f, txt) => setP(f, txt || (f < 1 ? 'Extracting… ' + Math.floor(f * 100) + '%' : 'Finishing…')),
+      onWarn: (m) => toast(m, 6000),
+    });
+    const name = safeName(S.title, 'audio') + '.' + res.ext;
+    const file = new File([res.blob], name, { type: res.mime });
+    download(file, name);
+    if (lastExtract) URL.revokeObjectURL(lastExtract.url);
+    lastExtract = { name, url: URL.createObjectURL(file) };
+    setP(1, 'Done');
+    const how = res.plan ? (res.plan.copy ? ' · copied without re-encoding' : ' · ' + res.plan.codec.toUpperCase()) : '';
+    $('exResultText').replaceChildren(el('b', { text: name }), ` · ${fmtBytes(res.blob.size)}${how}`, el('br'), el('span', { class: 'hint', text: (res.plan && res.plan.note ? res.plan.note + ' ' : '') + 'Saved to your downloads · took ' + fmtDuration((performance.now() - t0) / 1000) + '.' }));
+    $('exDownload').href = lastExtract.url; $('exDownload').download = name;
+    $('exShare').onclick = async () => { const r = await shareOrDownload([file], { title: name, download }); if (r === 'downloaded') toast('Sharing is not available here, so the file was saved instead.', 4000); else if (r === 'shared') toast('Audio shared'); };
+    $('exResult').hidden = false; $('exProgress').classList.remove('show');
+    toast('Audio saved: ' + name, 4000);
+  } catch (e) {
+    if (e instanceof ExtractCancelled || (e && e.name === 'ExtractCancelled')) { $('exStatus').textContent = 'Cancelled. Nothing was saved.'; toast('Extraction cancelled'); }
+    else {
+      (e && e.code ? console.info : console.warn)('Extract audio:', e && e.message || e);
+      const msg = e && e.code ? e.message : 'Could not extract the audio: ' + ((e && e.message) || e);
+      $('exStatus').textContent = msg; toast(msg, 6000);
+    }
+  } finally {
+    extractJob = null; try { app._wakeX && app._wakeX.release(); } catch { /* ignore */ }
+    $('exGo').disabled = false; $('exGo').textContent = 'Extract audio'; $('exGo').classList.remove('busy'); $('exFormat').disabled = false; $('exCancel').textContent = 'Close';
+    updateSummary();
+  }
+});
+bind('exCancel', 'click', () => { if (extractJob) extractJob.abort(); else closeDialog('extractDialog'); });
+bind('extractDialog', 'close', () => { if (extractJob) extractJob.abort(); }); // closing the sheet cancels the job
+bind('exportAudioBtn', 'click', () => {
+  const p = app.project; if (!p.clips.length || exporting) return;
+  if (extractJob) return openDialog('extractDialog');
+  const missing = [...p.clips, ...(p.overlays || [])].filter(c => !media.has(c.mediaId));
+  if (missing.length) return toast('Relink missing media before exporting (red clips).');
+  extractSrc = {
+    title: p.name || 'audio', text: 'The whole timeline’s sound, mixed (volume, fades, speed, music, voiceover) · ' + fmt(layout(p).total) + ' · no picture', trimText: '', trim: null,
+    run: (o) => exportTimelineAudio(JSON.parse(JSON.stringify(app.project)), media, o),
+  };
+  openExtractDialog();
+});
+
 // ---------------------------------------------------------------- install (PWA): see js/install.js
 initInstall({ $, toast, isIOS });
 
@@ -1858,10 +1968,20 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
         app._updateRequested = true; saveNow();
         if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' }); else location.reload();
       });
-      if (reg.waiting && hadController) showUpdate();
+      // A newer version that is already downloaded is applied by itself while nothing has been edited in this tab (the project is
+      // in IndexedDB either way), once per tab session; otherwise the "new version ready" bar asks. Otherwise an installed app
+      // keeps running its old cached copy until every window is closed, so a fix never seems to arrive.
+      const autoApply = () => {
+        let done = false; try { done = sessionStorage.getItem('ve.autoUpdated') === '1'; } catch { /* storage blocked */ }
+        if (done || app._updateRequested || app.rev !== 0 || exporting || extractJob || voice.busy || player.playing || !reg.waiting) return false;
+        try { sessionStorage.setItem('ve.autoUpdated', '1'); } catch { /* ignore */ }
+        app._updateRequested = true; reg.waiting.postMessage({ type: 'SKIP_WAITING' }); return true;
+      };
+      app.autoApplyUpdate = autoApply;
+      if (reg.waiting && hadController && !autoApply()) showUpdate();
       reg.addEventListener('updatefound', () => {
         const w = reg.installing;
-        w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdate(); });
+        w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller && !autoApply()) showUpdate(); });
       });
       let reloading = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {

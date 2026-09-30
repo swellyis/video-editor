@@ -1,6 +1,6 @@
 // Media import, metadata probing, thumbnails, waveforms, and runtime caches (object URLs, images).
 import { db } from './db.js';
-import { uid } from './util.js';
+import { uid, politeSlicer } from './util.js';
 
 let mbPromise = null, gifPromise = null;
 export function loadMediabunny() {
@@ -110,7 +110,7 @@ async function hasAudioTrack(blob) {
  * Compute waveform peaks (values 0..255, `rate` per second). Streams the audio through WebCodecs in small decoded
  * chunks, so only the low-resolution peak array is kept — an hour-long sermon never sits in memory as PCM.
  */
-export async function computePeaks(blob, rate = 20) {
+export async function computePeaks(blob, rate = 20, duration = 0) {
   try {
     const mb = await loadMediabunny();
     const input = new mb.Input({ source: new mb.BlobSource(blob), formats: mb.ALL_FORMATS });
@@ -119,7 +119,9 @@ export async function computePeaks(blob, rate = 20) {
       if (track && await track.canDecode()) {
         const peaks = [];
         const sink = new mb.AudioBufferSink(track);
+        const slice = politeSlicer(); // heavy loop: hand the thread back to the page every ~10 ms
         for await (const { buffer, timestamp } of sink.buffers()) {
+          await slice();
           const ch = buffer.getChannelData(0), sr = buffer.sampleRate;
           const t0 = Math.max(0, timestamp);
           for (let i = 0; i < ch.length; i += 4) {
@@ -135,6 +137,7 @@ export async function computePeaks(blob, rate = 20) {
     } finally { input.dispose && input.dispose(); }
   } catch (e) { /* fall through to the small-file path */ }
   if (blob.size > 60 * 1024 * 1024) return null; // never decode a big file in one piece
+  if (!(duration > 0) || duration * 48000 * 2 * 4 > 256 * 1024 * 1024) return null; // ...nor a long one: 60 MB of AAC can be an hour = 1.4 GB of PCM (tab crash)
   try {
     const buf = await blob.arrayBuffer();
     const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
@@ -415,13 +418,16 @@ export class MediaLibrary {
   async fillPeaks(id) {
     if (!this._peaking) this._peaking = new Map();
     if (this._peaking.has(id)) return this._peaking.get(id);
+    // one waveform job at a time (a project with many clips must not start many decoders at once)
+    const prev = this._peakChain || Promise.resolve();
     const job = (async () => {
+      await prev.catch(() => { });
       const rec = await this.get(id);
       if (!rec || rec.peaks) return;
-      const peaks = await Promise.race([computePeaks(rec.blob), new Promise((r) => setTimeout(() => r(null), 30 * 60 * 1000))]);
+      const peaks = await Promise.race([computePeaks(rec.blob, 20, rec.duration), new Promise((r) => setTimeout(() => r(null), 30 * 60 * 1000))]);
       if (peaks) { rec.peaks = peaks; await db.updateMediaMeta(id, { peaks }); this._emit(id); }
     })();
-    this._peaking.set(id, job);
+    this._peaking.set(id, job); this._peakChain = job;
     try { await job; } finally { this._peaking.delete(id); }
   }
   /**

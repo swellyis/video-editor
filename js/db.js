@@ -2,6 +2,7 @@
 const DB_NAME = 'video-editor-pro';
 const DB_VERSION = 1;
 let dbp;
+const MX = 'mx:';
 
 function open() {
   if (dbp) return dbp;
@@ -42,13 +43,23 @@ export const db = {
   saveProject: (p) => tx('projects', 'readwrite', s => { s.put(p); }),
   deleteProject: (id) => tx('projects', 'readwrite', s => { s.delete(id); }),
   putMedia: (rec) => tx('media', 'readwrite', s => { s.put(rec); }),
-  getMedia: (id) => tx('media', 'readonly', s => reqP(s.get(id))),
-  deleteMedia: (id) => tx('media', 'readwrite', s => { s.delete(id); }),
+  /** The media record. Small later additions (waveform peaks, corrected duration / hasAudio) live beside it in the kv store as 'mx:<id>'. */
+  async getMedia(id) {
+    const rec = await tx('media', 'readonly', s => reqP(s.get(id)));
+    if (rec) { const mx = await tx('kv', 'readonly', s => reqP(s.get(MX + id))).catch(() => null); if (mx) Object.assign(rec, mx); }
+    return rec;
+  },
+  deleteMedia: async (id) => { await tx('media', 'readwrite', s => { s.delete(id); }); await tx('kv', 'readwrite', s => { s.delete(MX + id); }).catch(() => { }); },
   async mediaKeys() { return tx('media', 'readonly', s => reqP(s.getAllKeys())); },
+  /**
+   * Add small metadata to a stored media record. It is written to its own tiny kv entry: rewriting the media record itself
+   * would re-store the WHOLE video (hundreds of MB to several GB: seconds of disk work, a second copy of the file in the
+   * quota, and everything else in the database queued behind it), just to attach a waveform.
+   */
   async updateMediaMeta(id, patch) {
-    return tx('media', 'readwrite', async s => {
-      const rec = await reqP(s.get(id));
-      if (rec) s.put(Object.assign(rec, patch));
+    return tx('kv', 'readwrite', async s => {
+      const cur = (await reqP(s.get(MX + id))) || {};
+      s.put(Object.assign(cur, patch), MX + id);
     });
   },
   inboxAll: () => tx('inbox', 'readonly', s => reqP(s.getAll())),
