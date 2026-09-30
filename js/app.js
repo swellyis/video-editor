@@ -327,7 +327,12 @@ document.addEventListener('click', (e) => {
   const tg = e.target.closest('[data-toggle]');
   if (tg) { setVal(tg.dataset.toggle, !getVal(tg.dataset.toggle)); app.commit(tg.classList.contains('mute-btn') ? (getVal(tg.dataset.toggle) ? 'Mute' : 'Unmute') : 'Toggle'); return; }
   const act = e.target.closest('[data-action]');
-  if (act && !act.disabled) { actions[act.dataset.action] && actions[act.dataset.action](); }
+  if (act && !act.disabled) {
+    const fn = actions[act.dataset.action]; if (!fn) return;
+    // an action that throws (or a promise that rejects) must never fail silently: the user sees why and the button works again
+    const fail = (err) => { console.warn(err); toast('Something went wrong: ' + ((err && err.message) || err) + '. Please try again.', 5000); };
+    try { const r = fn(act); if (r && typeof r.catch === 'function') r.catch(fail); } catch (err) { fail(err); }
+  }
 });
 function fillOutputs() {
   for (const o of qsa('output[data-out]')) {
@@ -396,9 +401,12 @@ function fillInspector() {
   if (bl) $('blurRadiusRow').hidden = bl.shape === 'ellipse';
   for (const [row, item, isClip] of [['detachClip', c, true], ['detachOvl', o, false]]) {
     const btn = $(row + 'Btn'), hint = $(row + 'Hint'); if (!btn || !hint) continue; // (a stale cached page without the button: nothing to update)
-    const can = !!item && item.kind === 'video' && item.hasAudio !== false;
+    const can = !!item && item.kind === 'video', none = can && item.hasAudio === false; // (a video with no sound keeps the button, greyed, with the reason)
     btn.parentElement.hidden = !can;
-    if (can) { const off = isClip && item.muted; btn.setAttribute('aria-disabled', off ? 'true' : 'false'); btn.classList.toggle('is-off', off); hint.textContent = off ? 'Muted, so there is no sound to detach. Unmute it first, or its audio may already be detached (Audio tab).' : 'Copies this video’s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.'; }
+    if (can) {
+      const off = none || (isClip && item.muted); btn.setAttribute('aria-disabled', off ? 'true' : 'false'); btn.classList.toggle('is-off', off);
+      hint.textContent = btn.classList.contains('busy') ? 'Moving this video’s sound onto its own audio track…' : none ? 'This video has no audio, so there is nothing to detach.' : off ? 'Muted, so there is no sound to detach. Unmute it first, or its audio may already be detached (Audio tab).' : 'Copies this video’s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.';
+    }
   }
   const cbl = c && c.blur; $('clipBlurBody').hidden = !(cbl && cbl.enabled); $('clipBlurKeep').hidden = !(cbl && cbl.enabled && cbl.keep);
   syncBlurBox();
@@ -500,6 +508,20 @@ $('audioLenInput').addEventListener('change', () => {
 $('textPosPresets').addEventListener('click', (e) => { const b = e.target.closest('button'); const t = selected('text'); if (!b || !t) return; t.y = parseFloat(b.dataset.y); t.x = 0.5; app.commit('Text position'); });
 
 // ---------------------------------------------------------------- actions
+let detachBusy = false;
+const DETACH_TIMEOUT = 5000;
+/** "Detaching…" state of the Detach audio buttons (spinner + label, disabled look, aria-busy), and its release. */
+function setDetachBusy(btns, on) {
+  if (!on) detachBusy = false;
+  for (const b of btns) {
+    b.classList.toggle('busy', on); b.setAttribute('aria-busy', on ? 'true' : 'false');
+    const label = b.querySelector('span:not(.spinner)');
+    if (label) { if (on) { b.dataset.label = label.textContent; label.textContent = 'Detaching…'; } else if (b.dataset.label) { label.textContent = b.dataset.label; delete b.dataset.label; } }
+    let sp = b.querySelector('.spinner');
+    if (on && !sp) { sp = document.createElement('span'); sp.className = 'spinner'; sp.setAttribute('aria-hidden', 'true'); b.prepend(sp); }
+    if (!on && sp) sp.remove();
+  }
+}
 const actions = {
   split() {
     // Splits the selected item on any track (clip, text, overlay, music/voice); with nothing (or a marker) selected,
@@ -600,14 +622,49 @@ const actions = {
   },
   kfPrev() { const k = kfTarget(); if (!k) return; const ts = kfTimes(k.item).filter(x => x < k.raw - 1e-3); if (ts.length) { player.pause(); player.setTime(k.start + ts[ts.length - 1] + 1e-4); } },
   kfNext() { const k = kfTarget(); if (!k) return; const ts = kfTimes(k.item).filter(x => x > k.raw + 1e-3); if (ts.length) { player.pause(); player.setTime(k.start + ts[0] + 1e-4); } },
-  detachAudio() {
+  /**
+   * Detach audio. The new track is created synchronously (no decoding, no waiting on the media), so it can never hang; the button
+   * shows "Detaching…" at once and ignores extra taps; the format check is header-only, raced against a hard timeout, and its verdict
+   * only adds a clear message (or, for a file with no sound at all, undoes the detach). The waveform fills in later in the background.
+   */
+  async detachAudio() {
+    if (detachBusy) return;
     const s = app.selection;
     if (!s || (s.type !== 'clip' && s.type !== 'overlay') || !selected(s.type)) return toast('Select a video clip or overlay first, then tap Detach audio.', 4000);
-    const r = detachAudio(app.project, s);
-    if (r.fail) return toast(r.reason, 4500);
-    app.selection = { type: 'audio', id: r.audio.id };
-    app.commit('Detach audio'); showTab('audio');
-    toast('Audio detached onto its own track (Audio tab). The video is muted; move, trim, fade or keyframe the audio separately.', 5000);
+    detachBusy = true;
+    const btns = qsa('[data-action=detachAudio]'), t0 = performance.now();
+    const guard = setTimeout(() => setDetachBusy(btns, false), DETACH_TIMEOUT + 2000); // last resort: the button can never stay stuck
+    setDetachBusy(btns, true);
+    try {
+      await Promise.race([new Promise(r => requestAnimationFrame(() => setTimeout(r, 40))), new Promise(r => setTimeout(r, 150))]); // let "Detaching…" paint first
+      if (!selected(s.type) || !app.selection || app.selection.id !== s.id || app.selection.type !== s.type) return; // the selection changed during that instant
+      const src = s.type === 'overlay' ? app.project.overlays.find(x => x.id === s.id) : app.project.clips.find(x => x.id === s.id);
+      const r = detachAudio(app.project, s);
+      if (r.fail) return toast(r.reason, 4500);
+      const mediaId = src.mediaId;
+      app.commit('Detach audio'); // (the video stays selected for a moment so the button keeps showing "Detaching…"; the new track is already in the project)
+      media.fillPeaks(mediaId).catch(() => { }); // waveform in the background (no-op when it is already there)
+      const verdict = await Promise.race([media.checkAudio(mediaId).catch(() => 'unknown'), new Promise(r => setTimeout(() => r('timeout'), DETACH_TIMEOUT))]);
+      const left = 450 - (performance.now() - t0); if (left > 0) await new Promise(r => setTimeout(r, left)); // keep the "Detaching…" state visible long enough to notice
+      if (verdict === 'none') { // the file really has no sound track: put everything back
+        const at = app.project.audio.findIndex(x => x.id === r.audio.id); if (at >= 0) app.project.audio.splice(at, 1);
+        src.muted = false;
+        for (const list of [app.project.clips, app.project.overlays || []]) for (const x of list) if (x.mediaId === mediaId) x.hasAudio = false;
+        const rec = media.recs.get(mediaId); if (rec) rec.hasAudio = false; db.updateMediaMeta(mediaId, { hasAudio: false }).catch(() => { });
+        app.commit('Detach audio (no audio)');
+        return toast('This video has no audio, so there is nothing to detach.', 5000);
+      }
+      if (app.selection && app.selection.type === s.type && app.selection.id === s.id) app.select({ type: 'audio', id: r.audio.id }); // to the new track, unless they tapped something else meanwhile
+      showTab('audio');
+      const row = document.querySelector('#audioList [data-id="' + r.audio.id + '"]'); if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+      toast(verdict === 'undecodable'
+        ? 'Audio detached onto its own track, but this audio format can’t be read by your browser, so it may be silent (and show no waveform) in the preview and the export.'
+        : verdict === 'timeout'
+          ? 'Audio detached onto its own track (Audio tab). Reading its audio format is taking long, so the waveform may appear later.'
+          : 'Audio detached onto its own track (Audio tab). The video is muted; move, trim, fade or keyframe the audio separately.', verdict === 'undecodable' ? 8000 : 5000);
+    } catch (err) {
+      console.warn(err); toast('Could not detach the audio: ' + ((err && err.message) || err), 5000);
+    } finally { clearTimeout(guard); setDetachBusy(btns, false); }
   },
   addVolumeKey() {
     let k = kfTarget(); if (!k || !['clip', 'overlay', 'audio'].includes(k.type)) return;

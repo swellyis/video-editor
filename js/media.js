@@ -411,11 +411,36 @@ export class MediaLibrary {
     this._emit(id);
     return this.recs.get(id);
   }
+  /** Fill in the waveform in the background (one run per media id at a time; gives up after 30 min so a stuck decoder can't pile up). */
   async fillPeaks(id) {
+    if (!this._peaking) this._peaking = new Map();
+    if (this._peaking.has(id)) return this._peaking.get(id);
+    const job = (async () => {
+      const rec = await this.get(id);
+      if (!rec || rec.peaks) return;
+      const peaks = await Promise.race([computePeaks(rec.blob), new Promise((r) => setTimeout(() => r(null), 30 * 60 * 1000))]);
+      if (peaks) { rec.peaks = peaks; await db.updateMediaMeta(id, { peaks }); this._emit(id); }
+    })();
+    this._peaking.set(id, job);
+    try { await job; } finally { this._peaking.delete(id); }
+  }
+  /**
+   * Quick look at a media file's sound (header only, never decodes the whole file): 'ok' | 'none' (no audio track) |
+   * 'undecodable' (there is an audio track but this browser can't decode it) | 'unknown' (couldn't tell).
+   * Callers race this against their own timeout, so it can never block the UI.
+   */
+  async checkAudio(id) {
     const rec = await this.get(id);
-    if (!rec || rec.peaks) return;
-    const peaks = await computePeaks(rec.blob);
-    if (peaks) { rec.peaks = peaks; await db.updateMediaMeta(id, { peaks }); this._emit(id); }
+    if (!rec || !rec.blob) return 'unknown';
+    let input;
+    try {
+      const mb = await loadMediabunny();
+      input = new mb.Input({ source: new mb.BlobSource(rec.blob), formats: mb.ALL_FORMATS });
+      const track = await input.getPrimaryAudioTrack();
+      if (!track) return 'none';
+      return (await track.canDecode()) ? 'ok' : 'undecodable';
+    } catch { return 'unknown'; }
+    finally { try { input && input.dispose && input.dispose(); } catch { /* ignore */ } }
   }
   /** Drop everything cached for a media id: object URL, decoded image, GIF frame bitmaps, the record itself. */
   forget(id) {

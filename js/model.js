@@ -750,7 +750,7 @@ export function detachAudio(project, sel) {
     fadeIn = Math.max(src.fadeIn || 0, it.xIn || 0, it.fadeInBlack || 0); fadeOut = Math.max(src.fadeOut || 0, it.xOut || 0, it.fadeOutBlack || 0); // picture transitions become audio fades
   }
   if (src.kind !== 'video') return fail('Only video clips have audio to detach.');
-  if (src.hasAudio === false) return fail('This video has no audio track to detach.');
+  if (src.hasAudio === false) return fail('This video has no audio, so there is nothing to detach.');
   if (src.muted && sel.type !== 'overlay') return fail('This clip is muted (its audio may already be detached). Unmute it first if you want to detach its audio again.');
   if ((project.audio || []).some(x => x.mediaId === src.mediaId && Math.abs(x.start - start) < 0.002 && Math.abs(x.in - src.in) < 0.002 && Math.abs(x.out - src.out) < 0.002)) return fail('This audio is already detached (see the Audio tab).');
   const a = newAudio({ id: src.mediaId, duration: src.srcDuration, name: src.name }, start);
