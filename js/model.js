@@ -28,8 +28,26 @@ export const defaultColor = () => ({ preset: 'none', brightness: 0, contrast: 0,
 export const defaultTransform = () => ({ zoom: 1, x: 0, y: 0, rotate: 0, angle: 0, flipH: false, flipV: false, kenBurns: 'none', kbFrom: 0, kbTo: 1 });
 export const defaultChroma = () => ({ enabled: false, color: '#00ff00', similarity: 0.4, smoothness: 0.15, spill: 0.5 });
 
-export function newProject(name = 'Untitled project') {
+export const PROJECT_NAME_MAX = 80;
+/** Friendly dated default for a project: "Project · Sep 29, 8:52 PM" (locale aware; the year is added for another year). */
+export function defaultProjectName(time = Date.now(), locale) {
+  const d = new Date(Number.isFinite(time) ? time : Date.now());
+  const opts = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  let s; try { s = new Intl.DateTimeFormat(locale, opts).format(d); } catch { s = d.toLocaleString(); }
+  return 'Project · ' + s.replace(/[\u202f\u00a0]/g, ' ');
+}
+/** A name typed by the user: whitespace collapsed, limited to 80 characters; '' when nothing is left. */
+export const cleanProjectName = (n) => (typeof n === 'string' ? n.replace(/\s+/g, ' ').trim().slice(0, PROJECT_NAME_MAX) : '');
+/** Old projects called "Untitled project" (any case) or with no name get a dated name from their created / updated time; every other name is kept. */
+export function isPlaceholderName(n) { return typeof n !== 'string' || !n.trim() || /^untitled( project)?$/i.test(n.trim()); }
+export function fixedProjectName(p) {
+  return isPlaceholderName(p && p.name) ? defaultProjectName((p && (p.created || p.updated)) || Date.now()) : p.name;
+}
+
+export function newProject(name) {
   const now = Date.now();
+  name = isPlaceholderName(name) ? defaultProjectName(now) : name;
   return {
     schema: SCHEMA, id: uid('prj'), name, created: now, updated: now,
     settings: { ratio: '16:9', res: 1080, fps: 30, quality: 'high', format: 'auto', fit: 'contain', bg: 'black', bgColor: '#000000', imageDuration: 4, endFade: 0 },
@@ -43,6 +61,7 @@ export function newProject(name = 'Untitled project') {
 export function migrate(p) {
   const base = newProject(p.name);
   const out = Object.assign(base, p);
+  out.name = fixedProjectName(out);
   out.settings = Object.assign(base.settings, p.settings || {});
   out.color = Object.assign(defaultColor(), p.color || {});
   out.thumb = Object.assign(newProject().thumb, p.thumb || {});

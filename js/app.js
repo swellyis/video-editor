@@ -10,7 +10,7 @@ import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, ANIM_PROPS, normalizeClip,
-  splitItem, audioSpan, rebaseKeyframes, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
+  splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
 import { Compositor, drawLogo, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
@@ -180,6 +180,7 @@ function renderAll() {
   $('undoBtn').disabled = !app.history.canUndo;
   $('redoBtn').disabled = !app.history.canRedo;
   $('projectName').textContent = app.project.name;
+  $('projectNameBtn').title = app.project.name + ' (tap to rename)';
   document.title = app.project.name + ' · Video Editor';
 }
 function syncHeads() {
@@ -1242,7 +1243,7 @@ async function openProject(id) {
 async function createProject(name) {
   if (app.ready) await flushPendingSave();
   player.pause();
-  app.project = newProject(name || 'Untitled project');
+  app.project = newProject(cleanProjectName(name) || defaultProjectName());
   app.selection = null; app.history.reset(app.project);
   releaseUnusedMedia();
   await saveNow();
@@ -1250,6 +1251,39 @@ async function createProject(name) {
   refreshCaps();
 }
 app.openProject = openProject;
+/** "Sep 29, 8:52 PM" (locale aware); the year only for another year. */
+function editedLabel(t) {
+  const d = new Date(t || Date.now()), o = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+  if (d.getFullYear() !== new Date().getFullYear()) o.year = 'numeric';
+  try { return new Intl.DateTimeFormat(undefined, o).format(d).replace(/[\u202f\u00a0]/g, ' '); } catch { return d.toLocaleString(); }
+}
+// Header project name: tap the name (or the pencil) to edit in place. Enter / leaving the field saves, Esc cancels,
+// empty falls back to the dated default name, 80 characters at most. One undo step.
+(() => {
+  const wrap = $('pnameWrap'), btn = $('projectNameBtn'), inp = $('projectNameInput'), pen = $('renameProjectBtn');
+  let cancelled = false, editing = false;
+  const stop = () => { editing = false; inp.hidden = true; btn.hidden = false; pen.hidden = false; wrap.classList.remove('editing'); };
+  const start = () => {
+    if (editing) return; editing = true; cancelled = false;
+    inp.value = app.project.name; btn.hidden = true; pen.hidden = true; inp.hidden = false; wrap.classList.add('editing');
+    inp.focus(); inp.select();
+  };
+  const save = () => {
+    if (!editing) return;
+    const n = cleanProjectName(inp.value) || defaultProjectName(app.project.created);
+    stop();
+    if (n !== app.project.name) { app.project.name = n; app.commit('Rename project'); toast('Project renamed'); }
+    btn.focus();
+  };
+  btn.addEventListener('click', start); pen.addEventListener('click', start);
+  inp.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); save(); }
+    else if (e.key === 'Escape') { e.preventDefault(); cancelled = true; stop(); btn.focus(); }
+  });
+  inp.addEventListener('blur', () => { if (editing && !cancelled) save(); });
+  app.editProjectName = start;
+})();
 async function renderProjectList() {
   const list = $('projectList'); list.replaceChildren();
   const projects = await db.listProjects();
@@ -1258,14 +1292,16 @@ async function renderProjectList() {
     let thumb = '';
     if (first) { const m = await media.get(first.mediaId); thumb = m && m.strip ? m.strip[0] : ''; }
     const dur = layout(migrate(p)).total;
-    const card = el('div', { class: 'project-card' + (p.id === app.project.id ? ' current' : '') },
+    const shown = p.id === app.project.id ? app.project.name : fixedProjectName(p);
+    const card = el('div', { class: 'project-card' + (p.id === app.project.id ? ' current' : ''), 'aria-current': p.id === app.project.id ? 'true' : null },
       el('div', { class: 'pthumb', style: thumb ? { backgroundImage: `url(${thumb})` } : {} }),
       el('div', {},
-        el('h3', { text: p.name }),
-        el('div', { class: 'pmeta', text: `${(p.clips || []).length} clips · ${fmt(dur)} · edited ${new Date(p.updated).toLocaleString()}` }),
+        el('h3', { title: shown }, shown, p.id === app.project.id ? el('span', { class: 'ptag', text: 'Current' }) : null),
+        el('div', { class: 'pmeta', text: `${(p.clips || []).length} ${(p.clips || []).length === 1 ? 'clip' : 'clips'} · ${fmt(dur)}` }),
+        el('div', { class: 'pmeta', text: 'Last edited ' + editedLabel(p.updated) }),
         el('div', { class: 'button-row' },
           el('button', { class: 'btn primary small', type: 'button', text: p.id === app.project.id ? 'Open (current)' : 'Open', onclick: async () => { await openProject(p.id); closeDialog('projectsDialog'); } }),
-          el('button', { class: 'btn secondary small', type: 'button', text: 'Rename', onclick: async () => { const n = prompt('Project name', p.name); if (!n) return; if (p.id === app.project.id) { app.project.name = n; app.commit('Rename'); await saveNow(); } else { p.name = n; p.updated = Date.now(); await db.saveProject(p); } renderProjectList(); renderAll(); } }),
+          el('button', { class: 'btn secondary small', type: 'button', text: 'Rename', onclick: async () => { const n0 = prompt('Project name', shown); if (n0 === null) return; const n = cleanProjectName(n0) || defaultProjectName(p.created || p.updated); if (p.id === app.project.id) { app.project.name = n; app.commit('Rename project'); await saveNow(); } else { p.name = n; p.updated = Date.now(); await db.saveProject(p); } renderProjectList(); renderAll(); } }),
           el('button', { class: 'btn secondary small', type: 'button', text: 'Duplicate', onclick: async () => { if (p.id === app.project.id) await saveNow(); const src = p.id === app.project.id ? JSON.parse(JSON.stringify(app.project)) : p; const c = { ...deepClone(src), id: uid('prj'), name: src.name + ' copy', created: Date.now(), updated: Date.now() }; await db.saveProject(c); renderProjectList(); toast('Project duplicated'); } }),
           el('button', { class: 'btn secondary small', type: 'button', text: 'Export', onclick: () => exportProjectFile(p.id) }),
           el('button', { class: 'btn ghost danger small', type: 'button', text: 'Delete', onclick: async () => {
@@ -1285,7 +1321,7 @@ async function renderProjectList() {
   }
 }
 $('projectBtn').onclick = () => { renderProjectList(); openDialog('projectsDialog'); };
-$('newProject').onclick = async () => { const n = prompt('Name your new project', 'Untitled project'); if (n === null) return; await createProject(n || 'Untitled project'); closeDialog('projectsDialog'); toast('New project created'); };
+$('newProject').onclick = async () => { const n = prompt('Name your new project (leave empty for the date)', defaultProjectName()); if (n === null) return; await createProject(cleanProjectName(n) || defaultProjectName()); closeDialog('projectsDialog'); toast('New project created'); };
 /**
  * Project file. With media: a .vedit file (tar) holding project.json plus every media file as raw bytes. It's assembled
  * from Blob parts that reference the stored media, so nothing is base64-encoded or copied into one giant string.
@@ -1330,7 +1366,7 @@ async function importProjectFile(file) {
       else missing++;
     }
     const p = migrate(src);
-    p.id = uid('prj'); p.name = String(src.name || 'Imported').slice(0, 200); p.updated = Date.now();
+    p.id = uid('prj'); p.updated = Date.now(); // (migrate already gave a placeholder name a dated one)
     await db.saveProject(p);
     await openProject(p.id);
     closeDialog('projectsDialog');
@@ -1835,10 +1871,12 @@ async function boot() {
   const ripple = await db.kvGet('ripple').catch(() => null); if (ripple === false) { app.rippleEnabled = false; $('rippleBtn').setAttribute('aria-pressed', 'false'); }
   const snap = await db.kvGet('snap').catch(() => null); if (snap === false) { app.snapEnabled = false; $('snapBtn').setAttribute('aria-pressed', 'false'); }
   ensureFonts().then(() => player.requestRender());
+  // projects saved as "Untitled project" (or with no name) get a dated name from their created / updated time; other names are untouched
+  try { for (const sp of await db.listProjects()) { const fx = fixedProjectName(sp); if (fx !== sp.name) { sp.name = fx; await db.saveProject(sp); } } } catch (e) { console.warn('project name migration', e); }
   const last = await db.kvGet('lastProject').catch(() => null);
   let ok = last ? await openProject(last) : false;
   if (!ok) { const all = await db.listProjects(); if (all.length) ok = await openProject(all[0].id); }
-  if (!ok) await createProject('My first video');
+  if (!ok) await createProject();
   const onboarded = await db.kvGet('onboarded').catch(() => true);
   if (!onboarded) { if (app.project.clips.length) db.kvSet('onboarded', true).catch(() => { }); else $('onboard').hidden = false; }
   // files shared to the installed app (Android share sheet → share_target)

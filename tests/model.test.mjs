@@ -183,3 +183,24 @@ test('connect: media type / file name detection', async () => {
   assert.equal(c.nameFromUrl('https://a.com/dl', 'video/webm'), 'dl.webm');
   assert.equal(c.nameFromUrl('https://a.com/', 'image/png'), 'linked-media.png');
 });
+
+test('project names: dated default, placeholder migration, cleaning', async () => {
+  const m = await import('../js/model.js');
+  const t = Date.UTC(2026, 8, 29, 20, 52);
+  assert.match(m.defaultProjectName(t, 'en-US'), /^Project · Sep 29, \d{1,2}:52 (AM|PM)$/);
+  assert.match(m.defaultProjectName(Date.UTC(2020, 0, 5, 12, 5), 'en-US'), /2020/);
+  assert.notEqual(m.defaultProjectName(t, 'en-US'), m.defaultProjectName(t, 'de-DE'));
+  assert.match(m.newProject().name, /^Project · /);
+  assert.match(m.newProject('').name, /^Project · /);
+  assert.equal(m.newProject('Sunday').name, 'Sunday');
+  for (const bad of ['Untitled project', 'untitled project', ' UNTITLED ', '', '   ', undefined, null, 5]) assert.equal(m.isPlaceholderName(bad), true, String(bad));
+  for (const good of ['Sunday', 'Untitled project 2', 'My first video', 'Untitled — mine']) assert.equal(m.isPlaceholderName(good), false, good);
+  const old = m.migrate({ ...m.newProject('x'), name: 'Untitled project', created: Date.UTC(2025, 2, 3, 15, 30) });
+  assert.match(old.name, /^Project · Mar 3, 2025/);
+  assert.equal(m.migrate({ ...m.newProject('x'), name: 'Kept as is' }).name, 'Kept as is');
+  assert.equal(m.migrate({ ...m.newProject('x'), name: 'Untitled project 2' }).name, 'Untitled project 2');
+  assert.equal(m.SCHEMA, 5);
+  assert.equal(m.cleanProjectName('  a   b  '), 'a b');
+  assert.equal(m.cleanProjectName('x'.repeat(200)).length, 80);
+  assert.equal(m.cleanProjectName(null), '');
+});
