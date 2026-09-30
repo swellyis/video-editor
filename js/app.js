@@ -1802,7 +1802,7 @@ window.addEventListener('pagehide', () => { scheduleSave.flush(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { player.pause(); scheduleSave.flush(); } });
 
 // ---------------------------------------------------------------- Connect tab + files shared from other apps
-const connect = initConnect({ importFiles, showTab, toast, openDialog, closeDialog });
+const connect = initConnect({ importFiles, showTab });
 app.connect = connect;
 let inboxBusy = null;
 /** Take what the service worker stored from the OS share sheet (files, or a link) and put it into the project. */

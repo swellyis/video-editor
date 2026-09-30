@@ -4,11 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="ve-build" content="vaece8694f3" />
+  <meta name="ve-build" content="vb4aaeecb57" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self'; frame-src https:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <meta name="description" content="Edit, trim, title and export YouTube videos and Shorts on your device: timeline, text, music, voiceover, green screen, MP4 export. Free, private, works offline." />
   <script src="js/install-early.js"></script>
   <link rel="canonical" href="https://swellyis.github.io/video-editor/" />
@@ -479,13 +479,16 @@
       <!-- CONNECT -->
       <div class="tab-panel" id="tab-connect">
         <section class="section" id="cnBring">
-          <div class="section-head"><h2>Bring media in</h2></div>
+          <div class="section-head"><h2>Add media</h2></div>
           <div class="button-row">
             <label class="btn primary" for="cloudInput" id="cloudBtn">Add from Drive, Photos or Files</label>
             <input id="cloudInput" type="file" accept="video/*,image/*,audio/*" multiple />
           </div>
-          <p class="hint" style="margin-top:8px">Opens your device's own file picker. On Android open the menu in the picker's corner to reach Google Drive, Photos and other apps; on iPhone choose Files or Photo Library. Video and photos go on the main track, audio goes on the music track.</p>
-          <label class="label" for="linkInput" style="margin-top:14px">Import from a link (direct file address)</label>
+          <p class="hint" style="margin-top:8px">Opens your device's file picker. On Android, use the picker's menu to reach Google Drive and Photos; on iPhone choose Files or Photo Library. Video and photos go on the main track, audio on the music track.</p>
+        </section>
+        <section class="section" id="cnLink">
+          <div class="section-head"><h2>Import from a link</h2></div>
+          <label class="label" for="linkInput">Direct address of a video, photo or audio file</label>
           <div class="link-row">
             <input class="field" id="linkInput" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://example.com/clip.mp4" aria-describedby="linkMsg" />
             <button class="btn primary" id="linkGo" type="button">Import</button>
@@ -495,30 +498,12 @@
             <div class="link-progress-row"><span id="linkStat" class="mono">Starting…</span><button class="btn secondary small" id="linkCancel" type="button">Cancel</button></div>
           </div>
           <p class="hint" id="linkMsg" role="status" aria-live="polite"></p>
-          <p class="hint">Only secure https:// links to a video, photo or audio file. The site has to allow other websites to download the file (CORS), and many do not: then download it in your browser and use the button above. The link is only fetched, nothing from your project is sent anywhere.</p>
+          <p class="hint">https:// only, and the site must allow other websites to download the file (CORS). Many don't; then download the file in your browser and use the button above. Only the link is fetched; nothing from your project is sent anywhere.</p>
         </section>
         <section class="section" id="cnShare">
-          <div class="section-head"><h2>Send media in from other apps</h2></div>
-          <p class="hint" id="shareHint">Install this editor (browser menu, Install app or Add to Home screen). Then, in Photos, Files, Drive or a browser, tap Share and choose Video Editor: videos and photos land on the main track, audio on the music track, and a shared link fills the box above.</p>
-        </section>
-        <section class="section" id="cnSites">
-          <div class="section-head"><h2>My sites</h2></div>
-          <form id="siteForm" autocomplete="off">
-            <div class="site-add">
-              <input class="field" id="siteName" maxlength="40" placeholder="Name (optional)" aria-label="Site name" />
-              <input class="field" id="siteUrl" type="url" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://www.example.com" aria-label="Site address (https)" required />
-              <button class="btn primary" id="siteAdd" type="submit">Add site</button>
-            </div>
-          </form>
-          <p class="hint" id="siteMsg" role="status" aria-live="polite"></p>
-          <div class="chip-row" id="siteSuggest" aria-label="Suggested sites"></div>
-          <div class="item-list site-list" id="siteList"></div>
-          <p class="hint" id="siteEmpty">Save shortcuts to sites you use for footage, music or design. They are kept on this device only, not in your project files.</p>
-          <p class="hint">A site opens in a panel inside the editor when it allows that. Many big sites (Canva, YouTube, Google Drive, Pexels, Pixabay) refuse to be shown inside other pages, so every panel has an Open in new window button. This editor cannot control other sites or read their pages; use downloads, Share, or links to move files.</p>
-        </section>
-        <section class="section" id="cnOut">
-          <div class="section-head"><h2>Send results out</h2></div>
-          <p class="hint">After exporting, Finish the cut has a Share button, and the Thumbnail maker has one too. They open your device's share sheet (to Drive, Photos, messages, YouTube and so on) where the browser supports sharing files, and download the file otherwise.</p>
+          <div class="section-head"><h2>Share in and out</h2></div>
+          <p class="hint" id="shareHint"><b>In:</b> once the editor is installed (browser menu, Install app or Add to Home screen), Share in Photos, Files, Drive or a browser lists Video Editor. Not available in iPhone Safari.</p>
+          <p class="hint" style="margin-top:6px"><b>Out:</b> the Share buttons after an export and in the Thumbnail maker open your device's share sheet, or download the file if sharing isn't supported.</p>
         </section>
       </div>
 
@@ -585,14 +570,6 @@
   <div class="sheet-head"><h2 id="templatesTitle">Starter templates</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
   <p class="hint">Ready-made, fully editable starting points for devotionals, sermons and Shorts. Change any text, swap backgrounds for your own footage, re-time on the timeline.</p>
   <div class="tpl-grid" id="templateGrid"></div>
-</dialog>
-
-<!-- Site panel (My sites) -->
-<dialog class="sheet wide site-sheet" id="siteDialog" aria-labelledby="siteTitle">
-  <div class="sheet-head"><h2 id="siteTitle">Site</h2><div class="site-head-actions"><a class="btn primary small" id="siteNewWin" href="about:blank" target="_blank" rel="noopener noreferrer">Open in new window</a><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div></div>
-  <p class="hint" id="siteNote" role="status" aria-live="polite"></p>
-  <div class="site-frame-wrap" id="siteFrameWrap"></div>
-  <div class="button-row" id="siteTryRow" hidden><button class="btn secondary" id="siteTry" type="button">Try showing it here anyway</button></div>
 </dialog>
 
 <!-- Help -->

@@ -1,9 +1,9 @@
 // Integrations ("Connect" tab): pure logic, no DOM. A browser can't drive other sites, so this covers what it CAN do:
 // receive files shared from other apps (Web Share Target, see sw.js), download a media file from an https link (CORS),
-// keep a private list of website shortcuts (opened in a sandboxed panel or a new window), and share results out.
+// and share results out.
 // Nothing here ever sends project data anywhere: the only requests are GETs of the links the user typed.
 
-export const MAX_SITES = 30, NAME_MAX = 40, URL_MAX = 2048;
+export const URL_MAX = 2048;
 export const LIMITS = { urlBytes: 1024 * 1024 * 1024, probeMs: 6000 }; // 1 GiB: the file is held in memory while it downloads
 
 const hasControlOrSpace = (s) => { for (const ch of s) { const c = ch.charCodeAt(0); if (c <= 32 || c === 127) return true; } return /\s/.test(s); };
@@ -31,51 +31,6 @@ export function parseHttpsUrl(input) {
 export function extractUrl(text) {
   const m = /https?:\/\/[^\s<>"']+/i.exec(String(text || ''));
   return m ? m[0].replace(/[).,;!?]+$/, '') : '';
-}
-
-export function defaultSiteName(url) { try { return new URL(url).hostname.replace(/^www\./, '').slice(0, NAME_MAX); } catch { return 'Site'; } }
-export function cleanSiteName(name, url) { const n = String(name == null ? '' : name).replace(/\s+/g, ' ').trim().slice(0, NAME_MAX); return n || defaultSiteName(url); }
-
-/** Ideas the user can add with one tap (none is preloaded). `frames: false` = verified to refuse being shown inside other pages. */
-export const SITE_SUGGESTIONS = [
-  { name: 'Canva', url: 'https://www.canva.com/' },
-  { name: 'Pexels', url: 'https://www.pexels.com/videos/' },
-  { name: 'Pixabay', url: 'https://pixabay.com/videos/' },
-  { name: 'YouTube Studio', url: 'https://studio.youtube.com/' },
-  { name: 'Google Drive', url: 'https://drive.google.com/' },
-];
-/** Sites known to send X-Frame-Options / frame-ancestors, so a frame would just stay blank. The panel says so straight away instead of waiting. */
-export const NO_FRAME_HOSTS = ['canva.com', 'pexels.com', 'pixabay.com', 'youtube.com', 'google.com', 'facebook.com', 'instagram.com', 'x.com', 'twitter.com', 'tiktok.com', 'linkedin.com', 'dropbox.com', 'wikipedia.org', 'github.com'];
-export function knownNoFrame(url) { try { const h = new URL(url).hostname; return NO_FRAME_HOSTS.some(d => h === d || h.endsWith('.' + d)); } catch { return false; } }
-
-// ---- saved sites (localStorage, never in project files)
-export const SITES_KEY = 've.sites';
-/** Validate a stored/imported list: https only, unique ids, capped. Anything malformed is dropped. */
-export function sanitizeSites(list) {
-  const out = [], seen = new Set();
-  for (const s of Array.isArray(list) ? list : []) {
-    if (!s || typeof s !== 'object') continue;
-    const p = parseHttpsUrl(s.url); if (!p.ok) continue;
-    let id = typeof s.id === 'string' && /^[\w-]{1,40}$/.test(s.id) ? s.id : 's_' + Math.random().toString(36).slice(2, 9);
-    while (seen.has(id)) id += 'x';
-    seen.add(id); out.push({ id, name: cleanSiteName(s.name, p.url), url: p.url });
-    if (out.length >= MAX_SITES) break;
-  }
-  return out;
-}
-let memory = null; // used when localStorage is blocked
-export function loadSites(storage = globalThis.localStorage) {
-  try { return sanitizeSites(JSON.parse(storage.getItem(SITES_KEY) || '[]')); } catch { return sanitizeSites(memory); }
-}
-export function saveSites(list, storage = globalThis.localStorage) {
-  const clean = sanitizeSites(list);
-  try { storage.setItem(SITES_KEY, JSON.stringify(clean)); memory = null; } catch { memory = clean; }
-  return clean;
-}
-export function moveSite(list, id, delta) {
-  const i = list.findIndex(s => s.id === id), j = i + delta;
-  if (i < 0 || j < 0 || j >= list.length) return list;
-  const a = list.slice(); [a[i], a[j]] = [a[j], a[i]]; return a;
 }
 
 // ---- import from link

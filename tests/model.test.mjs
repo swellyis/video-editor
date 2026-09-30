@@ -164,33 +164,13 @@ test('item names: defaults, trimming to 80 chars, blank clip names fall back, la
   assert.equal(blurLabel({ name: 'Face' }), 'Face');
 });
 
-test('connect: https-only URL validation, shared-text link extraction, names', async () => {
+test('connect: https-only URL validation, shared-text link extraction', async () => {
   const c = await import('../js/connect.js');
   const good = { 'https://a.com/x.mp4': 'https://a.com/x.mp4', 'a.com/x': 'https://a.com/x', '//a.com/x': 'https://a.com/x', 'a.com:8080/x': 'https://a.com:8080/x', '  https://A.com/Path?q=1  ': 'https://a.com/Path?q=1' };
   for (const [i, o] of Object.entries(good)) assert.deepEqual(c.parseHttpsUrl(i), { ok: true, url: o }, i);
   for (const bad of ['', 'javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,hi', 'blob:https://a.com/x', 'file:///etc/passwd', 'http://a.com', 'ftp://a.com', 'https://u:p@a.com', 'https://a b.com', 'localhost', 'https://localhost/', 'https:a.com', 'x'.repeat(3000)]) assert.equal(c.parseHttpsUrl(bad).ok, false, bad);
   assert.equal(c.extractUrl('Look at this https://x.com/a.mp4, wow'), 'https://x.com/a.mp4');
   assert.equal(c.extractUrl('no link'), '');
-  assert.equal(c.cleanSiteName('  My   site  ', 'https://a.com/'), 'My site');
-  assert.equal(c.cleanSiteName('', 'https://www.a.com/x'), 'a.com');
-  assert.equal(c.cleanSiteName('y'.repeat(100), 'https://a.com/').length, 40);
-});
-
-test('connect: sites list is sanitized, capped, reordered; storage failures do not throw', async () => {
-  const c = await import('../js/connect.js');
-  const list = c.sanitizeSites([{ name: 'a', url: 'https://a.com/' }, { name: 'bad', url: 'javascript:1' }, null, 7, { url: 'http://plain.com' }, { id: 'dup', url: 'https://b.com' }, { id: 'dup', url: 'https://c.com' }]);
-  assert.deepEqual(list.map(s => s.url), ['https://a.com/', 'https://b.com/', 'https://c.com/']);
-  assert.equal(new Set(list.map(s => s.id)).size, 3);
-  assert.equal(c.sanitizeSites(Array.from({ length: 80 }, (_, i) => ({ url: `https://s${i}.com` }))).length, c.MAX_SITES);
-  assert.deepEqual(c.sanitizeSites('nope'), []);
-  const ids = list.map(s => s.id);
-  assert.deepEqual(c.moveSite(list, ids[2], -1).map(s => s.id), [ids[0], ids[2], ids[1]]);
-  assert.deepEqual(c.moveSite(list, ids[0], -1).map(s => s.id), ids);
-  const store = { m: {}, getItem(k) { return this.m[k] ?? null; }, setItem(k, v) { this.m[k] = v; } };
-  c.saveSites(list, store); assert.equal(c.loadSites(store).length, 3);
-  store.m[c.SITES_KEY] = '{broken'; assert.deepEqual(c.loadSites(store), []);
-  const full = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('quota'); } };
-  assert.doesNotThrow(() => c.saveSites(list, full)); assert.equal(c.loadSites(full).length, 3);
 });
 
 test('connect: media type / file name detection', async () => {
@@ -202,6 +182,4 @@ test('connect: media type / file name detection', async () => {
   assert.equal(c.nameFromUrl('https://a.com/dir/clip%20one.mp4?x=1', 'video/mp4'), 'clip one.mp4');
   assert.equal(c.nameFromUrl('https://a.com/dl', 'video/webm'), 'dl.webm');
   assert.equal(c.nameFromUrl('https://a.com/', 'image/png'), 'linked-media.png');
-  assert.equal(c.knownNoFrame('https://www.canva.com/x'), true);
-  assert.equal(c.knownNoFrame('https://example.org/'), false);
 });
