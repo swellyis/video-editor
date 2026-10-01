@@ -8,7 +8,7 @@ import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
-  moveClip, rippleShift, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
+  moveClip, rippleShift, matchImageToAudio, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, MOTION_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
@@ -438,6 +438,12 @@ function fillInspector() {
   const setState = (sel, ok, tipOk, tipNo) => qsa(sel).forEach(b => { b.disabled = false; b.setAttribute('aria-disabled', ok ? 'false' : 'true'); b.classList.toggle('is-off', !ok); b.title = ok ? tipOk : tipNo; });
   setState('.tl-toolbar [data-action=duplicate]', !!st, 'Duplicate selected (Ctrl+D)', TOOL_HINT.duplicate.none);
   setState('.tl-toolbar [data-action=delete]', !!st, 'Delete selected (Del)', TOOL_HINT.delete.none);
+  {
+    const selClip = st === 'clip' ? selected('clip') : null;
+    const maOk = (selClip && selClip.kind === 'image') || st === 'audio';
+    setState('.tl-toolbar [data-action=matchAudio]', !!maOk, 'Match audio: make the selected image as long as the audio',
+      st === 'clip' ? 'A video clip can’t be stretched to fit the audio. Select an image clip instead.' : 'Match audio: select an image clip on the timeline first, then tap it to make the image as long as the audio.');
+  }
   setState('.tl-toolbar [data-action=addKeyframe]', kfOk, 'Keyframe the selected item at the playhead (Shift+K). On a music or voice track it adds a volume keyframe.', TOOL_HINT.addKeyframe[st || 'none'] || TOOL_HINT.addKeyframe.none);
 }
 // Side-panel lists: rebuilt only when what they show changed (they're refreshed on every slider input event).
@@ -566,6 +572,17 @@ const actions = {
     else return toast(TOOL_HINT.delete.none);
     const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', marker: 'Marker' }[s.type];
     app.selection = null; app.commit('Delete'); toast(what + ' deleted. Undo (Ctrl+Z) brings it back.');
+  },
+  matchAudio() {
+    // Make the selected image as long as the audio (or, with an audio track selected, the image under its start).
+    const sel = app.selection && selected(app.selection.type) ? app.selection : null;
+    const r = matchImageToAudio(app.project, sel, { ripple: app.rippleEnabled });
+    if (r.fail) return toast(r.reason, 6000);
+    const L = (v) => { const w = Math.floor(v + 1e-6), f = Math.round((v - w) * 100); return fmt(w) + (f ? '.' + String(f).padStart(2, '0') : ''); };
+    const nm = r.audio.name || (r.audio.voice ? 'Voice' : 'Music');
+    if (r.unchanged) return toast('Image already ' + L(r.len) + ', matching ' + nm + '.');
+    app.commit('Match audio');
+    toast('Image now ' + L(r.len) + ', matching ' + nm + (r.capped ? ' (the longest an image can be here)' : '') + '. Undo (Ctrl+Z) puts it back.', 5000);
   },
   moveLeft() { const c = selected('clip'); if (!c) return; const i = app.project.clips.indexOf(c); if (i > 0) { moveClip(app.project, i, i - 1); app.commit('Move clip'); } },
   moveRight() { const c = selected('clip'); if (!c) return; const i = app.project.clips.indexOf(c); if (i < app.project.clips.length - 1) { moveClip(app.project, i, i + 1); app.commit('Move clip'); } },

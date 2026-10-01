@@ -736,6 +736,69 @@ export function splitItem(project, sel, t) {
  * speed, volume, fades and volume envelope, and the original is muted. After that they are independent (no link kept). Returns
  * { audio } or { fail, reason }. Nothing is changed when it fails. The new track is flagged as a voice track so music keeps ducking under it.
  */
+/**
+ * Match audio: plan (no changes) for making a main-track image clip end where the relevant audio ends.
+ * `sel` is the selection ({type:'clip'} for an image, or {type:'audio'} for a track that starts over a main-track image).
+ * Returns { fail, reason } or { clip, item, audio, len, oldLen, end, capped }.
+ * Audio choice: a track that overlaps the image's start, or starts within 0.5 s after it (a voice or detached track beats music, then the closest start wins); otherwise the unmuted track that ends last. A looped track without a set length repeats to the
+ * end of the video, so it has no end of its own and is never used. `len` is rounded up to a whole frame so the picture covers the sound.
+ */
+export function planMatchAudio(project, sel) {
+  const fail = (reason) => ({ fail: true, reason });
+  const lay = layout(project), fps = project.settings?.fps || 30, total = lay.total;
+  const aud = project.audio || [];
+  const OPEN = (a) => 'Looped track “' + a.name + '” repeats until the video ends, so it has no end to match. Set its length in the Audio tab (or turn Loop off), then tap Match audio.';
+  let it = null, pinned = null;
+  if (!sel) return fail('Nothing selected. Tap an image clip on the timeline first, then tap Match audio.');
+  if (sel.type === 'clip') {
+    it = lay.items.find(i => i.clip.id === sel.id);
+    if (!it) return fail('Nothing selected. Tap an image clip on the timeline first, then tap Match audio.');
+    if (it.clip.kind !== 'image') return fail('A video clip can’t be stretched to fit the audio: its length is the length of the footage. Change its Speed in the Clip tab, or select an image clip and tap Match audio.');
+  } else if (sel.type === 'audio') {
+    pinned = aud.find(a => a.id === sel.id);
+    if (!pinned) return fail('Nothing selected. Tap an image clip on the timeline first, then tap Match audio.');
+    for (const i of lay.items) if (pinned.start >= i.start - 1e-3 && pinned.start < i.end - 1e-3) it = i;
+    if (!it) return fail('This audio doesn’t start over a clip. Select an image clip (or a track that starts over one), then tap Match audio.');
+    if (it.clip.kind !== 'image') return fail('The clip under the start of this audio is a video, not an image. Select an image clip, then tap Match audio.');
+  } else return fail('Match audio works on an image clip. Tap an image on the timeline first (or a music/voice track that starts over one), then tap Match audio.');
+  const c = it.clip, cs = it.start;
+  const span = (a) => (a.loop && !(a.loopLen > 0)) ? null : audioSpan(a, total);
+  const info = (a) => { const sp = span(a); return { a, start: a.start, end: sp == null ? null : a.start + sp }; };
+  let chosen;
+  if (pinned) {
+    const x = info(pinned);
+    if (x.end == null) return fail(OPEN(pinned));
+    if (x.end <= cs + MIN_CLIP) return fail('This audio ends before the image starts, so there is nothing to match.');
+    chosen = x;
+  } else {
+    if (!aud.length) return fail('There is no music, voice or detached audio on the timeline yet. Add some in the Audio tab, then tap Match audio.');
+    const live = aud.filter(a => !a.muted);
+    if (!live.length) return fail('All audio tracks are muted, so there is no sound to match. Unmute one in the Audio tab first.');
+    const all = live.map(info), open = all.filter(x => x.end == null);
+    const valid = all.filter(x => x.end != null && x.end > cs + MIN_CLIP);
+    if (!valid.length) return fail(open.length ? OPEN(open[0].a) : 'The audio on the timeline ends before this image starts, so there is nothing to match.');
+    const rel = valid.filter(x => (x.start <= cs + 0.05 && x.end > cs + 0.05) || (x.start > cs + 0.05 && x.start <= cs + 0.5));
+    if (rel.length) rel.sort((p, q) => (q.a.voice ? 1 : 0) - (p.a.voice ? 1 : 0) || Math.abs(p.start - cs) - Math.abs(q.start - cs) || q.end - p.end);
+    else valid.sort((p, q) => q.end - p.end);
+    chosen = (rel.length ? rel : valid)[0];
+  }
+  let len = Math.max(MIN_CLIP, Math.ceil((chosen.end - cs) * fps - 1e-3) / fps);
+  const cap = Math.max(MIN_CLIP, (c.srcDuration || 3600) - (c.in || 0)); let capped = false;
+  if (len > cap) { len = cap; capped = true; }
+  return { clip: c, item: it, audio: chosen.a, len, oldLen: it.len, end: cs + len, capped };
+}
+/** Apply planMatchAudio: set the image's length (keyframes keep their relative place, Ken Burns follows the new length). */
+export function matchImageToAudio(project, sel, { ripple = false } = {}) {
+  const plan = planMatchAudio(project, sel);
+  if (plan.fail) return plan;
+  if (Math.abs(plan.len - plan.oldLen) < 1e-4) return { ...plan, unchanged: true };
+  const c = plan.clip, before = layout(project), k = plan.len / plan.oldLen, a0 = plan.audio.start;
+  for (const tr of Object.values(c.keyframes || {})) for (const key of tr) key.t = Math.round(key.t * k * 1e6) / 1e6;
+  c.out = c.in + plan.len;
+  if (ripple) { rippleShift(project, plan.item.end - 1e-3, layout(project).total - before.total); plan.audio.start = a0; }
+  return plan;
+}
+
 export function detachAudio(project, sel) {
   const fail = (reason) => ({ fail: true, reason });
   let src, start, fadeIn, fadeOut, speed, vol;

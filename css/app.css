@@ -338,7 +338,7 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
   .transport button{width:36px}
   .transport-time{right:8px;font-size:10px}
   .tool span{display:none}
-  .tool{padding:0 9px}
+  .tool{padding:0 9px;height:44px;min-width:44px}
   #zoomRange{width:70px}
   .tl-heads{width:46px}
   .tl-head{font-size:7px}
