@@ -1,6 +1,6 @@
 // Clean voice: make a cleaner copy of a file's sound on this device (nothing is uploaded).
 //   Light  = RNNoise (ships with the app, ~110 KB, works offline from the first use)
-//   Strong = DPDFNet neural network (about 22 MB, downloaded once on request, then kept for offline use)
+//   Strong = DPDFNet neural network (about 21 MB, downloaded once on request, then kept for offline use)
 // The cleaned sound is stored as a derived audio file (mono, 48 kHz, Opus/AAC) next to the original, which is never changed.
 // The file is read, cleaned and written in 10-second pieces, so an hour-long recording needs only a few MB of memory.
 import { loadMediabunny } from './media.js';
@@ -15,7 +15,7 @@ export class CleanError extends Error { constructor(code, msg) { super(msg); thi
 
 export const AI_CACHE = 'video-editor-ai'; // the service worker keeps this cache across app updates
 const STRONG_DIR = new URL('../vendor/clean-strong/', import.meta.url).href;
-/** The files of the Strong engine and their real sizes in bytes (the download is ~22 MB, fetched only when the user agrees). */
+/** The files of the Strong engine and their real sizes in bytes (the download is ~21 MB, fetched only when the user agrees). */
 export const STRONG_FILES = [
   { key: 'model', name: 'dpdfnet2_48khz_hr.onnx', bytes: 10596848, type: 'application/octet-stream' },
   { key: 'wasm', name: 'ort-wasm-simd-threaded.wasm', bytes: 11210254, type: 'application/wasm' },
@@ -65,7 +65,7 @@ export async function downloadStrong({ onProgress, signal } = {}) {
   }
   onProgress && onProgress({ loaded: STRONG_BYTES, total: STRONG_BYTES, file: '' });
 }
-/** Delete the downloaded Strong engine (frees ~22 MB). */
+/** Delete the downloaded Strong engine (frees ~21 MB). */
 export async function removeStrong() {
   try { if (!hasCaches()) return false; const c = await caches.open(AI_CACHE); let any = false; for (const f of STRONG_FILES) any = (await c.delete(fileUrl(f), { ignoreSearch: true })) || any; return any; } catch { return false; }
 }

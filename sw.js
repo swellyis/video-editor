@@ -88,7 +88,7 @@ self.addEventListener('fetch', (event) => {
     })());
     return;
   }
-  // Clean voice "Strong" (neural network, ~22 MB): downloaded by the page only after the user agrees, and stored by the page in the
+  // Clean voice "Strong" (neural network, ~21 MB): downloaded by the page only after the user agrees, and stored by the page in the
   // same 'video-editor-ai' cache. Here it is only READ (cache first, else the network); it is never precached or deleted by updates.
   if (url.pathname.includes('/vendor/clean-strong/')) {
     event.respondWith((async () => {
