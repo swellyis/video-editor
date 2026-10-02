@@ -1,6 +1,6 @@
 // Frame compositor shared by preview, thumbnail maker and export.
 import { captionAt, captionWords } from './captions.js';
-import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasMotion, overlaysAt, EASES, blurAt } from './model.js';
+import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasMotion, overlaysAt, EASES, blurAt, byLane } from './model.js';
 import { clamp } from './util.js';
 import { BlurFX } from './blur.js';
 
@@ -545,14 +545,14 @@ export class Compositor {
     }
     ctx.globalAlpha = 1;
     // Blur / Privacy regions: over the picture and overlays, under text and logo
-    for (const b of project.blurs || []) {
+    for (const b of byLane(project.blurs || [])) {
       if (nBlur >= 12) break;
       const reg = blurAt(b, t); if (!reg) continue;
       this._fx().apply(ctx, W, H, reg); nBlur++;
     }
     ctx.globalAlpha = 1;
     // texts
-    for (const tl of project.texts) {
+    for (const tl of byLane(project.texts)) {
       if (t < tl.start || t >= tl.end || !tl.text) continue;
       const a = Math.min(tl.fadeIn > 0 ? (t - tl.start) / tl.fadeIn : 1, tl.fadeOut > 0 ? (tl.end - t) / tl.fadeOut : 1);
       boxes.push(drawText(ctx, W, H, tl, clamp(a, 0, 1), t - tl.start));

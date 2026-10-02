@@ -77,6 +77,7 @@ export function migrate(p) {
   out.captionStyle = normalizeCaptionStyle(p.captionStyle);
   if ((p.schema || 0) < 5 && out.thumb.time === 0) out.thumb.time = null; // before v5, 0 meant "not chosen yet"
   sanitizeProject(out);
+  ensureLanes(out);
   out.schema = SCHEMA;
   return out;
 }
@@ -106,7 +107,7 @@ export function sanitizeProject(p) {
   for (const c of p.clips) {
     cleanName(c, 'Clip'); c.muted = c.muted === true; c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
     c.srcDuration = num(c.srcDuration, 0, 1e6, 1); c.in = num(c.in, 0, 1e6, 0); c.out = num(c.out, c.in + 0.01, 1e6, c.in + 1);
-    c.fadeIn = num(c.fadeIn, 0, 60, 0); c.fadeOut = num(c.fadeOut, 0, 60, 0);
+    c.fadeIn = num(c.fadeIn, 0, 60, 0); c.fadeOut = num(c.fadeOut, 0, 60, 0); c.gap = num(c.gap, 0, 1e5, 0);
     c.transition.duration = num(c.transition.duration, 0, 10, 0.6);
     c.transform.zoom = num(c.transform.zoom, 0.05, 20, 1);
     cleanClipBlur(c.blur);
@@ -201,7 +202,7 @@ export function blurAt(b, t) {
 export function normalizeClip(c) {
   return Object.assign({
     id: uid('clip'), kind: 'video', mediaId: null, name: 'Clip', srcDuration: 1, width: 0, height: 0, hasAudio: true,
-    in: 0, out: 1, speed: 1, volume: 1, muted: false, fadeIn: 0, fadeOut: 0, fit: 'inherit', bg: 'inherit', opacity: 1,
+    in: 0, out: 1, speed: 1, volume: 1, muted: false, fadeIn: 0, fadeOut: 0, fit: 'inherit', bg: 'inherit', opacity: 1, gap: 0,
     transition: { type: 'cut', duration: 0.6 }, keyframes: {},
   }, c, {
     keyframes: c.keyframes || {},
@@ -262,7 +263,7 @@ export function newOverlay(media, start, settings) {
 export const overlayLen = (o) => Math.max(MIN_CLIP, (o.out - o.in) / (o.kind === 'image' ? 1 : (o.speed || 1)));
 export const overlaySourceTime = (o, t) => o.kind === 'image' ? 0 : clamp(o.in + (t - o.start) * (o.speed || 1), o.in, Math.max(o.in, o.out - 0.001));
 export function overlaysAt(project, t) {
-  return (project.overlays || []).filter(o => t >= o.start && t < o.start + overlayLen(o));
+  return byLane((project.overlays || []).filter(o => t >= o.start && t < o.start + overlayLen(o)));
 }
 export function overlayGain(o, t) {
   if (o.kind !== 'video' || o.muted || !o.hasAudio) return 0;
@@ -434,22 +435,27 @@ export function loopSeams(a, total) {
   return out;
 }
 
-/** Compute timeline placement for clips (magnetic main track with overlapping crossfades). */
+/**
+ * Compute timeline placement for clips. The main track keeps its order (a clip never overlaps its neighbour except for a crossfade),
+ * but a clip may start later than the previous one ends: `clip.gap` is the empty time before it (black picture, no sound).
+ * A gap cancels a crossfade into that clip (there is nothing to blend with).
+ */
 export function layout(project) {
   const items = []; let t = 0;
   const clips = project.clips;
   for (let i = 0; i < clips.length; i++) {
-    const c = clips[i], len = clipLen(c);
-    let start = t, xIn = 0, fadeIn = 0;
+    const c = clips[i], len = clipLen(c), gap = c.gap > 1e-6 ? c.gap : 0;
+    let start = t + gap, xIn = 0, fadeIn = 0;
     const tr = c.transition || { type: 'cut' };
-    if (i > 0 && tr.type === 'crossfade') {
+    if (i > 0 && tr.type === 'crossfade' && !gap) {
       const prev = items[i - 1];
       xIn = Math.max(0, Math.min(tr.duration, prev.len / 2, len / 2));
       start = prev.end - xIn;
     } else if (tr.type === 'fade') {
-      const prevLen = i > 0 ? items[i - 1].len : Infinity;
-      fadeIn = Math.max(0, Math.min(tr.duration / (i > 0 ? 2 : 1), len / 2, prevLen / 2));
-      if (i > 0) items[i - 1].fadeOutBlack = fadeIn;
+      const dip = i > 0 && !gap;
+      const prevLen = dip ? items[i - 1].len : Infinity;
+      fadeIn = Math.max(0, Math.min(tr.duration / (dip ? 2 : 1), len / 2, prevLen / 2));
+      if (dip) items[i - 1].fadeOutBlack = fadeIn;
     }
     const it = { clip: c, index: i, start, end: start + len, len, xIn, xOut: 0, fadeInBlack: fadeIn, fadeOutBlack: 0 };
     if (i > 0) items[i - 1].xOut = xIn;
@@ -642,7 +648,7 @@ export function splitAt(project, t) {
   const local = t - it.start;
   if (local < MIN_CLIP || it.end - t < MIN_CLIP) return null;
   const b = deepClone(c);
-  b.id = uid('clip');
+  b.id = uid('clip'); b.gap = 0; // the second half follows the first directly
   b.transition = { type: 'cut', duration: c.transition.duration };
   if (c.kind === 'image') {
     b.in = c.in + local; b.out = c.out; c.out = c.in + local; // image in-point = animation (GIF) time offset
@@ -843,14 +849,16 @@ export function removeClip(project, id, ripple) {
   const lay = layout(project);
   const it = lay.items.find(x => x.clip.id === id);
   if (!it) return;
+  const next = lay.items[it.index + 1], prevEnd = it.index > 0 ? lay.items[it.index - 1].end : 0;
   project.clips.splice(it.index, 1);
-  if (ripple) rippleShift(project, it.end - 1e-3, layout(project).total - lay.total);
+  if (ripple) { rippleShift(project, it.end - 1e-3, layout(project).total - lay.total); }
+  else if (next) next.clip.gap = Math.max(0, round3(next.start - prevEnd)); // not rippling: what follows stays where it is (the hole stays empty)
 }
 export function duplicateClip(project, id, ripple) {
   const lay = layout(project);
   const it = lay.items.find(x => x.clip.id === id);
   if (!it) return null;
-  const b = deepClone(it.clip); b.id = uid('clip'); b.transition = { type: 'cut', duration: b.transition.duration };
+  const b = deepClone(it.clip); b.id = uid('clip'); b.gap = 0; b.transition = { type: 'cut', duration: b.transition.duration };
   project.clips.splice(it.index + 1, 0, b);
   if (ripple) rippleShift(project, it.end - 1e-3, layout(project).total - lay.total);
   return b;
@@ -858,7 +866,185 @@ export function duplicateClip(project, id, ripple) {
 export function moveClip(project, from, to) {
   if (from === to || from < 0 || from >= project.clips.length) return;
   const [c] = project.clips.splice(from, 1);
+  c.gap = 0;
   project.clips.splice(clamp(to, 0, project.clips.length), 0, c);
+}
+
+
+// ---------- free placement: lanes and gaps ----------
+const round3 = (v) => Math.round(v * 1000) / 1000;
+const EPS = 1e-3;
+/** Items that live in stacked lanes. Lane 0 is the bottom one; a higher lane is drawn on top (picture) and shown higher up in the timeline. */
+export const LANE_KINDS = ['overlay', 'text', 'blur', 'audio'];
+export const laneList = (project, kind) => (kind === 'overlay' ? project.overlays : kind === 'text' ? project.texts : kind === 'blur' ? project.blurs : kind === 'audio' ? project.audio : null) || [];
+export const laneOf = (it) => (Number.isInteger(it.lane) && it.lane >= 0 ? it.lane : 0);
+/** [start, end] on the timeline of a lane item. */
+export function laneSpan(kind, it, total) {
+  if (kind === 'overlay') return [it.start, it.start + overlayLen(it)];
+  if (kind === 'audio') return [it.start, it.start + audioSpan(it, total)];
+  return [it.start, it.end];
+}
+/** Items in stacking order: lower lanes first (drawn first, so higher lanes end up on top); same lane keeps list order. */
+export function byLane(list) {
+  if (!list.some(x => laneOf(x))) return list;
+  return list.map((x, i) => [x, i]).sort((a, b) => laneOf(a[0]) - laneOf(b[0]) || a[1] - b[1]).map(a => a[0]);
+}
+/**
+ * Give every lane item a lane. Items that have none (old projects, items just added) are stacked on top of whatever they overlap in
+ * time, in list order, which keeps the picture exactly as it was drawn before lanes existed. Two items that overlap inside one lane
+ * (after a trim or a typed time) are separated: the later one moves to the next lane up where it fits. Empty lanes are closed up.
+ * Returns true if anything changed.
+ */
+export function ensureLanes(project) {
+  let changed = false;
+  const total = layout(project).total;
+  for (const kind of LANE_KINDS) {
+    const list = laneList(project, kind); if (!list.length) continue;
+    const sp = new Map(list.map(it => [it, laneSpan(kind, it, total)]));
+    const ovl = (a, b) => a[0] < b[1] - EPS && b[0] < a[1] - EPS;
+    const placed = list.filter(it => Number.isInteger(it.lane) && it.lane >= 0);
+    for (const it of list) {
+      if (placed.includes(it)) continue;
+      let l = 0; for (const o of placed) if (ovl(sp.get(it), sp.get(o))) l = Math.max(l, laneOf(o) + 1);
+      it.lane = l; placed.push(it); changed = true;
+    }
+    const byStart = [...list].sort((a, b) => laneOf(a) - laneOf(b) || sp.get(a)[0] - sp.get(b)[0]);
+    const done = new Set();
+    for (const it of byStart) {
+      const own = laneOf(it);
+      // in its own lane only the items already settled count (the earlier one stays); in lanes above, everything counts
+      const fits = (l) => !list.some(o => o !== it && laneOf(o) === l && (l !== own || done.has(o)) && ovl(sp.get(it), sp.get(o)));
+      if (!fits(own)) { let l = own + 1; while (!fits(l)) l++; it.lane = l; changed = true; }
+      done.add(it);
+    }
+    const used = [...new Set(list.map(laneOf))].sort((a, b) => a - b);
+    if (used.some((l, i) => l !== i)) { for (const it of list) it.lane = used.indexOf(laneOf(it)); changed = true; }
+  }
+  return changed;
+}
+/** Open a new, empty lane at index `at` (items at `at` and above move up one). */
+export function insertLane(project, kind, at) { for (const it of laneList(project, kind)) if (laneOf(it) >= at) it.lane = laneOf(it) + 1; }
+export const laneCount = (project, kind) => laneList(project, kind).reduce((n, it) => Math.max(n, laneOf(it) + 1), 1);
+/**
+ * Where an item of length `len` can sit in `lane` without touching its neighbours, as close to `desired` as possible.
+ * Returns { start, dist } (dist 0 = the wish is free). `skip` is the item being moved.
+ */
+export function freeSpot(project, kind, lane, skip, len, desired, total) {
+  const others = laneList(project, kind).filter(o => o !== skip && laneOf(o) === lane).map(o => laneSpan(kind, o, total)).sort((a, b) => a[0] - b[0]);
+  return nearestFree(others, len, desired);
+}
+export function nearestFree(spans, len, desired) {
+  const want = Math.max(0, desired);
+  const fits = (s) => s >= -1e-9 && spans.every(o => s + len <= o[0] + EPS || s >= o[1] - EPS);
+  let best = null;
+  for (const c of [want, 0, ...spans.map(o => o[1]), ...spans.map(o => o[0] - len)]) {
+    if (!fits(c)) continue;
+    const d = Math.abs(c - want);
+    if (!best || d < best.dist - 1e-9) best = { start: Math.max(0, c), dist: d };
+  }
+  return best || { start: want, dist: 0 };
+}
+/**
+ * Move one lane item to `start` in `lane`. `lane` may be an existing lane number, or { newAt: n } to open a new lane at index n first.
+ * Same-lane overlap is never created: the item takes the nearest free spot of its lane when that is close (half its length, at least half
+ * a second), otherwise it gets a new lane just above. Returns { lane, start, pushed }.
+ */
+export function planLaneItem(project, kind, item, start, lane) {
+  const total = layout(project).total, [s0, e0] = laneSpan(kind, item, total), len = e0 - s0;
+  if (lane && typeof lane === 'object') return { lane: lane.newAt, newAt: lane.newAt, start: Math.max(0, start), pushed: false };
+  const spot = freeSpot(project, kind, lane, item, len, start, total);
+  if (spot.dist <= Math.max(len / 2, 0.5) + 1e-9) return { lane, newAt: null, start: spot.start, pushed: false };
+  return { lane: lane + 1, newAt: lane + 1, start: Math.max(0, start), pushed: true };
+}
+export function placeLaneItem(project, kind, item, start, lane) {
+  const plan = planLaneItem(project, kind, item, start, lane);
+  if (plan.newAt != null) insertLane(project, kind, plan.newAt);
+  setLaneItemStart(kind, item, plan.start);
+  item.lane = plan.lane;
+  ensureLanes(project);
+  return { lane: item.lane, start: plan.start, pushed: plan.pushed };
+}
+/** Set where a lane item starts (texts, blurs keep their length). */
+export function setLaneItemStart(kind, item, start) {
+  start = Math.max(0, start);
+  if (kind === 'text' || kind === 'blur') { const len = item.end - item.start; item.start = start; item.end = start + len; }
+  else item.start = start;
+}
+
+/**
+ * Free move of a main-track clip (used when Ripple is off): the clip goes to the nearest free spot of the track (never over another
+ * clip), the clips keep their own positions, and the order of the track follows the new positions. Gaps are stored in `clip.gap`.
+ * Returns the start it actually got, or null.
+ */
+export function moveClipTo(project, id, desired) {
+  const lay = layout(project), it = lay.items.find(i => i.clip.id === id);
+  if (!it) return null;
+  const others = lay.items.filter(i => i !== it).map(i => [i.start, i.end]).sort((a, b) => a[0] - b[0]);
+  const start = nearestFree(others, it.len, desired).start;
+  const entries = lay.items.map(i => ({ clip: i.clip, start: i.clip === it.clip ? start : i.start, prev: i.index ? lay.items[i.index - 1].clip : null }));
+  arrangeMain(project, entries);
+  return round3(start);
+}
+/** Rewrite order and gaps of the main track from absolute start times. A clip whose neighbour changed loses its crossfade / dip (it would shift it). */
+export function arrangeMain(project, entries) {
+  entries.sort((a, b) => a.start - b.start || project.clips.indexOf(a.clip) - project.clips.indexOf(b.clip));
+  let prevEnd = 0, prevClip = null;
+  for (const e of entries) {
+    const c = e.clip, len = clipLen(c);
+    const sameNeighbour = e.prev !== undefined && e.prev === prevClip && c.transition && c.transition.type === 'crossfade';
+    if (sameNeighbour && e.start < prevEnd - 1e-6) c.gap = 0;
+    else {
+      c.gap = Math.max(0, round3(e.start - prevEnd));
+      if (c.gap < 1e-6 && e.prev !== prevClip && c.transition && c.transition.type !== 'cut' && e.prev !== undefined) c.transition = { ...c.transition, type: 'cut' };
+    }
+    prevEnd = e.start + len; prevClip = c;
+  }
+  project.clips = entries.map(e => e.clip);
+}
+/**
+ * Not rippling: after main clip `id` changed length (lay0 = layout before), the clip after it stays where it was: the gap between them
+ * grows or shrinks. It is pushed along only when the clip now reaches it (no gap left).
+ */
+export function holdNextClip(project, id, lay0) {
+  const i = project.clips.findIndex(c => c.id === id), next = project.clips[i + 1], n0 = lay0.items[i + 1];
+  if (!next || !n0) return;
+  const want = n0.start - layout(project).items[i].end;
+  next.gap = want > 1e-3 ? round3(want) : 0;
+}
+/** Put a clip that is not on the track yet at `start` (nearest free spot). Returns its start. */
+export function addClipAt(project, clip, desired) {
+  const lay = layout(project);
+  const start = nearestFree(lay.items.map(i => [i.start, i.end]).sort((a, b) => a[0] - b[0]), clipLen(clip), desired).start;
+  const entries = lay.items.map(i => ({ clip: i.clip, start: i.start, prev: i.index ? lay.items[i.index - 1].clip : null }));
+  entries.push({ clip, start, prev: undefined });
+  arrangeMain(project, entries);
+  return round3(start);
+}
+const volumeOnly = (item) => { const k = {}; if (item.keyframes && item.keyframes.volume) k.volume = deepClone(item.keyframes.volume); return k; };
+/** Turn a main-track clip into a picture-in-picture overlay at the same time (it leaves the main track; `ripple` closes the hole). Returns the overlay. */
+export function clipToOverlay(project, id, ripple, start) {
+  const it = layout(project).items.find(i => i.clip.id === id); if (!it) return null;
+  const c = it.clip;
+  const o = normalizeOverlay({
+    kind: c.kind, mediaId: c.mediaId, name: c.name, srcDuration: c.srcDuration, width: c.width, height: c.height, hasAudio: c.hasAudio,
+    start: start ?? it.start, in: c.in, out: c.out, speed: c.speed, volume: c.volume, muted: c.muted, opacity: c.opacity, fadeIn: Math.max(0.25, c.fadeIn || 0), fadeOut: Math.max(0.25, c.fadeOut || 0),
+    keyframes: volumeOnly(c),
+  });
+  removeClip(project, id, ripple);
+  if (!project.overlays) project.overlays = [];
+  project.overlays.push(o);
+  return o;
+}
+/** Turn an overlay into a main-track clip (nearest free spot to `start`, or, with `index`, inserted there like a reorder). Returns the clip. */
+export function overlayToClip(project, id, start, index) {
+  const o = (project.overlays || []).find(x => x.id === id); if (!o) return null;
+  const c = normalizeClip({
+    kind: o.kind, mediaId: o.mediaId, name: o.name, srcDuration: o.srcDuration, width: o.width, height: o.height, hasAudio: o.hasAudio,
+    in: o.in, out: o.out, speed: o.speed || 1, volume: o.volume, muted: o.muted, opacity: o.opacity, fadeIn: 0, fadeOut: 0, keyframes: volumeOnly(o),
+  });
+  project.overlays.splice(project.overlays.indexOf(o), 1);
+  if (index != null) project.clips.splice(clamp(index, 0, project.clips.length), 0, c); else addClipAt(project, c, start);
+  return c;
 }
 
 // ---------- History (snapshot based) ----------
