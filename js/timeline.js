@@ -1,5 +1,5 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
-import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX, laneOf, laneList, laneSpan, planLaneItem, placeLaneItem, setLaneItemStart, nearestFree, moveClipTo, clipToOverlay, overlayToClip, addClipAt, holdNextClip } from './model.js';
+import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX, laneOf, laneList, laneSpan, planLaneItem, placeLaneItem, nearestFree, moveClipTo, clipToOverlay, overlayToClip, holdNextClip } from './model.js';
 import { clamp, fmt, el, icon, toast } from './util.js';
 import { retimeWords } from './captions.js';
 
@@ -17,7 +17,6 @@ const LANE = {
   audio: { track: 'aTrack', rowH: 38, off: 3, pad: 6, min: 44 },
 };
 const ZONE = 16; // height of the "new lane" drop strips shown above and below a track while an item is dragged
-const TRACK_OF = { clip: 'video', overlay: 'overlay', text: 'text', blur: 'blur', audio: 'audio' };
 export class Timeline {
   /** Rows of a lane track: sizes the track and returns the top offset (px) of an item from its lane. Highest lane = top row. */
   laneGeo(kind, items) {
@@ -71,6 +70,28 @@ export class Timeline {
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, this.timeAtClient(e.clientX)); }
     }, { passive: false });
     new ResizeObserver(() => { if (this.autoFit) this.fit(); else this.render(); }).observe(this.scroll);
+    this.pinchSetup();
+  }
+  /** Two fingers on the timeline zoom it (pinch). A drag in progress is cancelled when the second finger lands. */
+  pinchSetup() {
+    const ptrs = new Map(), dist = () => { const [a, b] = [...ptrs.values()]; return Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; };
+    this.scroll.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch') return;
+      ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+      if (ptrs.size === 2) {
+        e.stopPropagation();
+        if (this.drag && this.drag.abort) this.drag.abort();
+        const [a, b] = [...ptrs.values()];
+        this._pinch = { d0: dist(), pps0: this.pps, anchor: this.timeAtClient((a[0] + b[0]) / 2) };
+      }
+    }, true);
+    this.scroll.addEventListener('pointermove', (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+      if (this._pinch && ptrs.size === 2) { const f = this._pinch.pps0 * dist() / this._pinch.d0 / this.pps; if (Math.abs(f - 1) > 0.004) this.zoomBy(f, this._pinch.anchor); }
+    }, true);
+    const gone = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) this._pinch = null; };
+    this.scroll.addEventListener('pointerup', gone, true); this.scroll.addEventListener('pointercancel', gone, true);
   }
   get project() { return this.app.project; }
   // ---------- track mute buttons (timeline headers) ----------
@@ -249,7 +270,7 @@ export class Timeline {
       }, this.vTrack);
       n._id = c.id; n.dataset.id = c.id;
       const w = Math.max(6, it.len * this.pps);
-      n.style.left = this.x(it.start) + 'px'; n.style.width = w + 'px';
+      n.style.left = this.x(it.start) + 'px'; n.style.width = w + 'px'; n.classList.toggle('narrow', w < 64);
       n.style.zIndex = String(10 + it.index);
       n.classList.toggle('sel', sel.type === 'clip' && sel.id === c.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.classList.toggle('image', c.kind === 'image');
@@ -284,7 +305,7 @@ export class Timeline {
         return d;
       }, this.oTrack);
       n._id = o.id; n.dataset.id = o.id;
-      n.style.left = this.x(o.start) + 'px'; n.style.width = Math.max(8, overlayLen(o) * this.pps) + 'px';
+      n.style.left = this.x(o.start) + 'px'; n.style.width = Math.max(8, overlayLen(o) * this.pps) + 'px'; n.classList.toggle('narrow', overlayLen(o) * this.pps < 64);
       n.style.top = oTop(o) + 'px';
       const lab = n.querySelector('span'), keyed = !!(o.chroma && o.chroma.enabled), om = o.kind === 'video' && o.hasAudio && o.muted, lk = keyed + '|' + o.name + '|' + om;
       if (lab._key !== lk) { lab._key = lk; lab.replaceChildren(icon(keyed ? 'key' : 'pip', 'ico item-ico'), ' ' + o.name, ...(om ? [' ', muteBadge('Muted')] : [])); }
@@ -304,7 +325,7 @@ export class Timeline {
         return d;
       }, this.tTrack);
       n._id = t.id; n.dataset.id = t.id;
-      n.style.left = this.x(t.start) + 'px'; n.style.width = Math.max(8, (t.end - t.start) * this.pps) + 'px';
+      n.style.left = this.x(t.start) + 'px'; n.style.width = Math.max(8, (t.end - t.start) * this.pps) + 'px'; n.classList.toggle('narrow', (t.end - t.start) * this.pps < 64);
       n.style.top = tTop(t) + 'px';
       n.querySelector('span').textContent = textLabel(t);
       n.classList.toggle('sel', sel.type === 'text' && sel.id === t.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
@@ -325,7 +346,7 @@ export class Timeline {
         return d;
       }, this.bTrack);
       n._id = b.id; n.dataset.id = b.id;
-      n.style.left = this.x(b.start) + 'px'; n.style.width = Math.max(8, (b.end - b.start) * this.pps) + 'px';
+      n.style.left = this.x(b.start) + 'px'; n.style.width = Math.max(8, (b.end - b.start) * this.pps) + 'px'; n.classList.toggle('narrow', (b.end - b.start) * this.pps < 64);
       n.style.top = bTop(b) + 'px';
       const lab = n.querySelector('span'), bk = blurLabel(b);
       if (lab._key !== bk) { lab._key = bk; lab.replaceChildren(icon('blur', 'ico item-ico'), ' ' + bk); }
@@ -347,7 +368,7 @@ export class Timeline {
       n._id = a.id; n.dataset.id = a.id;
       const span = audioSpan(a, lay.total);
       const w = Math.max(8, span * this.pps);
-      n.style.left = this.x(a.start) + 'px'; n.style.width = w + 'px';
+      n.style.left = this.x(a.start) + 'px'; n.style.width = w + 'px'; n.classList.toggle('narrow', w < 64);
       n.style.top = aTop(a) + 'px';
       const alab = n.querySelector('span'), atxt = (a.voice ? '🎙 ' : '♪ ') + a.name + (a.loop ? ' · loop' : '') + (a.duck && !a.muted ? ' · duck' : '') + '|' + !!a.muted;
       if (alab._key !== atxt) { alab._key = atxt; alab.replaceChildren(...(a.muted ? [muteBadge('Muted'), ' '] : []), atxt.slice(0, atxt.lastIndexOf('|'))); }
@@ -398,7 +419,7 @@ export class Timeline {
       }
       if (n.parentNode !== this.cTrack) this.cTrack.appendChild(n);
       n._id = c.id; n.dataset.id = c.id; n._gen = gen;
-      n.style.left = this.x(c.start) + 'px'; n.style.width = Math.max(4, (c.end - c.start) * this.pps - 1) + 'px';
+      n.style.left = this.x(c.start) + 'px'; n.style.width = Math.max(4, (c.end - c.start) * this.pps - 1) + 'px'; n.classList.toggle('narrow', (c.end - c.start) * this.pps < 64);
       n.style.top = (4 + (lanes ? lanes.lane.get(c.id) || 0 : 0) * 28) + 'px';
       const lab = n.firstChild; if (lab._key !== c.text) { lab._key = c.text; lab.textContent = c.text; }
       const on = sel.type === 'caption' && sel.id === c.id;
@@ -690,7 +711,7 @@ export class Timeline {
           // Dragging it up into the PiP track turns it into a picture-in-picture overlay.
           node.classList.add('dragging');
           this.beginZones(['overlay']);
-          const dy = ev.clientY - y0, len = it0.len;
+          const len = it0.len;
           d.toOverlay = this.overTrack(this.oTrack, ev.clientY, 0);
           let s0 = Math.max(0, it0.start + dt); const sn = this.snap(s0, id, [0, len]); if (sn.snapped) { s0 = Math.max(0, sn.t); this.showSnap(Math.abs(sn.t - s0) < 1e-6 ? s0 : s0 + len); } else this.snapLine.style.display = 'none';
           d.start = s0;
@@ -756,7 +777,7 @@ export class Timeline {
           t0.end = e2; tip('End ' + fmt(e2), e2);
         }
         capWords();
-        this.app.liveUpdate({ previewAt: handle === 'r' ? t0.end - 0.05 : t0.start + 0.01, keepTime: handle === 'body' });
+        this.app.liveUpdate(handle === 'body' ? { keepTime: true } : { previewAt: handle === 'r' ? t0.end - 0.05 : t0.start + 0.01 }); // moving: the playhead stays (it is a snap target)
       };
       d.onUp = () => { if (moved) this.app.commit(type === 'blur' ? 'Move blur region' : type === 'caption' ? 'Edit caption' : 'Move text'); };
     } else if (type === 'audio') {
@@ -810,7 +831,7 @@ export class Timeline {
           o.out = o.kind === 'image' ? or.i + len : clamp(or.i + len * sp, or.i + MIN_CLIP * sp, o.srcDuration || 1e9);
           tip('Ends ' + fmt(o.start + overlayLen(o)), o.start + overlayLen(o));
         }
-        this.app.liveUpdate({ previewAt: handle === 'r' ? o.start + overlayLen(o) - 0.05 : o.start + 0.01, keepTime: handle === 'body' });
+        this.app.liveUpdate(handle === 'body' ? { keepTime: true } : { previewAt: handle === 'r' ? o.start + overlayLen(o) - 0.05 : o.start + 0.01 });
       };
       d.onUp = () => { if (moved) this.app.commit('Edit overlay'); };
     } else if (type === 'marker') {
@@ -888,6 +909,7 @@ export class Timeline {
       if (moved) { this.app.restore(snapshot); }
     };
     node.addEventListener('pointermove', move); node.addEventListener('pointerup', end); node.addEventListener('pointercancel', cancel);
+    d.abort = () => cancel({});
   }
 
   /**

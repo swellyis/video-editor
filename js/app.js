@@ -8,7 +8,7 @@ import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
-  moveClip, rippleShift, ensureLanes, matchImageToAudio, stepVolume, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
+  moveClip, rippleShift, ensureLanes, holdNextClip, matchImageToAudio, stepVolume, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, MOTION_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
@@ -510,7 +510,7 @@ function trimFrom(source) {
   e = clamp(Number.isFinite(e) ? e : c.srcDuration, min, c.srcDuration);
   if (e - s < min) { if (source === 'end') s = Math.max(0, e - min); else e = Math.min(c.srcDuration, s + min); }
   const before = layout(app.project), it0 = before.items.find(i => i.clip.id === c.id);
-  app._pendingTrimRipple = app._pendingTrimRipple || { end: it0.end, total: before.total, kf: deepClone(c.keyframes || {}), in0: c.in };
+  app._pendingTrimRipple = app._pendingTrimRipple || { end: it0.end, total: before.total, kf: deepClone(c.keyframes || {}), in0: c.in, id: c.id, lay0: before };
   c.in = s; c.out = e;
   // keyframes stay on the same frames of the source when the start is trimmed
   const P = app._pendingTrimRipple;
@@ -521,6 +521,7 @@ function trimFrom(source) {
 function trimCommit() {
   const r = app._pendingTrimRipple; app._pendingTrimRipple = null;
   if (r && app.rippleEnabled) rippleShift(app.project, r.end - 1e-3, layout(app.project).total - r.total);
+  else if (r && r.lay0) holdNextClip(app.project, r.id, r.lay0); // Ripple off: the next clip stays where it was
   app.commit('Trim');
 }
 $('startRange').addEventListener('input', () => { const r = trimFrom('start'); if (r) app.liveUpdate({ previewAt: r.it.start }); });
@@ -528,7 +529,7 @@ $('endRange').addEventListener('input', () => { const r = trimFrom('end'); if (r
 $('startRange').addEventListener('change', trimCommit); $('endRange').addEventListener('change', trimCommit);
 $('clipIn').addEventListener('change', () => { if (trimFrom('inputs')) trimCommit(); });
 $('clipOut').addEventListener('change', () => { if (trimFrom('inputs')) trimCommit(); });
-$('imageDur').addEventListener('input', () => { const c = selected('clip'); if (!c) return; const b = layout(app.project); app._pendingTrimRipple = app._pendingTrimRipple || { end: b.items.find(i => i.clip.id === c.id).end, total: b.total }; c.out = c.in + parseFloat($('imageDur').value); app.liveUpdate(); });
+$('imageDur').addEventListener('input', () => { const c = selected('clip'); if (!c) return; const b = layout(app.project); app._pendingTrimRipple = app._pendingTrimRipple || { end: b.items.find(i => i.clip.id === c.id).end, total: b.total, id: c.id, lay0: b }; c.out = c.in + parseFloat($('imageDur').value); app.liveUpdate(); });
 $('imageDur').addEventListener('change', trimCommit);
 $('audioLenInput').addEventListener('change', () => {
   const a = selected('audio'); if (!a) return; const l = parseFloat($('audioLenInput').value); if (!(l > 0)) return;

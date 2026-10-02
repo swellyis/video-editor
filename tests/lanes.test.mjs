@@ -70,7 +70,7 @@ test('placeLaneItem: nearest free spot when close, otherwise a new lane above; n
   assert.equal(r.start, 4); assert.equal(r.lane, 0);
   r = placeLaneItem(p, 'text', m, 9, 0); // inside t2: nearest free spot is far -> new lane above
   assert.equal(r.pushed, true); assert.equal(m.lane, 1); assert.equal(m.start, 9); assert.equal(m.end, 11);
-  r = placeLaneItem(p, 'text', m, 30, { newAt: 0 }); // a new lane below everything
+  placeLaneItem(p, 'text', m, 30, { newAt: 0 }); // a new lane below everything
   assert.equal(m.lane, 0); assert.deepEqual(p.texts.filter(t => t.id !== 'm').map(laneOf), [1, 1]);
 });
 
