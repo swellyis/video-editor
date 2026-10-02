@@ -850,20 +850,28 @@ export function moveClip(project, from, to) {
 }
 
 // ---------- History (snapshot based) ----------
+export const MERGE_MS = 1000;
 export class History {
   constructor(limit = 120) { this.limit = limit; this.undoStack = []; this.redoStack = []; this.current = null; }
-  reset(project) { this.undoStack = []; this.redoStack = []; this.current = JSON.stringify(project); }
+  reset(project) { this.undoStack = []; this.redoStack = []; this.current = JSON.stringify(project); this.mergeKey = null; }
   /** Record a new state after a mutation. */
-  commit(project) {
+  commit(project, mergeKey) {
     const s = JSON.stringify(project);
     if (s === this.current) return false;
+    // Repeated edits with the same key within MERGE_MS of each other (e.g. a burst of Volume up taps) are ONE undo step.
+    const now = Date.now();
+    if (mergeKey && this.mergeKey === mergeKey && now - this.mergeAt <= MERGE_MS && this.undoStack.length) {
+      this.current = s; this.redoStack = []; this.mergeAt = now;
+      return true;
+    }
+    this.mergeKey = mergeKey || null; this.mergeAt = now;
     if (this.current != null) this.undoStack.push(this.current);
     if (this.undoStack.length > this.limit) this.undoStack.shift();
     this.current = s; this.redoStack = [];
     return true;
   }
-  undo() { if (!this.undoStack.length) return null; this.redoStack.push(this.current); this.current = this.undoStack.pop(); return JSON.parse(this.current); }
-  redo() { if (!this.redoStack.length) return null; this.undoStack.push(this.current); this.current = this.redoStack.pop(); return JSON.parse(this.current); }
+  undo() { this.mergeKey = null; if (!this.undoStack.length) return null; this.redoStack.push(this.current); this.current = this.undoStack.pop(); return JSON.parse(this.current); }
+  redo() { this.mergeKey = null; if (!this.redoStack.length) return null; this.undoStack.push(this.current); this.current = this.redoStack.pop(); return JSON.parse(this.current); }
   get canUndo() { return this.undoStack.length > 0; }
   get canRedo() { return this.redoStack.length > 0; }
   mediaIds() {
@@ -873,4 +881,15 @@ export class History {
     }
     return ids;
   }
+}
+
+/**
+ * Base-volume step (the Volume slider, not keyframes). `level` and `max` are multipliers (1 = 100%), `dir` is +1 / -1,
+ * `fine` uses 1-point steps instead of 10. Works in whole percentage points so repeated taps never drift.
+ * Returns { level, atLimit } where atLimit is true when the level could not move (already at 0 or at max).
+ */
+export function stepVolume(level, dir, { fine = false, max = 2 } = {}) {
+  const cur = Math.round((Number.isFinite(level) ? level : 1) * 100), top = Math.round(max * 100);
+  const next = Math.min(top, Math.max(0, cur + (dir < 0 ? -1 : 1) * (fine ? 1 : 10)));
+  return { level: next / 100, atLimit: next === Math.min(top, Math.max(0, cur)) };
 }

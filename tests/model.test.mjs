@@ -245,3 +245,31 @@ test('detachAudio: matching item, original muted, refuses twice / muted / no aud
   const mg = m.migrate(JSON.parse(JSON.stringify(old)));
   assert.equal(mg.audio[0].speed, 1); assert.deepEqual(mg.audio[0].keyframes, {}); assert.equal(m.SCHEMA, 5);
 });
+
+test('stepVolume: 10-point steps, 1-point fine steps, clamped to 0..max, no float drift', async () => {
+  const { stepVolume } = await import('../js/model.js');
+  assert.deepEqual(stepVolume(1, 1), { level: 1.1, atLimit: false });
+  assert.deepEqual(stepVolume(1, -1), { level: 0.9, atLimit: false });
+  assert.equal(stepVolume(1, 1, { fine: true }).level, 1.01);
+  assert.equal(stepVolume(0.6, 1).level, 0.7);
+  assert.equal(stepVolume(0.05, -1).level, 0); // clamps instead of going negative
+  assert.deepEqual(stepVolume(0, -1), { level: 0, atLimit: true });
+  assert.equal(stepVolume(1.95, 1).level, 2);
+  assert.deepEqual(stepVolume(2, 1), { level: 2, atLimit: true });
+  assert.deepEqual(stepVolume(1.5, 1, { max: 1.5 }), { level: 1.5, atLimit: true });
+  let v = 0.3; for (let i = 0; i < 7; i++) v = stepVolume(v, 1).level; assert.equal(v, 1); // 0.3 + 7 x 0.1 is exactly 1
+  assert.equal(stepVolume(NaN, 1).level, 1.1);
+});
+
+test('History.commit with a merge key: a burst is one undo step, other keys / slow taps / other edits start a new one', async () => {
+  const { History } = await import('../js/model.js');
+  const h = new History(); const p = { v: 0, w: 0 }; h.reset(p);
+  p.v = 1; assert.ok(h.commit(p, 'vol:a')); p.v = 2; assert.ok(h.commit(p, 'vol:a')); p.v = 3; h.commit(p, 'vol:a');
+  assert.equal(h.undoStack.length, 1); assert.equal(h.undo().v, 0); assert.equal(h.redo().v, 3);
+  p.v = 4; h.commit(p, 'vol:b'); assert.equal(h.undoStack.length, 2); // other key
+  p.w = 1; h.commit(p); p.v = 5; h.commit(p, 'vol:b'); assert.equal(h.undoStack.length, 4); // a plain edit in between ends the burst
+  p.v = 6; h.commit(p, 'vol:b'); assert.equal(h.undoStack.length, 4);
+  h.mergeAt -= 1500; p.v = 7; h.commit(p, 'vol:b'); assert.equal(h.undoStack.length, 5); // slower than 1 s
+  h.undo(); p.v = 8; h.commit(p, 'vol:b'); assert.equal(h.undoStack.length, 5 - 1 + 1); // undo ends the burst too
+  assert.equal(h.commit(p, 'vol:b'), false); // unchanged state is not a step
+});

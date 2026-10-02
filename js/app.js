@@ -8,7 +8,7 @@ import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
-  moveClip, rippleShift, matchImageToAudio, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
+  moveClip, rippleShift, matchImageToAudio, stepVolume, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, MOTION_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
@@ -107,8 +107,8 @@ function setSaveState(s) {
   e.classList.toggle('failed', s === 'failed');
 }
 
-app.commit = (label) => {
-  if (app.history.commit(app.project)) scheduleSave();
+app.commit = (label, mergeKey) => {
+  if (app.history.commit(app.project, mergeKey)) scheduleSave();
   renderAll();
 };
 app.liveUpdate = (opts = {}) => {
@@ -334,7 +334,7 @@ document.addEventListener('click', (e) => {
     const fn = actions[act.dataset.action]; if (!fn) return;
     // an action that throws (or a promise that rejects) must never fail silently: the user sees why and the button works again
     const fail = (err) => { console.warn(err); toast('Something went wrong: ' + ((err && err.message) || err) + '. Please try again.', 5000); };
-    try { const r = fn(act); if (r && typeof r.catch === 'function') r.catch(fail); } catch (err) { fail(err); }
+    try { const r = fn(act, e); if (r && typeof r.catch === 'function') r.catch(fail); } catch (err) { fail(err); }
   }
 });
 function fillOutputs() {
@@ -444,6 +444,12 @@ function fillInspector() {
     setState('.tl-toolbar [data-action=matchAudio]', !!maOk, 'Match audio: make the selected image as long as the audio',
       st === 'clip' ? 'A video clip can’t be stretched to fit the audio. Select an image clip instead.' : 'Match audio: select an image clip on the timeline first, then tap it to make the image as long as the audio.');
   }
+  {
+    const vt = volumeTarget(), vOk = !vt.why;
+    const tipUp = 'Volume up: raise the selected item\'s Volume by 10 points (Shift or Alt: 1 point). Shortcut: ]', tipDown = 'Volume down: lower the selected item\'s Volume by 10 points (Shift or Alt: 1 point). Shortcut: [';
+    setState('.tl-toolbar [data-action=volumeDown]', vOk, tipDown, vt.why || tipDown);
+    setState('.tl-toolbar [data-action=volumeUp]', vOk, tipUp, vt.why || tipUp);
+  }
   setState('.tl-toolbar [data-action=addKeyframe]', kfOk, 'Keyframe the selected item at the playhead (Shift+K). On a music or voice track it adds a volume keyframe.', TOOL_HINT.addKeyframe[st || 'none'] || TOOL_HINT.addKeyframe.none);
 }
 // Side-panel lists: rebuilt only when what they show changed (they're refreshed on every slider input event).
@@ -531,6 +537,33 @@ function setDetachBusy(btns, on) {
     if (!on && sp) sp.remove();
   }
 }
+/** Why the selection has no Volume to change (null when it has one): { item, bind, name } or { why }. */
+function volumeTarget() {
+  const s = app.selection, item = s && selected(s.type);
+  if (!s || !item) return { why: 'Nothing selected. Tap a clip, overlay, music or voice track on the timeline first, then tap Volume up or down.' };
+  if (s.type === 'clip' || s.type === 'overlay') {
+    if (item.kind === 'image') return { why: 'An image has no sound, so there is no volume to change. Select a video clip, overlay, music or voice track.' };
+    if (item.hasAudio === false) return { why: 'This video has no audio, so there is no volume to change.' };
+    return { item, bind: s.type === 'clip' ? 'clip.volume' : 'ovl.volume', name: item.name || (s.type === 'clip' ? 'Clip' : 'Overlay'), where: s.type === 'clip' ? 'the Clip tab' : 'the Picture-in-picture tab' };
+  }
+  if (s.type === 'audio') return { item, bind: 'audio.volume', name: item.name || (item.voice ? 'Voice' : 'Music'), where: 'the Audio tab' };
+  const what = { text: 'Text', blur: 'A blur region', marker: 'A marker' }[s.type] || 'This item';
+  return { why: what + ' has no sound, so there is no volume to change. Select a video clip, overlay, music or voice track.' };
+}
+function stepSelectedVolume(dir, ev) {
+  const t = volumeTarget();
+  if (t.why) return toast(t.why, 4500);
+  const { item } = t;
+  if (item.muted) return toast('“' + t.name + '” is muted, so changing its volume would not be heard. Unmute it first (Mute button in ' + t.where + ').', 5000);
+  const slider = document.querySelector('[data-bind="' + t.bind + '"]'), max = slider && +slider.max > 0 ? +slider.max : 2;
+  const fine = !!(ev && (ev.shiftKey || ev.altKey));
+  const r = stepVolume(item.volume, dir, { fine, max });
+  const pct = Math.round(r.level * 100);
+  if (r.atLimit) return toast(dir > 0 ? 'Volume is already at the maximum, ' + pct + '%.' : 'Volume is already 0% (silent).', 2200);
+  item.volume = r.level;
+  app.commit('Volume', 'vol:' + app.selection.type + ':' + app.selection.id);
+  toast('Volume ' + pct + '%' + (r.level === 0 ? ' (silent)' : r.level >= max - 1e-9 ? ' (max)' : ''), 1500);
+}
 const actions = {
   split() {
     // Splits the selected item on any track (clip, text, overlay, music/voice); with nothing (or a marker) selected,
@@ -573,6 +606,8 @@ const actions = {
     const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', marker: 'Marker' }[s.type];
     app.selection = null; app.commit('Delete'); toast(what + ' deleted. Undo (Ctrl+Z) brings it back.');
   },
+  volumeDown(_b, ev) { stepSelectedVolume(-1, ev); },
+  volumeUp(_b, ev) { stepSelectedVolume(1, ev); },
   matchAudio() {
     // Make the selected image as long as the audio (or, with an audio track selected, the image under its start).
     const sel = app.selection && selected(app.selection.type) ? app.selection : null;
@@ -1110,9 +1145,11 @@ document.addEventListener('keydown', (e) => {
   if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); redo(); return; }
   if (typing) { if (e.key === 'Escape') e.target.blur(); return; }
+  const handled0 = () => e.preventDefault();
   if (qs('dialog[open]')) return;
   if (ctx === 'control' && CONTROL_KEYS.has(e.key)) return; // e.g. arrows move the focused slider, Space presses the focused button
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); actions.duplicate(); return; }
+  if (!mod && (e.code === 'BracketLeft' || e.code === 'BracketRight')) { handled0(); actions[e.code === 'BracketLeft' ? 'volumeDown' : 'volumeUp'](null, e); return; }
   if (mod || e.altKey) return;
   const k = e.key;
   const handled = () => e.preventDefault();
