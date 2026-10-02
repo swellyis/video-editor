@@ -536,7 +536,7 @@ export class Compositor {
       // Blur > whole-clip blur (Clip tab): the clip's picture, under whatever is on higher lanes
       for (const { it, alpha, black } of act) {
         const cb = it.clip.blur;
-        if (cb && cb.enabled && nBlur < 12 && alpha * black > 0.002) { this._fx().apply(ctx, W, H, { shape: cb.shape, mode: cb.mode, radius: cb.radius, strength: cb.strength, feather: cb.feather, invert: !!cb.keep, x: cb.x, y: cb.y, w: cb.w, h: cb.h, a: 1 }); nBlur++; }
+        if (cb && cb.enabled && nBlur < 12 && alpha * black > 0.002) { this._fx().apply(ctx, W, H, { shape: cb.shape, mode: cb.mode, radius: cb.radius, strength: cb.strength, feather: cb.feather, invert: !!cb.keep, x: cb.x, y: cb.y, w: cb.w, h: cb.h, amount: alpha * black, full: !cb.keep }); nBlur++; }
       }
       ctx.globalAlpha = 1;
     } });
