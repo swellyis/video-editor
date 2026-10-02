@@ -1927,7 +1927,7 @@ function extractSource() {
 }
 
 // ---------------------------------------------------------------- captions (tab, SRT, find/replace, auto-transcribe)
-for (const k of FONT_KEYS) $('capFontSelect').append(el('option', { value: k, text: FONTS[k].label }));
+for (const k of FONT_KEYS) $('capFontSelect')?.append(el('option', { value: k, text: FONTS[k].label }));
 const sortedCaptions = () => [...(app.project.captions || [])].sort((a, b) => a.start - b.start);
 /** Re-split every caption to the style's words-per-caption (text is kept; word timings are carried along). */
 function resplitCaptions() {
@@ -2066,8 +2066,8 @@ bind('tdLang', 'change', () => { refreshTransNote(); try { localStorage.setItem(
 bind('tdSelOnly', 'change', refreshTransWarn);
 bind('tdCustom', 'change', () => { try { localStorage.setItem('ve-trans-words', $('tdCustom').value); } catch { /* optional */ } });
 (() => {
-  for (const [k, m] of Object.entries(trans.MODELS)) $('tdModel').append(el('option', { value: k, text: m.label + ' (' + m.mb + ' MB' + (k === 'fast' ? ', best on phones' : ', slower') + ')' }));
-  for (const [k, l] of trans.LANGUAGES) $('tdLang').append(el('option', { value: k, text: l }));
+  if ($('tdModel')) for (const [k, m] of Object.entries(trans.MODELS)) $('tdModel').append(el('option', { value: k, text: m.label + ' (' + m.mb + ' MB' + (k === 'fast' ? ', best on phones' : ', slower') + ')' }));
+  if ($('tdLang')) for (const [k, l] of trans.LANGUAGES) $('tdLang').append(el('option', { value: k, text: l }));
   try { const m = localStorage.getItem('ve-trans-model'), l = localStorage.getItem('ve-trans-lang'), w = localStorage.getItem('ve-trans-words'); if (trans.MODELS[m]) $('tdModel').value = m; if (l && [...$('tdLang').options].some(o => o.value === l)) $('tdLang').value = l; if (w) $('tdCustom').value = w; } catch { /* optional */ }
 })();
 bind('tdFree', 'click', async () => { if (await trans.clearModels()) { toast('Downloaded speech models removed.', 3000); refreshTransNote(); } });
