@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="ve-build" content="v9cfdeed0ee" />
+  <meta name="ve-build" content="v56647df791" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
@@ -150,8 +150,6 @@
               <div class="slider-row"><label>Duration</label><input type="range" id="imageDur" min="0.5" max="30" step="0.5" /><output id="imageDurOut">4s</output></div>
             </div>
             <div class="button-row" style="margin-top:12px">
-              <button class="btn secondary" data-action="split" type="button" title="Split the selected item at the playhead (S)">✂ Split</button>
-              <button class="btn secondary" data-action="duplicate" type="button" title="Duplicate (Ctrl+D)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3.5V3a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 2 3v6a1.5 1.5 0 0 0 1.5 1.5H4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg> Duplicate</button>
               <button class="btn secondary" data-action="moveLeft" type="button" aria-label="Move earlier">←</button>
               <button class="btn secondary" data-action="moveRight" type="button" aria-label="Move later">→</button>
               <button class="btn ghost danger" data-action="delete" type="button" title="Delete (Del)">Delete</button>
@@ -281,7 +279,7 @@
               <label><span class="label">Fade in (s)</span><input class="field mono" type="number" min="0" max="5" step="0.1" data-bind="text.fadeIn" data-commit="change" /></label>
               <label><span class="label">Fade out (s)</span><input class="field mono" type="number" min="0" max="5" step="0.1" data-bind="text.fadeOut" data-commit="change" /></label>
             </div>
-            <div class="button-row" style="margin-top:12px"><button class="btn secondary" data-action="duplicateText" type="button"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3.5V3a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 2 3v6a1.5 1.5 0 0 0 1.5 1.5H4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg> Duplicate</button><button class="btn ghost danger" data-action="deleteText" type="button">Delete text</button></div>
+            <div class="button-row" style="margin-top:12px"><button class="btn ghost danger" data-action="deleteText" type="button">Delete text</button></div>
           </section>
         </div>
       </div>
@@ -355,7 +353,7 @@
               <label><span class="label">Trim in (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="ovl.in" data-commit="change" /></label>
               <label><span class="label">Trim out (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="ovl.out" data-commit="change" /></label>
             </div>
-            <div class="button-row" style="margin-top:10px"><button class="btn secondary" data-action="ovlStartHere" type="button">Start at playhead</button><button class="btn secondary" data-action="duplicate" type="button">Duplicate</button><button class="btn ghost danger" data-action="deleteOverlay" type="button">Delete</button></div>
+            <div class="button-row" style="margin-top:10px"><button class="btn secondary" data-action="ovlStartHere" type="button">Start at playhead</button><button class="btn ghost danger" data-action="deleteOverlay" type="button">Delete</button></div>
           </section>
           <section class="section" id="ovlSpeedSection">
             <h2 class="sh">Speed</h2>
@@ -442,7 +440,7 @@
               <label><span class="label">End (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="blur.end" data-commit="change" /></label>
             </div>
             <div class="button-row" style="margin-top:8px"><button class="btn secondary" data-action="blurStartHere" type="button">Start at playhead</button><button class="btn secondary" data-action="blurEndHere" type="button">End at playhead</button></div>
-            <div class="button-row" style="margin-top:8px"><button class="btn secondary" data-action="duplicate" type="button">Duplicate</button><button class="btn ghost danger" data-action="deleteBlur" type="button">Delete</button></div>
+            <div class="button-row" style="margin-top:8px"><button class="btn ghost danger" data-action="deleteBlur" type="button">Delete</button></div>
           </section>
         </div>
         <section class="section">

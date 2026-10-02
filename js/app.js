@@ -634,7 +634,6 @@ const actions = {
     app.commit('Add text'); showTab('text');
     setTimeout(() => { const ta = qs('#textPanel textarea'); ta && ta.focus(); ta && ta.select(); }, 50);
   },
-  duplicateText() { const t = selected('text'); if (!t) return; const b = deepClone(t); b.id = uid('txt'); b.start = t.end; b.end = t.end + (t.end - t.start); app.project.texts.push(b); app.selection = { type: 'text', id: b.id }; app.commit('Duplicate text'); },
   deleteText() { const t = selected('text'); if (!t) return; app.project.texts = app.project.texts.filter(x => x !== t); app.selection = null; app.commit('Delete text'); },
   textStartHere() { const t = selected('text'); if (!t) return; const len = t.end - t.start; t.start = player.t; if (t.end <= t.start + 0.1) t.end = t.start + len; app.commit('Text start'); },
   textEndHere() { const t = selected('text'); if (!t) return; if (player.t > t.start + 0.1) { t.end = player.t; app.commit('Text end'); } else toast('Playhead must be after the text start.'); },
