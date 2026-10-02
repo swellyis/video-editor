@@ -129,7 +129,7 @@ export function sanitizeProject(p) {
     a.in = num(a.in, 0, 1e6, 0); a.out = num(a.out, a.in + 0.01, 1e6, a.in + 1); a.loopLen = num(a.loopLen, 0, 1e6, 0); a.phase = num(a.phase, 0, 1e6, 0);
     a.fadeIn = num(a.fadeIn, 0, 60, 0); a.fadeOut = num(a.fadeOut, 0, 60, 0); a.speed = num(a.speed, 0.25, 4, 1);
   }
-  for (const it of [...p.clips, ...p.overlays, ...p.audio]) cleanVolumeKeys(it);
+  for (const it of [...p.clips, ...p.overlays, ...p.audio]) { cleanVolumeKeys(it); cleanClean(it); }
   if (p.logo) { const L = p.logo; L.size = num(L.size, 0.01, 1, 0.14); L.opacity = num(L.opacity, 0, 1, 0.85); L.margin = num(L.margin, 0, 0.5, 0.035); L.position = oneOf(L.position, ['tl', 'tr', 'bl', 'br', 'center'], 'tr'); }
   return p;
 }
@@ -287,6 +287,22 @@ export const MOTION_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity', 'w', 'h']
 export const ANIM_PROPS = [...MOTION_PROPS, 'volume'];
 /** The properties a given item type can animate (blur regions animate position and size). */
 /** Clips and overlays that have an audio track can also animate their volume (a multiplier of the Volume slider); music/voice tracks animate only that. */
+
+// ---- Clean voice: a per-item setting. The cleaned sound is a derived media file (id from cleanId) made on this device;
+// the original file is never touched, and "off" simply plays the original again.
+export const CLEAN_LEVELS = ['off', 'light', 'strong'];
+export const CLEAN_VERSION = 1; // bump when the cleaning changes so older derived copies are ignored and made again
+export const cleanId = (mediaId, level) => 'cln_' + String(mediaId) + '_' + level + '_v' + CLEAN_VERSION;
+export const cleanLevelOf = (item) => (item && item.clean && (item.clean.level === 'light' || item.clean.level === 'strong') ? item.clean.level : 'off');
+/** Id of the derived (cleaned) media of an item, or null while its Clean voice is off. */
+export const cleanTarget = (item) => { const l = cleanLevelOf(item); return l === 'off' || !item.mediaId ? null : cleanId(item.mediaId, l); };
+/** Every derived id an item may refer to (kept alive by storage cleanup even while switched off, so switching back is instant). */
+export const cleanIdsOf = (item) => (item && item.clean && item.mediaId ? [cleanId(item.mediaId, 'light'), cleanId(item.mediaId, 'strong')] : []);
+function cleanClean(it) {
+  if (!it.clean || typeof it.clean !== 'object') { delete it.clean; return; }
+  it.clean = { level: CLEAN_LEVELS.includes(it.clean.level) ? it.clean.level : 'off' };
+}
+
 export const hasSound = (item) => !!item && item.kind !== 'image' && item.hasAudio !== false;
 export const animPropsOf = (type, item) => (type === 'blur' ? ['x', 'y', 'w', 'h'] : type === 'audio' ? ['volume']
   : ['x', 'y', 'scale', 'rotation', 'opacity', ...(item && (type === 'clip' || type === 'overlay') && hasKeyframes(item, 'volume') ? ['volume'] : [])]);
@@ -840,6 +856,7 @@ export function detachAudio(project, sel) {
     name: ((src.name || 'Video') + ' (audio)').slice(0, NAME_MAX), in: src.in, out: src.out, srcDuration: src.srcDuration, speed, volume: vol, muted: false,
     fadeIn, fadeOut, duck: false, loop: false, voice: true, keyframes: {},
   });
+  if (src.clean) a.clean = deepClone(src.clean); // the detached sound keeps the cleaning of the picture it came from
   if (hasKeyframes(src, 'volume')) a.keyframes.volume = deepClone(src.keyframes.volume);
   project.audio.push(a);
   src.muted = true;
@@ -1120,6 +1137,7 @@ export function clipToOverlay(project, id, ripple, start) {
     start: start ?? it.start, in: c.in, out: c.out, speed: c.speed, volume: c.volume, muted: c.muted, opacity: c.opacity, fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0,
     x: 0.5, y: 0.5, w: Math.min(1, H * aspect / W), radius: 0, shadow: false, keyframes: volumeOnly(c),
   });
+  if (c.clean) o.clean = deepClone(c.clean);
   removeClip(project, id, ripple);
   if (!project.overlays) project.overlays = [];
   project.overlays.push(o);

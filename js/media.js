@@ -294,6 +294,7 @@ export function sanitizeMediaMeta(m) {
   if (typeof m.type === 'string' && /^(video|audio|image)\/[\w.+-]{1,60}$/i.test(m.type)) out.type = m.type;
   for (const k of ['size', 'duration', 'width', 'height', 'frameCount']) if (isNum(m[k]) && m[k] >= 0 && m[k] < 1e13) out[k] = m[k];
   for (const k of ['hasAudio', 'animated', 'gifStill']) if (typeof m[k] === 'boolean') out[k] = m[k];
+  if (typeof m.cleanOf === 'string' && /^[\w-]{1,80}$/.test(m.cleanOf)) { out.cleanOf = m.cleanOf; if (m.cleanLevel === 'light' || m.cleanLevel === 'strong') out.cleanLevel = m.cleanLevel; if (isNum(m.cleanV)) out.cleanV = m.cleanV; }
   if (Array.isArray(m.strip) && m.strip.length <= 400 && m.strip.every(u => typeof u === 'string' && u.length < 400000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u))) out.strip = m.strip;
   // waveform peaks are regenerated locally (openProject fills missing peaks)
   return out;
