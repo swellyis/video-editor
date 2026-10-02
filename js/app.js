@@ -10,11 +10,12 @@ import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, ensureLanes, holdNextClip, matchImageToAudio, stepVolume, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
-  splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, MOTION_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
+  splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, MOTION_PROPS, detachAudio, cleanTarget, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
 import { Compositor, drawLogo, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
+import { initCleanUI } from './clean-ui.js';
 import { Timeline } from './timeline.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
@@ -32,7 +33,7 @@ async function healBuildMismatch() {
   if (tried) return false; // already tried once in this tab: run as well as we can rather than loop
   try {
     if ('serviceWorker' in navigator) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
-    if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+    if (window.caches) for (const k of await caches.keys()) if (k.startsWith('video-editor-shell-')) await caches.delete(k); // (never the downloaded speech and Clean voice models)
     await Promise.race([fetch(location.pathname, { cache: 'reload' }), new Promise(r => setTimeout(r, 6000))]); // refresh the HTTP-cached page
   } catch { /* best effort */ }
   location.reload();
@@ -52,6 +53,7 @@ const app = {
 // Debug/test handle: only on local development hosts or with ?debug in the URL (not exposed on the public site).
 if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has('debug')) window.__app = app;
 startLongTaskMonitor(); app.perf = perf; // main-thread health (long tasks), used by the polite background jobs and by tests
+let cleanUI = null; // Clean voice control (set up below)
 let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
 
 // media this tab still needs, reported to other tabs before they garbage-collect stored media
@@ -66,6 +68,7 @@ const player = new Player({
 app.player = player;
 const timeline = new Timeline($('timeline'), app);
 app.timeline = timeline;
+cleanUI = initCleanUI({ $, qs, app, media, player, selected, toast, fmtBytes, commit: (l) => app.commit(l) });
 
 // ---------------------------------------------------------------- persistence
 // Autosave: revision-counted so the indicator only says "Saved" when the stored copy matches the editor.
@@ -438,6 +441,7 @@ function fillInspector() {
     $('loopHint').textContent = a.loop ? (a.loopLen > 0 ? `Repeats the ${fmt(audioLen(a))} trimmed section for ${fmt(a.loopLen)}.` : `Repeats the ${fmt(audioLen(a))} trimmed section until the video ends. Set a length to stop earlier.`) : 'Turn on to repeat a short track under the whole video.';
   }
   $('logoPanel').hidden = !p.logo; $('logoHint').hidden = !!p.logo;
+  if (cleanUI) cleanUI.render();
   // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
   // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
   const st = app.selection && selected(app.selection.type) ? app.selection.type : null;
@@ -2123,11 +2127,13 @@ actions.extractAudio = async function extractAudioAction() {
   const rec = await media.get(item.mediaId);
   if (!rec || !rec.blob) return toast('This clip’s media is missing (red clip). Relink it first, then extract its audio.', 5000);
   const trimmed = item.in > 0.01 || (item.srcDuration && item.out < item.srcDuration - 0.05);
+  const cid = cleanTarget(item), crec = cid && media.has(cid) ? await media.get(cid) : null; // Clean voice on: extract the cleaned sound
+  const useRec = crec && crec.blob ? crec : rec;
   extractSrc = {
-    title: item.name || rec.name || 'audio', blob: rec.blob, trim: trimmed ? { start: item.in, end: item.out } : null,
-    text: (rec.kind === 'audio' ? 'Audio file' : 'Video') + ' “' + (item.name || rec.name) + '” · ' + fmt(item.srcDuration || rec.duration || 0) + ' · ' + fmtBytes(rec.size || rec.blob.size),
+    title: item.name || rec.name || 'audio', blob: useRec.blob, trim: trimmed ? { start: item.in, end: item.out } : null,
+    text: (rec.kind === 'audio' ? 'Audio file' : 'Video') + ' “' + (item.name || rec.name) + '” · ' + fmt(item.srcDuration || rec.duration || 0) + ' · ' + fmtBytes(rec.size || rec.blob.size) + (useRec !== rec ? ' · cleaned voice' : ''),
     trimText: trimmed ? 'Only the trimmed part (' + fmt(item.in) + ' – ' + fmt(item.out) + ')' : '',
-    run: (o) => extractAudio(rec.blob, o),
+    run: (o) => extractAudio(useRec.blob, o),
   };
   openExtractDialog();
 };

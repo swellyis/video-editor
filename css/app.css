@@ -522,3 +522,18 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 /* short items: the trim handles take at most a third each, so the middle can still be grabbed to move the item */
 .narrow>.h-l,.narrow>.h-r{width:30%;max-width:20px}
 .narrow>.h-l::after,.narrow>.h-r::after{left:calc(50% - 1px)}
+
+/* Clean voice (one shared control, moved under the Volume slider of whichever sound is selected) */
+.clean-box{margin:12px 0 4px;padding:10px;border:1px solid rgba(127,127,127,.25);border-radius:10px;background:var(--surface-2)}
+.clean-box .segmented{background:var(--surface-3)}
+.clean-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+.clean-head .label{margin:0;color:var(--ink)}
+.clean-state{font-size:11px;color:var(--muted);text-align:right}
+.clean-state.ok{color:var(--accent);font-weight:600}
+.clean-box .hint{margin-top:8px}
+.clean-box .progress{margin-top:8px}
+.clean-box .button-row{margin-top:8px}
+.clean-box>.btn{margin-top:8px}
+.clean-box .check{margin-top:8px}
+.clean-box .linkish{min-height:32px;padding:0 4px}
+.clean-box [hidden]{display:none!important}

@@ -162,6 +162,21 @@
             <div class="segmented six" data-bind="clip.speed" data-num="1"><button data-value="0.25" type="button">¼×</button><button data-value="0.5" type="button">½×</button><button data-value="1" type="button">1×</button><button data-value="1.5" type="button">1.5×</button><button data-value="2" type="button">2×</button><button data-value="4" type="button">4×</button></div>
             <div class="slider-row"><label>Fine speed</label><input type="range" min="0.25" max="4" step="0.05" data-bind="clip.speed" /><output data-out="clip.speed" data-fmt="x"></output></div>
             <div class="slider-row"><label>Volume</label><input type="range" min="0" max="2" step="0.05" data-bind="clip.volume" /><output data-out="clip.volume" data-fmt="pct"></output></div>
+            <div class="clean-box" id="cleanBox" hidden>
+              <div class="clean-head"><span class="label" id="cleanLabel">Clean voice</span><span class="clean-state" id="cleanState" aria-live="polite"></span></div>
+              <div class="segmented" id="cleanSeg" role="group" aria-labelledby="cleanLabel"><button type="button" data-clean="off">Off</button><button type="button" data-clean="light">Light</button><button type="button" data-clean="strong">Strong</button></div>
+              <p class="hint" id="cleanHint"></p>
+              <div class="progress" id="cleanProg" aria-live="polite">
+                <div class="progress-track"><div class="progress-bar" id="cleanBar"></div></div>
+                <div class="progress-copy"><span id="cleanProgText">Starting…</span><button class="linkish" type="button" id="cleanCancel">Cancel</button></div>
+              </div>
+              <div class="clean-ask" id="cleanAsk" hidden>
+                <p class="hint" id="cleanAskText"></p>
+                <div class="button-row"><button class="btn primary small" type="button" id="cleanAskGo">Download &amp; clean</button><button class="btn secondary small" type="button" id="cleanAskNo">Not now</button></div>
+              </div>
+              <button class="btn secondary small" type="button" id="cleanNow" hidden>Clean now</button>
+              <label class="check" id="cleanCompareRow" hidden><input type="checkbox" id="cleanCompare" /> Hear the original (compare)</label>
+            </div>
             <button type="button" class="mute-btn" data-toggle="clip.muted" aria-pressed="false"><svg class="ico spk-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 5.2a3.6 3.6 0 010 5.6M13 3.4a6.2 6.2 0 010 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><svg class="ico spk-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 6l4 4M15 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mute this clip</span><span class="mb-state" aria-hidden="true">Sound on</span></button>
             <div class="detach-row"><button type="button" class="btn secondary detach-btn" data-action="detachAudio" id="detachClipBtn"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 3v10M13.5 5v6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.5 2"/></svg><span>Detach audio</span></button><p class="hint" id="detachClipHint">Copies this video&rsquo;s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.</p><button type="button" class="btn secondary detach-btn extract-btn" data-action="extractAudio"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Extract audio as a file…</span></button><p class="hint">Saves just the sound (trimmed part) as an M4A, Opus or WAV file you can keep or share. The clip itself is not changed.</p></div>
             

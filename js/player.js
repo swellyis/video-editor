@@ -1,5 +1,5 @@
 // Real-time preview engine: plays the whole sequence across clips with a shared clock.
-import { layout, sourceTime, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioSpan, audioSpeed, audioSourceTime, overlayLen, overlaySourceTime, overlayGain, hasKeyframes } from './model.js';
+import { layout, sourceTime, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioSpan, audioSpeed, audioSourceTime, overlayLen, overlaySourceTime, overlayGain, hasKeyframes, cleanTarget } from './model.js';
 import { clamp } from './util.js';
 
 const POOL_MAX = 8;
@@ -12,7 +12,7 @@ export class Player {
     this.onTime = onTime || (() => { }); this.onState = onState || (() => { });
     this.audioEnabled = audio;
     this.t = 0; this.playing = false; this.rate = 1;
-    this.videos = new Map(); this.audios = new Map();
+    this.videos = new Map(); this.audios = new Map(); this.aux = new Map(); this.cleanBypass = false; // aux: cleaned-sound players that stand in for a video's own sound (Clean voice)
     this.ac = null; this.lay = { items: [], total: 0 }; this.speech = [];
     this.lastBoxes = []; this._raf = 0; this._renderQueued = false; this.external = false;
     this.lastUse = new Map();
@@ -29,6 +29,7 @@ export class Player {
       if (!live.has(id) || (c && c.mediaId !== v.mediaId)) this._dropVideo(id);
     }
     for (const id of [...this.audios.keys()]) if (!liveA.has(id)) this._dropAudio(id);
+    for (const [id, e] of [...this.aux]) { const it = p.clips.find(x => x.id === id) || (p.overlays || []).find(x => x.id === id); if (!it || this._cleanFor(it) !== e.mediaId) this._dropAux(id); }
     if (this.t > this.total) this.t = this.total;
     if (!this.playing) this.sync(this.t, false);
     this.requestRender();
@@ -41,6 +42,7 @@ export class Player {
         this.ac = new AC({ latencyHint: 'interactive' });
         for (const v of this.videos.values()) this._wire(v);
         for (const a of this.audios.values()) this._wire(a);
+        for (const a of this.aux.values()) this._wire(a);
       }
       if (this.ac.state === 'suspended') this.ac.resume().catch(() => { });
     } catch (e) { console.warn('Audio unavailable', e); }
@@ -96,13 +98,46 @@ export class Player {
     try { v.gain && v.gain.disconnect(); } catch { }
     this.videos.delete(id);
   }
+  /** The cleaned (Clean voice) copy to play instead of an item's own sound, when it is switched on, ready on this device, and not being compared. */
+  _cleanFor(item) { if (this.cleanBypass) return null; const id = cleanTarget(item); return id && this.media.has(id) ? id : null; }
+  _getAux(item, cid) {
+    let e = this.aux.get(item.id);
+    if (e && e.mediaId === cid) return e;
+    if (e) this._dropAux(item.id);
+    const url = this.media.url(cid); if (!url) return null;
+    e = { el: this._makeEl('audio', url), mediaId: cid, gain: null };
+    this._wire(e); this.aux.set(item.id, e);
+    return e;
+  }
+  _dropAux(id) {
+    const e = this.aux.get(id); if (!e) return;
+    try { e.el.pause(); e.el.removeAttribute('src'); e.el.load(); } catch { }
+    try { e.gain && e.gain.disconnect(); } catch { }
+    this.aux.delete(id);
+  }
+  /** Play the cleaned sound of a video clip / overlay in step with its picture (same source time, speed, gain). */
+  _driveAux(item, cid, active, fwd, desired, pr, g0, g1) {
+    const e = this._getAux(item, cid); if (!e) return false;
+    const el = e.el;
+    if (active && fwd) {
+      if (Math.abs(el.playbackRate - pr) > 1e-3) el.playbackRate = pr;
+      if (el.paused) { if (Math.abs(el.currentTime - desired) > 0.04) el.currentTime = desired; el.play().catch(() => { }); }
+      else if (Math.abs(el.currentTime - desired) > 0.3 && !el.seeking) el.currentTime = desired;
+    } else {
+      if (!el.paused) el.pause();
+      if (Math.abs(el.currentTime - desired) > 0.05 && !el.seeking) el.currentTime = desired;
+    }
+    this._setGain(e, g0, g1);
+    return true;
+  }
   _getAudio(a) {
+    const mid = this._cleanFor(a) || a.mediaId;
     let e = this.audios.get(a.id);
-    if (e && e.mediaId === a.mediaId) return e;
+    if (e && e.mediaId === mid) return e;
     if (e) this._dropAudio(a.id);
-    const url = this.media.url(a.mediaId);
+    const url = this.media.url(mid);
     if (!url) return null;
-    e = { el: this._makeEl('audio', url), mediaId: a.mediaId, gain: null };
+    e = { el: this._makeEl('audio', url), mediaId: mid, gain: null };
     this._wire(e);
     this.audios.set(a.id, e);
     return e;
@@ -117,7 +152,7 @@ export class Player {
   /** Position every media element for time t. Returns true if all active sources are ready. */
   sync(t, playing) {
     const p = this.getProject();
-    const needed = new Set();
+    const needed = new Set(), auxNeeded = new Set();
     let ready = true;
     const fwd = playing && this.rate > 0;
     const now = performance.now();
@@ -145,7 +180,12 @@ export class Player {
         if (Math.abs(el.currentTime - desired) > 0.015 && !el.seeking) el.currentTime = desired;
         if (active && (el.readyState < 2 || el.seeking)) ready = false;
       }
-      this._setGain(v, active && fwd && this.rate === 1 ? clipGain(it, t) : 0, active && fwd && this.rate === 1 && hasKeyframes(c, 'volume') ? clipGain(it, Math.min(it.end, t + LOOK_AHEAD)) : null);
+      {
+        const g0 = active && fwd && this.rate === 1 ? clipGain(it, t) : 0, g1 = active && fwd && this.rate === 1 && hasKeyframes(c, 'volume') ? clipGain(it, Math.min(it.end, t + LOOK_AHEAD)) : null;
+        const cid = c.kind === 'video' ? this._cleanFor(c) : null;
+        if (cid) { this._setGain(v, 0); if (this._driveAux(c, cid, active, fwd, desired, clamp(c.speed * this.rate, 0.0625, 16), g0, g1)) auxNeeded.add(c.id); }
+        else this._setGain(v, g0, g1);
+      }
     }
     for (const o of p.overlays || []) {
       const len = overlayLen(o);
@@ -166,13 +206,19 @@ export class Player {
         if (!el.paused) el.pause();
         if (Math.abs(el.currentTime - desired) > 0.015 && !el.seeking) el.currentTime = desired;
       }
-      this._setGain(v, active && fwd && this.rate === 1 ? overlayGain(o, t) : 0, active && fwd && this.rate === 1 && hasKeyframes(o, 'volume') ? overlayGain(o, Math.min(o.start + len, t + LOOK_AHEAD)) : null);
+      {
+        const g0 = active && fwd && this.rate === 1 ? overlayGain(o, t) : 0, g1 = active && fwd && this.rate === 1 && hasKeyframes(o, 'volume') ? overlayGain(o, Math.min(o.start + len, t + LOOK_AHEAD)) : null;
+        const cid = this._cleanFor(o);
+        if (cid) { this._setGain(v, 0); if (this._driveAux(o, cid, active, fwd, desired, clamp((o.speed || 1) * this.rate, 0.0625, 16), g0, g1)) auxNeeded.add(o.id); }
+        else this._setGain(v, g0, g1);
+      }
     }
     for (const [id, v] of this.videos) {
       if (needed.has(id)) continue;
       if (!v.el.paused) v.el.pause();
       this._setGain(v, 0);
     }
+    for (const [id, e] of this.aux) { if (auxNeeded.has(id)) continue; if (!e.el.paused) e.el.pause(); this._setGain(e, 0); }
     if (this.videos.size > POOL_MAX) {
       const idle = [...this.videos.keys()].filter(id => !needed.has(id)).sort((a, b) => (this.lastUse.get(a) || 0) - (this.lastUse.get(b) || 0));
       while (this.videos.size > POOL_MAX && idle.length) this._dropVideo(idle.shift());
@@ -279,6 +325,7 @@ export class Player {
     this.pause();
     for (const id of [...this.videos.keys()]) this._dropVideo(id);
     for (const id of [...this.audios.keys()]) this._dropAudio(id);
+    for (const id of [...this.aux.keys()]) this._dropAux(id);
     if (this.ac) this.ac.close().catch(() => { });
   }
 }

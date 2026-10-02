@@ -6,6 +6,8 @@ const SHELL = [
   './css/app.css', './css/fonts.css',
   './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/render.js', './js/blur.js', './js/connect.js', './js/connect-ui.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/extract.js', './js/exporter.js', './js/templates.js', './js/install.js', './js/install-early.js', './js/build.js',
   './js/heic-worker.js', './js/captions.js', './js/transcribe.js', './js/whisper-worker.js',
+  './js/clean.js', './js/clean-ui.js', './js/clean-dsp.js', './js/clean-worker.js', './vendor/clean/rnnoise.js', './vendor/clean/rnnoise.wasm', // Clean voice "Light" (RNNoise, ~125 KB); the big "Strong" model is never precached
+ 
   './vendor/mediabunny.min.mjs', './vendor/gifuct.min.mjs', './vendor/libheif/libheif.js', './vendor/libheif/libheif.wasm',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-192.png', './icons/maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png',
   './fonts/ibm-plex-sans-latin-400-normal.woff2', './fonts/ibm-plex-sans-latin-500-normal.woff2', './fonts/ibm-plex-sans-latin-600-normal.woff2', './fonts/ibm-plex-sans-latin-700-normal.woff2',
@@ -83,6 +85,15 @@ self.addEventListener('fetch', (event) => {
       const res = await fetch(req);
       if (res.ok && res.type === 'basic') c.put(req, res.clone());
       return res;
+    })());
+    return;
+  }
+  // Clean voice "Strong" (neural network, ~22 MB): downloaded by the page only after the user agrees, and stored by the page in the
+  // same 'video-editor-ai' cache. Here it is only READ (cache first, else the network); it is never precached or deleted by updates.
+  if (url.pathname.includes('/vendor/clean-strong/')) {
+    event.respondWith((async () => {
+      try { const hit = await (await caches.open('video-editor-ai')).match(req, { ignoreSearch: true }); if (hit) return hit; } catch { /* fall through to the network */ }
+      return fetch(req);
     })());
     return;
   }
