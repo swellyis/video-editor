@@ -52,7 +52,7 @@ export function initCleanUI(ctx) {
     for (const b of box.querySelectorAll('#cleanSeg button')) { const on = b.dataset.clean === shown; b.classList.toggle('selected', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
     const ready = lvl !== 'off' && readyFor(item, lvl), stale = lvl !== 'off' && !ready && !here;
     const st = $('cleanState'); st.className = 'clean-state';
-    let hint = '', warn = false;
+    let hint, warn = false;
     if (here) st.textContent = job.phase === 'download' ? 'Downloading' : 'Cleaning';
     else if (ready) { st.textContent = 'Cleaned'; st.classList.add('ok'); }
     else if (stale) st.textContent = 'Not on this device yet';
