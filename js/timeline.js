@@ -1,5 +1,5 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
-import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX, laneOf, laneList, laneSpan, planLaneItem, placeLaneItem, nearestFree, moveClipTo, clipToOverlay, overlayToClip, holdNextClip } from './model.js';
+import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX, laneOf, laneCount, insertLane, spanCtx, findItem, planItem, placeItem, moveClipTo, holdNextClip } from './model.js';
 import { clamp, fmt, el, icon, toast } from './util.js';
 import { retimeWords } from './captions.js';
 
@@ -9,22 +9,16 @@ function muteBadge(title, extra = '') {
   const t = document.createElementNS('http://www.w3.org/2000/svg', 'title'); t.textContent = title; i.prepend(t);
   return i;
 }
-/** Stacked lanes of the PiP / text / blur / audio tracks: row height, offset of the first row, least track height. */
-const LANE = {
-  overlay: { track: 'oTrack', rowH: 30, off: 3, pad: 6, min: 44 },
-  text: { track: 'tTrack', rowH: 26, off: 4, pad: 8, min: 34 },
-  blur: { track: 'bTrack', rowH: 28, off: 4, pad: 8, min: 44 },
-  audio: { track: 'aTrack', rowH: 38, off: 3, pad: 6, min: 44 },
-};
-const ZONE = 16; // height of the "new lane" drop strips shown above and below a track while an item is dragged
+/** One stack of generic lanes (no track names): each row is ROW px high, items are ITEM_H high; ZONE = the "new lane" strips shown above and below while dragging. */
+const ROW = 44, ITEM_H = 38, ZONE = 16;
 export class Timeline {
-  /** Rows of a lane track: sizes the track and returns the top offset (px) of an item from its lane. Highest lane = top row. */
-  laneGeo(kind, items) {
-    const c = LANE[kind], n = Math.max(1, ...items.map(it => laneOf(it) + 1)), zone = this._zones && this._zones.has(kind) ? ZONE : 0;
-    const h = Math.max(c.min * (kind === 'audio' ? (this._audioBtns || 1) : 1), zone * 2 + n * c.rowH + c.pad);
-    const tr = this[c.track]; tr.style.height = h + 'px';
-    this.geo[kind] = { n, zone, rowH: c.rowH, off: c.off, track: tr, h };
-    return (it) => zone + c.off + (n - 1 - laneOf(it)) * c.rowH;
+  /** Sizes the lane stack and returns the top offset (px) of an item from its lane. The highest lane is the top row. */
+  laneGeo() {
+    const n = laneCount(this.project), zone = this._zones ? ZONE : 0;
+    const h = Math.max(ROW + 6, zone * 2 + n * ROW);
+    this.lanes.style.height = h + 'px';
+    this.geo = { n, zone, rowH: ROW, track: this.lanes, h };
+    return (it) => zone + (n - 1 - laneOf(it)) * ROW + (ROW - ITEM_H) / 2;
   }
 
   constructor(root, app) {
@@ -37,33 +31,22 @@ export class Timeline {
   }
   build() {
     this.root.innerHTML = '';
-    this.heads = el('div', { class: 'tl-heads' },
-      el('div', { class: 'tl-head ruler-head' }, el('span', { text: 'TIME' })),
-      el('div', { class: 'tl-head video-head' }, this.muteBtn('video', 'VIDEO')),
-      el('div', { class: 'tl-head overlay-head' }, this.muteBtn('overlay', 'PIP')),
-      el('div', { class: 'tl-head text-head' }, el('span', { text: 'TEXT' })),
-      el('div', { class: 'tl-head cap-head', hidden: true, 'aria-label': 'Captions track' }, el('span', { text: 'CAPS' })),
-      el('div', { class: 'tl-head blur-head' }, el('span', { text: 'BLUR' })),
-      el('div', { class: 'tl-head audio-head' }, this.muteBtn('music', 'MUSIC'), this.muteBtn('voice', 'VOICE')));
+    this.laneHeads = el('div', { class: 'tl-lane-heads' });
+    this.heads = el('div', { class: 'tl-heads' }, el('div', { class: 'tl-head ruler-head', 'aria-hidden': 'true' }), this.laneHeads);
     this.scroll = el('div', { class: 'tl-scroll', tabindex: '0', 'aria-label': 'Timeline' });
     this.content = el('div', { class: 'tl-content' });
     this.ruler = el('div', { class: 'tl-ruler' });
-    this.vTrack = el('div', { class: 'tl-track tl-video' });
-    this.oTrack = el('div', { class: 'tl-track tl-overlay' });
-    this.tTrack = el('div', { class: 'tl-track tl-text' });
-    this.cTrack = el('div', { class: 'tl-track tl-caps', hidden: true });
-    this.bTrack = el('div', { class: 'tl-track tl-blur' });
-    this.aTrack = el('div', { class: 'tl-track tl-audio' });
+    this.lanes = el('div', { class: 'tl-track tl-lanes' });
     this.playhead = el('div', { class: 'tl-playhead' }, el('div', { class: 'tl-playhead-knob' }));
     this.insert = el('div', { class: 'tl-insert' });
     this.snapLine = el('div', { class: 'tl-snapline' });
     this.drop = el('div', { class: 'tl-drop' });
     this.tip = el('div', { class: 'tl-tip' });
-    this.content.append(this.ruler, this.vTrack, this.oTrack, this.tTrack, this.cTrack, this.bTrack, this.aTrack, this.playhead, this.insert, this.snapLine, this.drop, this.tip);
+    this.content.append(this.ruler, this.lanes, this.playhead, this.insert, this.snapLine, this.drop, this.tip);
     this.scroll.append(this.content);
     this.root.append(this.heads, this.scroll);
     this.ruler.addEventListener('pointerdown', e => this.onScrubStart(e));
-    for (const tr of [this.vTrack, this.oTrack, this.tTrack, this.cTrack, this.bTrack, this.aTrack]) tr.addEventListener('pointerdown', e => { if (e.target === tr) this.onEmptyDown(e); });
+    this.lanes.addEventListener('pointerdown', e => { if (e.target === this.lanes) this.onEmptyDown(e); });
     // the ruler only draws ticks for the visible range; redraw as the timeline scrolls
     this.scroll.addEventListener('scroll', () => { if (this._rulerRaf) return; this._rulerRaf = requestAnimationFrame(() => { this._rulerRaf = 0; this.renderRuler(); this.renderCaps(); }); }, { passive: true });
     this.scroll.addEventListener('wheel', e => {
@@ -94,44 +77,38 @@ export class Timeline {
     this.scroll.addEventListener('pointerup', gone, true); this.scroll.addEventListener('pointercancel', gone, true);
   }
   get project() { return this.app.project; }
-  // ---------- track mute buttons (timeline headers) ----------
-  muteBtn(kind, label) {
-    const b = el('button', { class: 'track-mute', type: 'button', 'data-track': kind, 'aria-pressed': 'false', 'aria-label': 'Mute ' + label.toLowerCase() + ' track' },
-      icon('spk', 'ico spk-on'), icon('spkOff', 'ico spk-off'), el('span', { class: 'tm-l', text: label }));
-    b.addEventListener('click', () => this.toggleTrackMute(kind));
-    return b;
-  }
-  /** The items a track button controls (only those that can make sound). */
-  trackItems(kind) {
+  // ---------- lane sound buttons (left of each lane that holds something with sound) ----------
+  /** The items of a lane that make sound (video with audio, overlay video with audio, music / voice). */
+  laneAudible(lane) {
     const p = this.project;
-    if (kind === 'video') return p.clips.filter(c => c.kind === 'video' && c.hasAudio);
-    if (kind === 'overlay') return (p.overlays || []).filter(o => o.kind === 'video' && o.hasAudio);
-    if (kind === 'voice') return p.audio.filter(a => a.voice);
-    return p.audio.filter(a => !a.voice);
+    return [...p.clips.filter(c => laneOf(c) === lane && c.kind === 'video' && c.hasAudio), ...(p.overlays || []).filter(o => laneOf(o) === lane && o.kind === 'video' && o.hasAudio), ...p.audio.filter(a => laneOf(a) === lane)];
   }
-  toggleTrackMute(kind) {
-    const items = this.trackItems(kind), names = { video: 'video track', overlay: 'PiP track', music: 'music track', voice: 'voiceover track' };
-    if (!items.length) { toast(kind === 'video' ? 'No clips with sound on the video track.' : kind === 'overlay' ? 'No picture-in-picture videos with sound yet.' : kind === 'voice' ? 'No voiceover yet. Record one from the Audio tab.' : 'No music yet. Add music from the Audio tab.'); return; }
+  toggleLaneMute(lane) {
+    const items = this.laneAudible(lane); if (!items.length) return;
     const target = !items.every(x => x.muted);
     for (const x of items) x.muted = target;
-    this.app.commit((target ? 'Mute ' : 'Unmute ') + names[kind]);
-    toast((target ? 'Muted ' : 'Unmuted ') + names[kind], 1400);
+    this.app.commit((target ? 'Mute' : 'Unmute') + ' lane');
+    toast((target ? 'Muted' : 'Unmuted') + ' everything on this lane', 1400);
   }
   renderHeads() {
-    for (const b of this.heads.querySelectorAll('.track-mute')) {
-      const kind = b.dataset.track, items = this.trackItems(kind), n = items.filter(x => x.muted).length;
-      const all = items.length > 0 && n === items.length, some = n > 0 && !all;
-      const label = { video: 'video', overlay: 'PiP', music: 'music', voice: 'voiceover' }[kind];
-      b.setAttribute('aria-pressed', all ? 'true' : some ? 'mixed' : 'false');
-      b.setAttribute('aria-label', (all ? 'Unmute ' : 'Mute ') + label + ' track');
-      b.title = items.length ? (all ? 'Unmute ' : 'Mute ') + label + ' track' + (some ? ' (some items are muted)' : '') : 'No ' + label + ' audio yet';
-      b.classList.toggle('is-off', !items.length);
-      b.setAttribute('aria-disabled', items.length ? 'false' : 'true');
-      // voice button only appears once there is a voice track; music button is always there
-      const hide = kind === 'voice' && !this.project.audio.some(a => a.voice);
-      b.hidden = hide;
+    const n = this.geo.n, zone = this.geo.zone, heads = this.laneHeads;
+    heads.style.paddingTop = zone + 'px'; heads.style.height = this.geo.h + 'px';
+    while (heads.children.length > n) heads.lastChild.remove();
+    while (heads.children.length < n) {
+      const row = el('div', { class: 'tl-head lane-head' });
+      const b = el('button', { class: 'track-mute', type: 'button', 'aria-pressed': 'false' }, icon('spk', 'ico spk-on'), icon('spkOff', 'ico spk-off'));
+      b.addEventListener('click', () => this.toggleLaneMute(+row.dataset.lane));
+      row.append(b); heads.appendChild(row);
     }
-    this._audioBtns = this.heads.querySelectorAll('.audio-head .track-mute:not([hidden])').length;
+    [...heads.children].forEach((row, i) => {
+      const lane = n - 1 - i, items = this.laneAudible(lane), muted = items.filter(x => x.muted).length;
+      const all = items.length > 0 && muted === items.length, some = muted > 0 && !all, b = row.firstChild;
+      row.dataset.lane = String(lane); row.style.height = ROW + 'px';
+      b.hidden = !items.length; b.dataset.lane = String(lane);
+      b.setAttribute('aria-pressed', all ? 'true' : some ? 'mixed' : 'false');
+      b.setAttribute('aria-label', (all ? 'Unmute' : 'Mute') + ' lane ' + (lane + 1));
+      b.title = (all ? 'Unmute' : 'Mute') + ' everything on this lane' + (some ? ' (some items are muted)' : '');
+    });
   }
   x(t) { return 12 + t * this.pps; }
   timeAtClient(cx) { const r = this.content.getBoundingClientRect(); return Math.max(0, (cx - r.left - 12) / this.pps); }
@@ -157,48 +134,43 @@ export class Timeline {
 
 
   // ---------- free placement helpers (drag between lanes, drop indicator) ----------
-  /** Show "new lane" strips above and below the lanes of these tracks while an item is dragged. */
-  beginZones(kinds) {
+  /** Show "new lane" strips above and below the lane stack while an item is dragged. */
+  beginZones() {
     if (this._zones) return;
-    this._zones = new Set(kinds); this._zoneEls = [];
-    for (const k of kinds) for (const pos of ['top', 'bot']) {
+    this._zones = true; this._zoneEls = [];
+    for (const pos of ['top', 'bot']) {
       const z = el('div', { class: 'tl-zone ' + pos, text: 'New lane', 'aria-hidden': 'true' });
-      this[LANE[k].track].appendChild(z); this._zoneEls.push(z);
+      this.lanes.appendChild(z); this._zoneEls.push(z);
     }
     this.render();
   }
   endZones() {
     if (!this._zones) return;
     for (const z of this._zoneEls) z.remove();
-    this._zones = null; this._zoneEls = [];
+    this._zones = false; this._zoneEls = [];
     this.drop.style.display = 'none';
     this.render();
   }
-  /** The lane under a pointer height: a lane number, or { newAt } for the strips above (new top lane) / below (new bottom lane). `orig` when far from the track. */
-  laneTarget(kind, clientY, orig) {
-    const g = this.geo[kind]; if (!g) return orig;
+  /** The lane under a pointer height: a lane number, or { newAt } for the strips above (new top lane) / below (new bottom lane). `orig` when far from the lanes. */
+  laneTarget(clientY, orig) {
+    const g = this.geo; if (!g) return orig;
     const r = g.track.getBoundingClientRect(), y = clientY - r.top;
-    if (y < -44 || y > r.height + 44) return orig;
+    if (y < -ROW || y > r.height + ROW) return orig;
     if (y < g.zone) return { newAt: g.n };
     if (y >= r.height - g.zone) return { newAt: 0 };
-    return g.n - 1 - clamp(Math.floor((y - g.zone) / g.rowH), 0, g.n - 1);
+    return g.n - 1 - clamp(Math.floor((y - g.zone) / ROW), 0, g.n - 1);
   }
-  /** Is the pointer over this track's band? */
-  overTrack(tr, clientY, slack = 0) { const r = tr.getBoundingClientRect(); return clientY >= r.top - slack && clientY <= r.bottom + slack; }
   hideDrop() { this.drop.style.display = 'none'; }
   /** Dashed outline of where the dragged item will land: an existing lane row, or the new-lane strip / line. */
-  showDropLane(kind, plan, len) {
-    const g = this.geo[kind]; if (!g) return;
+  showDropLane(plan, len) {
+    const g = this.geo; if (!g) return;
     const top0 = g.track.offsetTop, st = this.drop.style;
     st.display = 'block'; st.left = this.x(plan.start) + 'px'; st.width = Math.max(8, len * this.pps) + 'px';
     if (plan.newAt != null) {
-      const yb = g.zone + (g.n - plan.newAt) * g.rowH; // boundary between the lanes where the new one opens
-      st.top = (top0 + (plan.newAt === g.n ? 1 : plan.newAt === 0 ? g.h - g.zone + 1 : yb - 3)) + 'px'; st.height = (plan.newAt === g.n || plan.newAt === 0 ? g.zone - 2 : 6) + 'px';
+      const yb = g.zone + (g.n - plan.newAt) * ROW; // boundary between the lanes where the new one opens
+      st.top = (top0 + (plan.newAt >= g.n ? 1 : plan.newAt === 0 ? g.h - g.zone + 1 : yb - 3)) + 'px'; st.height = (plan.newAt >= g.n || plan.newAt === 0 ? g.zone - 2 : 6) + 'px';
       this.drop.className = 'tl-drop new';
-    } else { st.top = (top0 + g.zone + g.off + (g.n - 1 - plan.lane) * g.rowH) + 'px'; st.height = (g.rowH - 4) + 'px'; this.drop.className = 'tl-drop'; }
-  }
-  showDropMain(start, len, h = 60) {
-    const st = this.drop.style; st.display = 'block'; st.left = this.x(start) + 'px'; st.width = Math.max(8, len * this.pps) + 'px'; st.top = (this.vTrack.offsetTop + 4) + 'px'; st.height = h + 'px'; this.drop.className = 'tl-drop';
+    } else { st.top = (top0 + g.zone + (g.n - 1 - plan.lane) * ROW + (ROW - ITEM_H) / 2) + 'px'; st.height = ITEM_H + 'px'; this.drop.className = 'tl-drop'; }
   }
   /** Follow the pointer vertically with the dragged node (its horizontal position is the item's own start). */
   ghostY(node, d, clientY, dx = 0) {
@@ -255,6 +227,8 @@ export class Timeline {
       n.dataset.label = m.name || '';
       n.classList.toggle('sel', sel.type === 'marker' && sel.id === m.id);
     }
+    // one stack of lanes: clips, overlays, text, blur regions, captions and sound all sit in it
+    const top = this.laneGeo();
     // video clips
     for (const it of lay.items) {
       const c = it.clip;
@@ -267,11 +241,11 @@ export class Timeline {
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'clip', d._id));
         this.keyable(d, 'clip');
         return d;
-      }, this.vTrack);
+      }, this.lanes);
       n._id = c.id; n.dataset.id = c.id;
       const w = Math.max(6, it.len * this.pps);
       n.style.left = this.x(it.start) + 'px'; n.style.width = w + 'px'; n.classList.toggle('narrow', w < 64);
-      n.style.zIndex = String(10 + it.index);
+      n.style.top = top(c) + 'px';
       n.classList.toggle('sel', sel.type === 'clip' && sel.id === c.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.classList.toggle('image', c.kind === 'image');
       const rec = this.app.media.peek(c.mediaId);
@@ -291,42 +265,38 @@ export class Timeline {
       xf.style.width = (it.xIn * this.pps) + 'px'; xf.style.display = it.xIn > 0 ? 'block' : 'none';
       this.renderStrip(n.querySelector('.strip'), c, rec, w);
       this.renderKfs(n, c, it.start, it.len);
-      this.renderVolEnv(n, c, 'clip', it.start, it.len, 60, sel.type === 'clip' && sel.id === c.id && hasSound(c));
+      this.renderVolEnv(n, c, 'clip', it.start, it.len, ITEM_H, sel.type === 'clip' && sel.id === c.id && hasSound(c));
     }
-    // picture-in-picture overlays
-    const ovs = p.overlays || [];
-    const oTop = this.laneGeo('overlay', ovs);
-    this.oTrack.classList.toggle('empty', !ovs.length);
-    for (const o of ovs) {
+    // overlays (picture-in-picture)
+    for (const o of p.overlays || []) {
       const n = this._node('o:' + o.id, () => {
         const d = el('div', { class: 'tl-item tl-ovlitem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'volenv' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'overlay', d._id));
         this.keyable(d, 'overlay');
         return d;
-      }, this.oTrack);
+      }, this.lanes);
       n._id = o.id; n.dataset.id = o.id;
       n.style.left = this.x(o.start) + 'px'; n.style.width = Math.max(8, overlayLen(o) * this.pps) + 'px'; n.classList.toggle('narrow', overlayLen(o) * this.pps < 64);
-      n.style.top = oTop(o) + 'px';
+      n.style.top = top(o) + 'px';
       const lab = n.querySelector('span'), keyed = !!(o.chroma && o.chroma.enabled), om = o.kind === 'video' && o.hasAudio && o.muted, lk = keyed + '|' + o.name + '|' + om;
       if (lab._key !== lk) { lab._key = lk; lab.replaceChildren(icon(keyed ? 'key' : 'pip', 'ico item-ico'), ' ' + o.name, ...(om ? [' ', muteBadge('Muted')] : [])); }
       n.classList.toggle('sel', sel.type === 'overlay' && sel.id === o.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.setAttribute('aria-label', `Overlay ${o.name}${om ? ' (muted)' : ''}, ${fmt(o.start)} to ${fmt(o.start + overlayLen(o))}`);
       n.classList.toggle('offline', !this.app.media.peek(o.mediaId));
       this.renderKfs(n, o, o.start, overlayLen(o));
-      this.renderVolEnv(n, o, 'overlay', o.start, overlayLen(o), 26, sel.type === 'overlay' && sel.id === o.id && hasSound(o));
+      this.renderVolEnv(n, o, 'overlay', o.start, overlayLen(o), ITEM_H, sel.type === 'overlay' && sel.id === o.id && hasSound(o));
     }
-    // text lanes
-    const tTop = this.laneGeo('text', p.texts);
+    // text
     for (const t of p.texts) {
       const n = this._node('t:' + t.id, () => {
         const d = el('div', { class: 'tl-item tl-textitem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'text', d._id));
         this.keyable(d, 'text');
         return d;
-      }, this.tTrack);
+      }, this.lanes);
       n._id = t.id; n.dataset.id = t.id;
       n.style.left = this.x(t.start) + 'px'; n.style.width = Math.max(8, (t.end - t.start) * this.pps) + 'px'; n.classList.toggle('narrow', (t.end - t.start) * this.pps < 64);
-      n.style.top = tTop(t) + 'px';
+      n.style.top = top(t) + 'px';
       n.querySelector('span').textContent = textLabel(t);
       n.classList.toggle('sel', sel.type === 'text' && sel.id === t.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.setAttribute('aria-label', `Text “${textLabel(t).slice(0, 60)}”, ${fmt(t.start)} to ${fmt(t.end)}`);
@@ -335,19 +305,16 @@ export class Timeline {
     }
     this.renderCaps();
     // blur / privacy regions
-    const bs = p.blurs || [];
-    const bTop = this.laneGeo('blur', bs);
-    this.bTrack.classList.toggle('empty', !bs.length);
-    for (const b of bs) {
+    for (const b of p.blurs || []) {
       const n = this._node('b:' + b.id, () => {
         const d = el('div', { class: 'tl-item tl-blurritem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'blur', d._id));
         this.keyable(d, 'blur');
         return d;
-      }, this.bTrack);
+      }, this.lanes);
       n._id = b.id; n.dataset.id = b.id;
       n.style.left = this.x(b.start) + 'px'; n.style.width = Math.max(8, (b.end - b.start) * this.pps) + 'px'; n.classList.toggle('narrow', (b.end - b.start) * this.pps < 64);
-      n.style.top = bTop(b) + 'px';
+      n.style.top = top(b) + 'px';
       const lab = n.querySelector('span'), bk = blurLabel(b);
       if (lab._key !== bk) { lab._key = bk; lab.replaceChildren(icon('blur', 'ico item-ico'), ' ' + bk); }
       n.classList.toggle('sel', sel.type === 'blur' && sel.id === b.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
@@ -355,21 +322,19 @@ export class Timeline {
       n.classList.toggle('animated', hasKeyframes(b));
       this.renderKfs(n, b, b.start, b.end - b.start);
     }
-    // audio lanes
-    this.renderHeads();
-    const aTop = this.laneGeo('audio', p.audio);
+    // music, voice and detached audio
     for (const a of p.audio) {
       const n = this._node('a:' + a.id, () => {
         const d = el('div', { class: 'tl-item tl-audioitem' }, el('canvas', { class: 'wave' }), el('div', { class: 'seams' }), el('div', { class: 'volenv' }), el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'audio', d._id));
         this.keyable(d, 'audio');
         return d;
-      }, this.aTrack);
+      }, this.lanes);
       n._id = a.id; n.dataset.id = a.id;
       const span = audioSpan(a, lay.total);
       const w = Math.max(8, span * this.pps);
       n.style.left = this.x(a.start) + 'px'; n.style.width = w + 'px'; n.classList.toggle('narrow', w < 64);
-      n.style.top = aTop(a) + 'px';
+      n.style.top = top(a) + 'px';
       const alab = n.querySelector('span'), atxt = (a.voice ? '🎙 ' : '♪ ') + a.name + (a.loop ? ' · loop' : '') + (a.duck && !a.muted ? ' · duck' : '') + '|' + !!a.muted;
       if (alab._key !== atxt) { alab._key = atxt; alab.replaceChildren(...(a.muted ? [muteBadge('Muted'), ' '] : []), atxt.slice(0, atxt.lastIndexOf('|'))); }
       n.classList.toggle('muted', !!a.muted);
@@ -381,33 +346,22 @@ export class Timeline {
       n.setAttribute('aria-label', `${a.voice ? 'Voice' : 'Music'} ${a.name}${a.loop ? ' (loop)' : ''}${a.muted ? ' (muted)' : ''}, ${fmt(a.start)} to ${fmt(a.start + span)}`);
       n.classList.toggle('offline', !this.app.media.peek(a.mediaId));
       this.renderWave(n.querySelector('.wave'), a, w, null, 30, 1, span);
-      this.renderVolEnv(n, a, 'audio', a.start, span, 34, sel.type === 'audio' && sel.id === a.id);
+      this.renderVolEnv(n, a, 'audio', a.start, span, ITEM_H, sel.type === 'audio' && sel.id === a.id);
     }
     // remove stale
     for (const [k, n] of this.nodes) if (n._seen !== this._gen) { n.remove(); this.nodes.delete(k); }
-    this.vTrack.classList.toggle('empty', !lay.items.length);
-    this.syncHeads();
+    this.lanes.classList.toggle('empty', this.geo.n === 0);
+    this.renderHeads();
     this.updatePlayhead(this.app.player.t);
   }
-  /** Track labels follow the height of their (possibly several-lane) track. */
-  syncHeads() {
-    const map = { 'overlay-head': this.oTrack, 'text-head': this.tTrack, 'blur-head': this.bTrack, 'audio-head': this.aTrack };
-    for (const [cls, tr] of Object.entries(map)) { const h = this.heads.querySelector('.' + cls), px = parseFloat(tr.style.height); if (h && px) h.style.height = px + 'px'; }
-  }
-  /** Captions track: hidden until there are captions; only the blocks near the visible part are in the DOM (an hour of speech is thousands). */
+  /** Captions: only the blocks near the visible part are in the DOM (an hour of speech is thousands). */
   renderCaps() {
-    const p = this.project, caps = p.captions || [], has = caps.length > 0;
-    this.cTrack.hidden = !has; this.heads.querySelector('.cap-head').hidden = !has;
+    const p = this.project, caps = p.captions || [];
     if (!this.capNodes) this.capNodes = new Map();
-    if (!has) { for (const n of this.capNodes.values()) n.remove(); this.capNodes.clear(); return; }
-    const sel = this.app.selection || {};
+    if (!caps.length) { for (const n of this.capNodes.values()) n.remove(); this.capNodes.clear(); return; }
+    const top = this.laneGeo(), sel = this.app.selection || {};
     const vw = Math.max(1, this.scroll.clientWidth), x0 = this.scroll.scrollLeft - vw, x1 = this.scroll.scrollLeft + 2 * vw;
     const t0 = (x0 - 12) / this.pps, t1 = (x1 - 12) / this.pps;
-    // lanes only matter when captions overlap; the usual case is a single row
-    const overlap = caps.some((c, i) => i && c.start < caps[i - 1].end - 1e-6);
-    const lanes = overlap ? this.lanes(caps.map(c => ({ id: c.id, s: c.start, e: c.end }))) : null;
-    const count = lanes ? lanes.count : 1;
-    this.cTrack.style.height = Math.max(34, count * 28 + 8) + 'px';
     const gen = (this._capGen = (this._capGen || 0) + 1);
     for (const c of caps) {
       if (c.end < t0 || c.start > t1) continue;
@@ -417,10 +371,10 @@ export class Timeline {
         n.addEventListener('pointerdown', e => this.onItemDown(e, 'caption', n._id));
         this.keyable(n, 'caption'); this.capNodes.set(c.id, n);
       }
-      if (n.parentNode !== this.cTrack) this.cTrack.appendChild(n);
+      if (n.parentNode !== this.lanes) this.lanes.appendChild(n);
       n._id = c.id; n.dataset.id = c.id; n._gen = gen;
       n.style.left = this.x(c.start) + 'px'; n.style.width = Math.max(4, (c.end - c.start) * this.pps - 1) + 'px'; n.classList.toggle('narrow', (c.end - c.start) * this.pps < 64);
-      n.style.top = (4 + (lanes ? lanes.lane.get(c.id) || 0 : 0) * 28) + 'px';
+      n.style.top = top(c) + 'px';
       const lab = n.firstChild; if (lab._key !== c.text) { lab._key = c.text; lab.textContent = c.text; }
       const on = sel.type === 'caption' && sel.id === c.id;
       n.classList.toggle('sel', on); n.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -448,15 +402,6 @@ export class Timeline {
     const d = el('div', { class: 'ticks', html });
     if (this._rulerHtml) this._rulerHtml.replaceWith(d); else this.ruler.prepend(d);
     this._rulerHtml = d;
-  }
-  lanes(items) {
-    const lane = new Map(), ends = [];
-    for (const it of [...items].sort((a, b) => a.s - b.s)) {
-      let i = ends.findIndex(e => e <= it.s + 1e-6);
-      if (i < 0) { i = ends.length; ends.push(0); }
-      ends[i] = it.e; lane.set(it.id, i);
-    }
-    return { lane, count: Math.max(1, ends.length) };
   }
   renderStrip(strip, c, rec, w) {
     const frames = rec && rec.strip ? rec.strip : [];
@@ -679,7 +624,7 @@ export class Timeline {
     if (!kb) try { node.setPointerCapture(pointerId); } catch { }
     // moving a whole item can also go up/down (lane changes), so vertical movement starts the drag too
     const y0 = kb ? 0 : e.clientY;
-    d.vertical = !kb && handle === 'body' && type !== 'caption' && type !== 'marker';
+    d.vertical = !kb && handle === 'body' && type !== 'marker';
     { const nr = node.parentNode.getBoundingClientRect(); d.grabY = y0 - (nr.top + node.offsetTop); }
     const dtOf = (ev) => (kb ? ev.dt : (this.contentX(ev) - x0) / this.pps);
     const gate = (ev, dt) => { if (!moved && !kb && Math.hypot(dt * this.pps, d.vertical ? ev.clientY - y0 : 0) < 4) return false; moved = true; if (!kb) this.autoScroll(ev); return true; };
@@ -706,52 +651,12 @@ export class Timeline {
           if (c.kind === 'image') c.out = c.in + len; else c.out = clamp(orig.in + len * c.speed, orig.in + MIN_CLIP * c.speed, c.srcDuration);
           tip('Out ' + (c.kind === 'image' ? fmt(c.out) : c.out.toFixed(2) + 's') + ' · ' + fmt(clipLen(c)), it0.start + clipLen(c));
           this.app.liveUpdate({ previewAt: Math.max(it0.start, it0.start + clipLen(c) - 0.04) });
-        } else {
-          // body: with Ripple on the clip is re-ordered (the track stays joined); with Ripple off it goes anywhere, leaving a gap.
-          // Dragging it up into the PiP track turns it into a picture-in-picture overlay.
-          node.classList.add('dragging');
-          this.beginZones(['overlay']);
-          const len = it0.len;
-          d.toOverlay = this.overTrack(this.oTrack, ev.clientY, 0);
-          let s0 = Math.max(0, it0.start + dt); const sn = this.snap(s0, id, [0, len]); if (sn.snapped) { s0 = Math.max(0, sn.t); this.showSnap(Math.abs(sn.t - s0) < 1e-6 ? s0 : s0 + len); } else this.snapLine.style.display = 'none';
-          d.start = s0;
-          if (d.toOverlay) {
-            this.insert.style.display = 'none';
-            d.laneTarget = this.laneTarget('overlay', ev.clientY, 0);
-            const plan = planLaneItem(p, 'overlay', { id: '__new', kind: 'video', start: s0, in: 0, out: len, speed: 1 }, s0, d.laneTarget);
-            d.plan = plan; this.showDropLane('overlay', plan, len);
-            this.ghostY(node, d, ev.clientY, (s0 - it0.start) * this.pps);
-            tip('PiP ' + fmt(plan.start), plan.start);
-          } else if (this.app.rippleEnabled) {
-            this.ghostY(node, d, ev.clientY, dt * this.pps); this.hideDrop();
-            const t = this.timeAtClient(ev.clientX);
-            let to = lay0.items.length;
-            for (let i = 0; i < lay0.items.length; i++) { const it = lay0.items[i]; if (t < (it.start + it.end) / 2) { to = i; break; } }
-            d.to = to;
-            const ix = to < lay0.items.length ? lay0.items[to].start : lay0.total;
-            this.insert.style.display = 'block'; this.insert.style.left = this.x(ix) + 'px';
-            tip('Ripple on: clips stay joined. Turn Ripple off to leave a gap', ix);
-          } else {
-            this.insert.style.display = 'none';
-            const others = lay0.items.filter(i => i !== it0).map(i => [i.start, i.end]).sort((a, b) => a[0] - b[0]);
-            d.free = nearestFree(others, len, s0).start;
-            this.showDropMain(d.free, len); this.ghostY(node, d, ev.clientY, (s0 - it0.start) * this.pps);
-            tip('Starts ' + fmt(d.free), d.free);
-          }
         }
+        // (moving the whole clip is handled below, with every other kind of item)
       };
       d.onUp = () => {
         this.insert.style.display = 'none'; node.classList.remove('dragging'); node.style.transform = '';
         if (!moved) return;
-        if (handle === 'body') {
-          if (d.toOverlay) {
-            const o = clipToOverlay(p, id, this.app.rippleEnabled, d.start);
-            if (o) { placeLaneItem(p, 'overlay', o, d.start, d.laneTarget); this.app.selection = { type: 'overlay', id: o.id }; this.app.commit('Move clip to PiP track'); toast('Now a picture-in-picture overlay. Set its size and position in the PiP tab.', 3500); return; }
-          } else if (this.app.rippleEnabled) {
-            if (d.to != null) { const to = d.to > idx ? d.to - 1 : d.to; if (to !== idx) { moveClip(p, idx, to); this.app.commit('Reorder clip'); return; } }
-          } else if (d.free != null && Math.abs(d.free - it0.start) > 1e-3) { moveClipTo(p, id, d.free); this.app.commit('Move clip'); return; }
-          this.render(); return;
-        }
         if (this.app.rippleEnabled) rippleShift(p, it0.end - 1e-3, layout(p).total - lay0.total);
         else holdNextClip(p, id, lay0);
         this.app.commit('Trim clip');
@@ -846,47 +751,56 @@ export class Timeline {
       d.onUp = () => { if (moved) this.app.commit('Move marker'); else this.app.seek(m.time); };
     }
 
-    // ---- moving a whole PiP / text / blur / audio item: any start time, any lane of its track, new lanes above/below ----
-    if (!kb && handle === 'body' && LANE[type]) {
-      const kind = type, item = laneList(p, kind).find(x => x.id === id), orig = laneOf(item), label = { overlay: 'Move overlay', text: 'Move text', blur: 'Move blur region', audio: 'Move audio' }[kind];
-      const len = laneSpan(kind, item, lay0.total)[1] - laneSpan(kind, item, lay0.total)[0];
-      const baseMove = d.onMove;
+    // ---- moving a whole item (any kind): any start time, any lane, a new lane above/below; one undo step ----
+    if (!kb && handle === 'body' && type !== 'marker') {
+      const fi = findItem(p, id); if (!fi) return d;
+      const kind = fi.kind, item = fi.item, orig = laneOf(item), ripple = this.app.rippleEnabled && kind === 'clip';
+      const label = { clip: 'Move clip', overlay: 'Move overlay', text: 'Move text', blur: 'Move blur region', audio: 'Move audio', caption: 'Move caption' }[kind];
+      const ctx0 = spanCtx(p), [a0, b0] = ctx0.span(kind, item), len = b0 - a0;
+      const baseMove = d.onMove;          // trims are handled by the branches above; for text, blur, audio, captions and overlays it also sets item.start (snapped) live
       d.target = orig;
       d.onMove = (ev) => {
         const dt = dtOf(ev);
         if (!moved && Math.hypot(dt * this.pps, ev.clientY - y0) < 4) return;
-        this.beginZones([kind]);
+        this.beginZones();
         node.classList.add('dragging');
-        baseMove(ev);                         // sets item.start (snapped) and updates the preview
-        d.toMain = kind === 'overlay' && this.overTrack(this.vTrack, ev.clientY, 0);
-        const start = laneSpan(kind, item, lay0.total)[0];
-        if (d.toMain) {
-          const others = layout(p).items.map(i => [i.start, i.end]).sort((a, b) => a[0] - b[0]);
-          d.free = nearestFree(others, len, start).start; d.mainStart = start;
-          this.showDropMain(d.free, len); tip((this.app.rippleEnabled ? 'Insert in the main track' : 'Main track ' + fmt(d.free)), d.free);
+        let start;
+        if (kind === 'clip') {
+          if (!gate(ev, dt)) return;
+          start = Math.max(0, a0 + dt); const sn = this.snap(start, id, [0, len]);
+          if (sn.snapped) { start = Math.max(0, sn.t); this.showSnap(Math.abs(sn.t - start) < 1e-6 ? start : start + len); } else this.snapLine.style.display = 'none';
+          d.start = start;
+        } else { baseMove(ev); start = spanCtx(p).span(kind, item)[0]; }
+        d.target = this.laneTarget(ev.clientY, orig);
+        if (ripple) {
+          // Ripple on: the main sequence stays joined, so the clip is re-ordered by where it is dropped; the lane only changes its row
+          const t = this.timeAtClient(ev.clientX), its = lay0.items;
+          let to = its.length; for (let i = 0; i < its.length; i++) if (t < (its[i].start + its[i].end) / 2) { to = i; break; }
+          d.to = to; d.plan = planItem(p, kind, item, its[Math.min(to, its.length - 1)] ? its[Math.min(to, its.length - 1)].start : start, d.target);
+          const ix = to < its.length ? its[to].start : lay0.total;
+          this.insert.style.display = 'block'; this.insert.style.left = this.x(ix) + 'px'; this.insert.style.top = this.lanes.offsetTop + 'px'; this.insert.style.height = this.geo.h + 'px';
+          this.hideDrop(); tip('Ripple on: clips stay joined. Turn Ripple off to leave a gap', ix);
         } else {
-          d.target = this.laneTarget(kind, ev.clientY, orig);
-          d.plan = planLaneItem(p, kind, item, start, d.target);
-          this.showDropLane(kind, d.plan, len);
-          if (d.plan.newAt != null) tip('New lane', start);
+          d.plan = planItem(p, kind, item, start, d.target);
+          this.showDropLane(d.plan, len);
+          tip(d.plan.newAt != null ? 'New lane' : 'Starts ' + fmt(d.plan.start), d.plan.start);
         }
-        this.ghostY(node, d, ev.clientY);
+        this.ghostY(node, d, ev.clientY, kind === 'clip' ? (start - a0) * this.pps : 0);
       };
       d.onUp = () => {
+        this.insert.style.display = 'none';
         if (!moved) return;
-        const start = laneSpan(kind, item, lay0.total)[0];
-        if (d.toMain) {
-          const idxNow = layout(p).items;
-          let to = idxNow.length; const tcur = start + len / 2;
-          for (let i = 0; i < idxNow.length; i++) if (tcur < (idxNow[i].start + idxNow[i].end) / 2) { to = i; break; }
-          const at = to < idxNow.length ? idxNow[to].start : layout(p).total;
-          const c = this.app.rippleEnabled ? overlayToClip(p, id, null, to) : overlayToClip(p, id, start);
-          if (c) {
-            if (this.app.rippleEnabled) rippleShift(p, at - 1e-3, clipLen(c));
-            this.app.selection = { type: 'clip', id: c.id }; this.app.commit('Move overlay to main track'); toast('Moved to the main track. Its PiP size and position no longer apply.', 3500); return;
-          }
+        let sel = { type, id };
+        if (ripple) {
+          const idx = p.clips.findIndex(c => c.id === id);
+          if (d.to != null) { const to = d.to > idx ? d.to - 1 : d.to; if (to !== idx) moveClip(p, idx, to); }
+          if (d.target && typeof d.target === 'object') { insertLane(p, d.target.newAt); item.lane = d.target.newAt; } else if (d.target != null) item.lane = d.target;
+        } else {
+          const start = kind === 'clip' ? d.start : spanCtx(p).span(kind, item)[0];
+          const plan = placeItem(p, kind, item, start, d.target ?? orig, { ripple: false });
+          if (plan.kind !== kind) { sel = { type: plan.kind, id: plan.item.id }; toast('Layered over the clip. Transitions and colour grade do not apply to layers.', 3200); }
         }
-        placeLaneItem(p, kind, item, start, d.target ?? orig);
+        this.app.selection = sel;
         this.app.commit(label);
       };
     }
@@ -939,6 +853,14 @@ export class Timeline {
         moveClip(p, idx, to); this.app.commit('Reorder clip'); this._refocus(type, id); return;
       }
       const step = (e.shiftKey ? 1 : 1 / fps) * dir;
+      if (!e.altKey && type !== 'marker') { // nudge: same lane, never over a neighbour (it takes the nearest free spot, or a new lane when there is none)
+        const p = this.project, fi = findItem(p, id); if (!fi) return;
+        const at = spanCtx(p).span(fi.kind, fi.item)[0];
+        const plan = placeItem(p, fi.kind, fi.item, at + step, laneOf(fi.item));
+        this.app.selection = { type: plan.kind, id: plan.item.id };
+        this.app.commit({ clip: 'Move clip', overlay: 'Move overlay', text: 'Move text', blur: 'Move blur region', audio: 'Move audio', caption: 'Move caption' }[fi.kind]);
+        this._refocus(plan.kind, plan.item.id); return;
+      }
       this._noSnap = true;
       try {
         const drag = this.startDrag({ kb: true, pointerId: -1 }, d, type, id, e.altKey ? 'r' : 'body');

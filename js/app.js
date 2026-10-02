@@ -117,7 +117,6 @@ app.commit = (label, mergeKey) => {
 app.liveUpdate = (opts = {}) => {
   player.invalidate();
   timeline.render();
-  syncHeads();
   if (opts.previewAt != null) player.setTime(opts.previewAt);
   fillInspector();
   updateSummary();
@@ -181,7 +180,6 @@ function renderAll() {
   player.invalidate();
   sizeStage();
   timeline.render();
-  syncHeads();
   fillInspector();
   renderLists();
   updateSummary();
@@ -190,13 +188,6 @@ function renderAll() {
   $('projectName').textContent = app.project.name;
   $('projectNameBtn').title = app.project.name + ' (tap to rename)';
   document.title = app.project.name + ' · Video Editor';
-}
-function syncHeads() {
-  qs('.text-head').style.height = timeline.tTrack.offsetHeight + 'px';
-  qs('.blur-head').style.height = timeline.bTrack.offsetHeight + 'px';
-  qs('.cap-head').style.height = timeline.cTrack.offsetHeight + 'px';
-  qs('.overlay-head').style.height = timeline.oTrack.offsetHeight + 'px';
-  qs('.audio-head').style.height = timeline.aTrack.offsetHeight + 'px';
 }
 function sizeStage() {
   const has = app.project.clips.length > 0;
@@ -331,7 +322,7 @@ document.addEventListener('change', (e) => {
 });
 const scheduleTextCommit = debounce(() => app.commit('Edit text'), 700);
 function liveLight() {
-  player.invalidate(); timeline.render(); syncHeads(); fillOutputs(); updateSummary(); renderLists(true);
+  player.invalidate(); timeline.render(); fillOutputs(); updateSummary(); renderLists(true);
 }
 document.addEventListener('click', (e) => {
   const seg = e.target.closest('[data-bind] > button');

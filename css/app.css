@@ -107,7 +107,6 @@ html[data-installed] .install-btn,html[data-installed] .install-help,html[data-i
 .tl-head{display:flex;align-items:center;justify-content:center;font:600 9px "IBM Plex Mono",monospace;color:#8f8f88;letter-spacing:.08em}
 .track-mute{all:unset;box-sizing:border-box;flex:1 1 44px;align-self:stretch;min-width:44px;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;color:#a9a9a1;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.06em;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .track-mute[hidden]{display:none}
-.audio-head{flex-direction:column}
 .track-mute .ico{width:16px;height:16px}
 .track-mute .spk-off{display:none}
 .track-mute[aria-pressed=true]{color:#fff;background:color-mix(in srgb,var(--accent) 34%,#1d1d1b);box-shadow:inset 0 0 0 1px var(--accent)}
@@ -122,7 +121,11 @@ html[data-installed] .install-btn,html[data-installed] .install-help,html[data-i
 .tl-item .mute-badge,.tl-audioitem .mute-badge{width:13px;height:13px;vertical-align:-2px}
 .tl-audioitem.muted .wave{opacity:.35}
 .ruler-head{height:26px;border-bottom:1px solid #2e2e2b}
-.blur-head{flex:0 0 auto}.video-head{height:68px}.overlay-head{flex:0 0 auto}.text-head{flex:0 0 auto}.audio-head{flex:0 0 auto}
+.tl-lane-heads{display:flex;flex-direction:column;box-sizing:border-box}
+.lane-head{flex:none;box-sizing:border-box;border-bottom:1px solid #262624}
+.lane-head .track-mute{flex:1 1 auto;min-height:36px}
+.tl-lanes{min-height:50px;background:repeating-linear-gradient(90deg,transparent 0 40px,rgba(255,255,255,.012) 40px 80px)}
+.tl-lanes.empty::after{content:"Your clips appear here. Drag to move them, drag edges to trim";position:absolute;left:14px;top:16px;font-size:11px;color:#6d6d67;pointer-events:none;white-space:nowrap}
 .tl-scroll{flex:1;overflow-x:auto;overflow-y:hidden;position:relative;scrollbar-color:#555 #242422;touch-action:pan-x;-webkit-overflow-scrolling:touch;outline:none}
 .tl-content{position:relative;min-width:100%}
 .tl-ruler{height:26px;position:relative;border-bottom:1px solid #2e2e2b;cursor:ew-resize;touch-action:none;background:#1d1d1b}
@@ -135,37 +138,27 @@ html[data-installed] .install-btn,html[data-installed] .install-help,html[data-i
 .tl-marker.sel::before{background:#fff}
 .tl-marker::after{content:attr(data-label);position:absolute;left:15px;top:1px;font:9px "IBM Plex Mono",monospace;color:#f0b429;white-space:nowrap;pointer-events:none;text-shadow:0 1px 2px #000}
 .tl-track{position:relative;border-bottom:1px solid #2a2a27}
-.tl-video{height:68px;background:repeating-linear-gradient(90deg,transparent 0 40px,rgba(255,255,255,.012) 40px 80px)}
-.tl-video.empty::after{content:"Your clips appear here — drag to reorder, drag edges to trim";position:absolute;left:14px;top:24px;font-size:11px;color:#6d6d67;pointer-events:none;white-space:nowrap}
-.tl-text{min-height:34px}
-.tl-caps{min-height:34px}
-.tl-capitem{height:24px;background:#0f6b5c;color:#fff;overflow:hidden}
+.tl-capitem{background:#0f6b5c;color:#fff;overflow:hidden}
 .tl-capitem span{pointer-events:none}
 .tl-capitem.sel{outline:2px solid #fff;outline-offset:-2px}
-.cap-head{flex:0 0 auto}
 .cap-nav{display:inline-flex;gap:6px}
 .cap-nav .btn{min-width:40px;font-size:18px;line-height:1}
 details.more{margin-top:12px}
 details.more>summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);min-height:32px;display:flex;align-items:center}
 details.more[open]>summary{color:var(--ink)}
-.tl-blur{min-height:44px}
-.tl-blurritem{height:26px;background:#2d6b8f;color:#fff}
+.tl-blurritem{background:#2d6b8f;color:#fff}
 .tl-blurritem.animated span::after{content:" ✦";opacity:.8}
-.tl-blur.empty::after{content:"Blur / privacy regions (Look tab)";position:absolute;left:14px;top:14px;font-size:10px;color:#5f5f59;pointer-events:none;white-space:nowrap}
-.tl-overlay{min-height:34px}
-.tl-overlay.empty::after{content:"Picture-in-picture overlays (PiP tab)";position:absolute;left:14px;top:10px;font-size:10px;color:#5f5f59;pointer-events:none;white-space:nowrap}
-.tl-ovlitem{height:26px;background:#7a4a1c;color:#fff}
+.tl-ovlitem{background:#7a4a1c;color:#fff}
 .tl-ovlitem.offline{background:repeating-linear-gradient(45deg,#3a1f1d 0 8px,#7a4a1c 8px 16px)}
 .tl-audioitem.voice{background:#6a2c52}
 .tl-textitem.animated span::after{content:" ✦";opacity:.8}
 .kfs{position:absolute;inset:0;pointer-events:none;z-index:3}
 .kf{position:absolute;top:50%;width:11px;height:11px;margin:-6px 0 0 -6px;padding:0;border:1px solid #111;background:#ffd24a;transform:rotate(45deg);pointer-events:auto;cursor:pointer;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,.35)}
-.tl-clip .kf{top:14px}
+.tl-clip .kf{top:12px}
 .kf:hover,.kf:focus-visible{background:#fff;outline:none}
 .kf.edge{pointer-events:none}
 @media (pointer:coarse){.kf{width:14px;height:14px;margin:-7px 0 0 -7px}}
-.tl-audio{min-height:42px}
-.tl-clip{position:absolute;top:4px;height:60px;border-radius:7px;overflow:hidden;background:#2b2b28;border:1px solid #4b4b45;cursor:grab;touch-action:pan-x;user-select:none;-webkit-user-select:none}
+.tl-clip{position:absolute;height:38px;border-radius:7px;overflow:hidden;background:#2b2b28;border:1px solid #4b4b45;cursor:grab;touch-action:pan-x;user-select:none;-webkit-user-select:none}
 .tl-clip.sel{border:2px solid var(--accent);touch-action:none;box-shadow:0 0 0 1px rgba(0,0,0,.6)}
 .tl-clip.dragging{opacity:.85;z-index:100!important;cursor:grabbing;box-shadow:0 10px 30px rgba(0,0,0,.6)}
 .tl-clip.image{background:#2f2a3a}
@@ -181,13 +174,13 @@ details.more[open]>summary{color:var(--ink)}
 .sel>.h-l,.sel>.h-r{display:block;background:color-mix(in srgb,var(--accent) 80%,transparent)}
 .h-l::after,.h-r::after{content:"";position:absolute;left:5px;top:35%;bottom:35%;width:2px;border-radius:2px;background:#fff}
 @media (hover:hover){.tl-clip:hover>.h-l,.tl-clip:hover>.h-r,.tl-item:hover>.h-l,.tl-item:hover>.h-r{display:block;background:rgba(255,255,255,.18)}.tl-clip.sel:hover>.h-l,.tl-clip.sel:hover>.h-r,.tl-item.sel>.h-l,.tl-item.sel>.h-r{background:color-mix(in srgb,var(--accent) 80%,transparent)}}
-.tl-item{position:absolute;height:24px;border-radius:6px;overflow:hidden;cursor:grab;touch-action:pan-x;user-select:none;-webkit-user-select:none;display:flex;align-items:center}
+.tl-item{position:absolute;height:38px;border-radius:6px;overflow:hidden;cursor:grab;touch-action:pan-x;user-select:none;-webkit-user-select:none;display:flex;align-items:center}
 .tl-item span{padding:0 16px 0 8px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;position:relative}
 .tl-item.sel{touch-action:none;box-shadow:0 0 0 2px var(--accent)}
 .tl-textitem{background:#4a3f8f;color:#fff}
-.tl-audioitem{height:34px;background:#1f5a4a;color:#fff}
+.tl-audioitem{background:#1f5a4a;color:#fff}
 .tl-audioitem.offline{background:repeating-linear-gradient(45deg,#3a1f1d 0 8px,#1f5a4a 8px 16px)}
-.tl-audioitem .wave{position:absolute;left:0;top:2px;height:30px;pointer-events:none}
+.tl-audioitem .wave{position:absolute;left:0;top:4px;height:30px;pointer-events:none}
 .tl-playhead{position:absolute;top:0;bottom:0;left:0;width:2px;margin-left:-1px;background:var(--accent);pointer-events:none;z-index:200}
 .tl-playhead-knob{position:absolute;top:0;left:-6px;width:14px;height:14px;background:var(--accent);clip-path:polygon(0 0,100% 0,100% 60%,50% 100%,0 60%)}
 .tl-insert{position:absolute;top:26px;height:70px;width:3px;margin-left:-1px;background:#fff;display:none;z-index:150;border-radius:2px}
