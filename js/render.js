@@ -1,4 +1,5 @@
 // Frame compositor shared by preview, thumbnail maker and export.
+import { captionAt, captionWords } from './captions.js';
 import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasMotion, overlaysAt, EASES, blurAt } from './model.js';
 import { clamp } from './util.js';
 import { BlurFX } from './blur.js';
@@ -280,6 +281,84 @@ export function drawText(ctx, W, H, tl, alpha = 1, local = 1e6) {
   return { id: tl.id, type: 'text', x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh };
 }
 
+
+/**
+ * Draw the caption that is on screen at time t (burned into preview, thumbnails excluded, and both export paths).
+ * Words are laid out into at most style.maxLines lines inside the safe width; if they don't fit the text shrinks a little, and the
+ * block is always kept inside the frame. 9:16 keeps clear of the bottom UI zone of Shorts by default.
+ */
+export function drawCaptions(ctx, W, H, project, t) {
+  const st = project.captionStyle, list = project.captions;
+  if (!st || st.show === false || !list || !list.length) return;
+  const cap = captionAt(list, t); if (!cap) return;
+  let words = captionWords(cap); if (!words.length) return;
+  if (st.caps) words = words.map(w => ({ ...w, w: w.w.toUpperCase() }));
+  const base = Math.min(W, H), tall = H / W >= 1.5, square = !tall && H >= W * 0.9;
+  const maxW = W * (tall ? 0.8 : 0.86);
+  ctx.save();
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+  let size = Math.max(10, st.size * base), lines = [], pad = 0, avail = maxW;
+  const lay = () => {
+    ctx.font = fontCss(st.font, size);
+    pad = st.box ? size * 0.4 : 0;
+    const space = ctx.measureText(' ').width; avail = Math.max(size, maxW - pad * 2);
+    lines = []; let cur = null;
+    for (const w of words) {
+      const ww = ctx.measureText(w.w).width;
+      if (cur && cur.w + space + ww <= avail) { cur.items.push({ ...w, x: cur.w + space, ww }); cur.w += space + ww; }
+      else { cur = { items: [{ ...w, x: 0, ww }], w: ww }; lines.push(cur); }
+    }
+  };
+  for (let attempt = 0; attempt < 9; attempt++) {
+    lay();
+    if ((lines.length <= st.maxLines && Math.max(...lines.map(l => l.w)) <= avail + 0.5) || size <= st.size * base * 0.56) break;
+    size *= 0.92;
+  }
+  if (Math.max(...lines.map(l => l.w)) > avail + 0.5) { // a single "word" wider than the frame (a long URL, no spaces): break it up
+    words = words.flatMap(w => {
+      if (ctx.measureText(w.w).width <= avail) return [w];
+      const parts = []; let cur = '';
+      for (const ch of w.w) { if (cur && ctx.measureText(cur + ch).width > avail) { parts.push(cur); cur = ''; } cur += ch; }
+      if (cur) parts.push(cur);
+      return parts.map((t, i) => ({ w: t, start: w.start + (w.end - w.start) * i / parts.length, end: w.start + (w.end - w.start) * (i + 1) / parts.length }));
+    });
+    lay();
+  }
+  const lh = size * 1.2, bh = lines.length * lh;
+  const padY = st.box ? size * 0.22 : 0;
+  const mB = tall ? 0.2 : square ? 0.09 : 0.07, mT = tall ? 0.12 : 0.07;
+  let top;
+  if (st.position === 'top') top = H * mT - st.offset * H;
+  else if (st.position === 'middle') top = H * 0.5 - bh / 2 - st.offset * H;
+  else top = H * (1 - mB) - bh - st.offset * H;
+  top = clamp(top, H * 0.02 + padY, H * 0.98 - bh - padY);
+  if (st.box) {
+    ctx.fillStyle = hexA(st.boxColor, st.boxOpacity);
+    lines.forEach((l, i) => { // one rounded box per line keeps ragged lines tidy
+      const x0 = (W - l.w) / 2 - pad, y0 = top + i * lh + (lh - size * 1.12) / 2 - padY * 0.4;
+      roundRect(ctx, x0, y0, l.w + pad * 2, size * 1.12 + padY * 0.8, size * 0.24); ctx.fill();
+    });
+  }
+  // the highlighted word = the last one whose start has passed
+  let active = -1;
+  if (st.hl) { for (let i = 0; i < words.length; i++) if (words[i].start <= t + 1e-6) active = i; }
+  const lw = st.outline > 0 ? Math.max(2, size * st.outline) : 0;
+  let wi = 0;
+  lines.forEach((l, i) => {
+    const y = top + i * lh + lh / 2, x0 = (W - l.w) / 2;
+    for (const it of l.items) {
+      const x = x0 + it.x;
+      if (lw) { ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.lineWidth = lw; ctx.strokeStyle = st.outlineColor; ctx.strokeText(it.w, x, y); }
+      else if (!st.box) { ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = size * 0.2; ctx.shadowOffsetY = size * 0.04; }
+      ctx.fillStyle = st.hl && wi === active ? st.highlight : st.color;
+      ctx.fillText(it.w, x, y);
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+      wi++;
+    }
+  });
+  ctx.restore();
+}
+
 /** Draw the logo / watermark with the project's placement settings (shared by preview, export and thumbnails). */
 export function drawLogo(ctx, W, H, L, lg) {
   const base = Math.min(W, H);
@@ -478,6 +557,8 @@ export class Compositor {
       const a = Math.min(tl.fadeIn > 0 ? (t - tl.start) / tl.fadeIn : 1, tl.fadeOut > 0 ? (tl.end - t) / tl.fadeOut : 1);
       boxes.push(drawText(ctx, W, H, tl, clamp(a, 0, 1), t - tl.start));
     }
+    // captions: over everything but the logo
+    if (!opts.noCaptions) drawCaptions(ctx, W, H, project, t);
     // logo / watermark
     const lg = project.logo && opts.getLogo ? opts.getLogo() : null;
     if (lg) drawLogo(ctx, W, H, project.logo, lg);

@@ -1,6 +1,7 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
 import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX } from './model.js';
 import { clamp, fmt, el, icon, toast } from './util.js';
+import { retimeWords } from './captions.js';
 
 function muteBadge(title, extra = '') {
   const i = icon('spkOff', 'ico badge-ico mute-badge' + (extra ? ' ' + extra : ''));
@@ -23,6 +24,7 @@ export class Timeline {
       el('div', { class: 'tl-head video-head' }, this.muteBtn('video', 'VIDEO')),
       el('div', { class: 'tl-head overlay-head' }, this.muteBtn('overlay', 'PIP')),
       el('div', { class: 'tl-head text-head' }, el('span', { text: 'TEXT' })),
+      el('div', { class: 'tl-head cap-head', hidden: true, 'aria-label': 'Captions track' }, el('span', { text: 'CAPS' })),
       el('div', { class: 'tl-head blur-head' }, el('span', { text: 'BLUR' })),
       el('div', { class: 'tl-head audio-head' }, this.muteBtn('music', 'MUSIC'), this.muteBtn('voice', 'VOICE')));
     this.scroll = el('div', { class: 'tl-scroll', tabindex: '0', 'aria-label': 'Timeline' });
@@ -31,19 +33,20 @@ export class Timeline {
     this.vTrack = el('div', { class: 'tl-track tl-video' });
     this.oTrack = el('div', { class: 'tl-track tl-overlay' });
     this.tTrack = el('div', { class: 'tl-track tl-text' });
+    this.cTrack = el('div', { class: 'tl-track tl-caps', hidden: true });
     this.bTrack = el('div', { class: 'tl-track tl-blur' });
     this.aTrack = el('div', { class: 'tl-track tl-audio' });
     this.playhead = el('div', { class: 'tl-playhead' }, el('div', { class: 'tl-playhead-knob' }));
     this.insert = el('div', { class: 'tl-insert' });
     this.snapLine = el('div', { class: 'tl-snapline' });
     this.tip = el('div', { class: 'tl-tip' });
-    this.content.append(this.ruler, this.vTrack, this.oTrack, this.tTrack, this.bTrack, this.aTrack, this.playhead, this.insert, this.snapLine, this.tip);
+    this.content.append(this.ruler, this.vTrack, this.oTrack, this.tTrack, this.cTrack, this.bTrack, this.aTrack, this.playhead, this.insert, this.snapLine, this.tip);
     this.scroll.append(this.content);
     this.root.append(this.heads, this.scroll);
     this.ruler.addEventListener('pointerdown', e => this.onScrubStart(e));
-    for (const tr of [this.vTrack, this.oTrack, this.tTrack, this.bTrack, this.aTrack]) tr.addEventListener('pointerdown', e => { if (e.target === tr) this.onEmptyDown(e); });
+    for (const tr of [this.vTrack, this.oTrack, this.tTrack, this.cTrack, this.bTrack, this.aTrack]) tr.addEventListener('pointerdown', e => { if (e.target === tr) this.onEmptyDown(e); });
     // the ruler only draws ticks for the visible range; redraw as the timeline scrolls
-    this.scroll.addEventListener('scroll', () => { if (this._rulerRaf) return; this._rulerRaf = requestAnimationFrame(() => { this._rulerRaf = 0; this.renderRuler(); }); }, { passive: true });
+    this.scroll.addEventListener('scroll', () => { if (this._rulerRaf) return; this._rulerRaf = requestAnimationFrame(() => { this._rulerRaf = 0; this.renderRuler(); this.renderCaps(); }); }, { passive: true });
     this.scroll.addEventListener('wheel', e => {
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, this.timeAtClient(e.clientX)); }
     }, { passive: false });
@@ -107,6 +110,8 @@ export class Timeline {
     this.scroll.scrollLeft = this.x(t) - before;
     this.app.onZoom && this.app.onZoom(this.pps);
   }
+  /** Scroll sideways so time t is in view (used when jumping between captions). */
+  reveal(t) { const x = this.x(t), sl = this.scroll.scrollLeft, w = this.scroll.clientWidth; if (x < sl + 20 || x > sl + w - 40) this.scroll.scrollLeft = Math.max(0, x - w / 3); }
   setZoom(pps) { this.autoFit = false; const t = this.app.player.t; const before = this.x(t) - this.scroll.scrollLeft; this.pps = clamp(pps, 2, 600); this.render(); this.scroll.scrollLeft = this.x(t) - before; }
 
   snapPoints(exclude) {
@@ -114,6 +119,7 @@ export class Timeline {
     for (const it of lay.items) { pts.push(it.start, it.end); }
     for (const t of p.texts) if (t.id !== exclude) pts.push(t.start, t.end);
     for (const b of p.blurs || []) if (b.id !== exclude) pts.push(b.start, b.end);
+    for (const c of p.captions || []) if (c.id !== exclude) pts.push(c.start, c.end);
     for (const a of p.audio) if (a.id !== exclude) pts.push(a.start, a.start + audioSpan(a, lay.total));
     for (const m of p.markers) if (m.id !== exclude) pts.push(m.time);
     for (const o of p.overlays || []) if (o.id !== exclude) pts.push(o.start, o.start + overlayLen(o));
@@ -140,7 +146,7 @@ export class Timeline {
     const p = this.project, lay = layout(p);
     this._gen = (this._gen || 0) + 1;
     const sel = this.app.selection || {};
-    const width = Math.max(this.scroll.clientWidth, this.x(Math.max(lay.total, ...p.audio.map(a => a.start + audioSpan(a, lay.total)), ...p.texts.map(t => t.end), ...(p.blurs || []).map(b => b.end), ...(p.overlays || []).map(o => o.start + overlayLen(o)))) + 240);
+    const width = Math.max(this.scroll.clientWidth, this.x(Math.max(lay.total, ...p.audio.map(a => a.start + audioSpan(a, lay.total)), ...p.texts.map(t => t.end), ...(p.captions || []).slice(-1).map(c => c.end), ...(p.blurs || []).map(b => b.end), ...(p.overlays || []).map(o => o.start + overlayLen(o)))) + 240);
     this.content.style.width = width + 'px';
     this._width = width;
     this.renderRuler();
@@ -237,6 +243,7 @@ export class Timeline {
       n.classList.toggle('animated', !!(t.anim && (t.anim.in !== 'none' || t.anim.out !== 'none')));
       this.renderKfs(n, t, t.start, t.end - t.start);
     }
+    this.renderCaps();
     // blur / privacy regions
     const bs = p.blurs || [];
     const bl = this.lanes(bs.map(b => ({ id: b.id, s: b.start, e: b.end })));
@@ -292,6 +299,40 @@ export class Timeline {
     for (const [k, n] of this.nodes) if (n._seen !== this._gen) { n.remove(); this.nodes.delete(k); }
     this.vTrack.classList.toggle('empty', !lay.items.length);
     this.updatePlayhead(this.app.player.t);
+  }
+  /** Captions track: hidden until there are captions; only the blocks near the visible part are in the DOM (an hour of speech is thousands). */
+  renderCaps() {
+    const p = this.project, caps = p.captions || [], has = caps.length > 0;
+    this.cTrack.hidden = !has; this.heads.querySelector('.cap-head').hidden = !has;
+    if (!this.capNodes) this.capNodes = new Map();
+    if (!has) { for (const n of this.capNodes.values()) n.remove(); this.capNodes.clear(); return; }
+    const sel = this.app.selection || {};
+    const vw = Math.max(1, this.scroll.clientWidth), x0 = this.scroll.scrollLeft - vw, x1 = this.scroll.scrollLeft + 2 * vw;
+    const t0 = (x0 - 12) / this.pps, t1 = (x1 - 12) / this.pps;
+    // lanes only matter when captions overlap; the usual case is a single row
+    const overlap = caps.some((c, i) => i && c.start < caps[i - 1].end - 1e-6);
+    const lanes = overlap ? this.lanes(caps.map(c => ({ id: c.id, s: c.start, e: c.end }))) : null;
+    const count = lanes ? lanes.count : 1;
+    this.cTrack.style.height = Math.max(34, count * 28 + 8) + 'px';
+    const gen = (this._capGen = (this._capGen || 0) + 1);
+    for (const c of caps) {
+      if (c.end < t0 || c.start > t1) continue;
+      let n = this.capNodes.get(c.id);
+      if (!n) {
+        n = el('div', { class: 'tl-item tl-capitem' }, el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
+        n.addEventListener('pointerdown', e => this.onItemDown(e, 'caption', n._id));
+        this.keyable(n, 'caption'); this.capNodes.set(c.id, n);
+      }
+      if (n.parentNode !== this.cTrack) this.cTrack.appendChild(n);
+      n._id = c.id; n.dataset.id = c.id; n._gen = gen;
+      n.style.left = this.x(c.start) + 'px'; n.style.width = Math.max(4, (c.end - c.start) * this.pps - 1) + 'px';
+      n.style.top = (4 + (lanes ? lanes.lane.get(c.id) || 0 : 0) * 28) + 'px';
+      const lab = n.firstChild; if (lab._key !== c.text) { lab._key = c.text; lab.textContent = c.text; }
+      const on = sel.type === 'caption' && sel.id === c.id;
+      n.classList.toggle('sel', on); n.setAttribute('aria-pressed', on ? 'true' : 'false');
+      n.setAttribute('aria-label', `Caption “${c.text.slice(0, 60)}”, ${fmt(c.start)} to ${fmt(c.end)}`);
+    }
+    for (const [id, n] of this.capNodes) if (n._gen !== gen) { n.remove(); this.capNodes.delete(id); }
   }
   /** Ruler ticks for the visible part of the timeline (plus a screen of margin each side), not the whole length. */
   renderRuler() {
@@ -439,6 +480,7 @@ export class Timeline {
     const t = p.texts.find(x => x.id === id); if (t) return { sel: { type: 'text', id }, start: t.start };
     const o = (p.overlays || []).find(x => x.id === id); if (o) return { sel: { type: 'overlay', id }, start: o.start };
     const bl = (p.blurs || []).find(x => x.id === id); if (bl) return { sel: { type: 'blur', id }, start: bl.start };
+    const cp = (p.captions || []).find(x => x.id === id); if (cp) return { sel: { type: 'caption', id }, start: cp.start };
     return null;
   }
   renderWave(cv, a, w, recIn, Hh = 30, speed = 1, span = null) {
@@ -587,8 +629,10 @@ export class Timeline {
         if (this.app.rippleEnabled) rippleShift(p, it0.end - 1e-3, layout(p).total - lay0.total);
         this.app.commit('Trim clip');
       };
-    } else if (type === 'text' || type === 'blur') {
-      const t0 = (type === 'blur' ? p.blurs : p.texts).find(t => t.id === id); const o = { s: t0.start, e: t0.end, kf: JSON.parse(JSON.stringify(t0.keyframes || {})) };
+    } else if (type === 'text' || type === 'blur' || type === 'caption') {
+      const t0 = (type === 'blur' ? p.blurs : type === 'caption' ? p.captions : p.texts).find(t => t.id === id); const o = { s: t0.start, e: t0.end, kf: JSON.parse(JSON.stringify(t0.keyframes || {})) };
+      const cw = type === 'caption' && t0.words ? JSON.parse(JSON.stringify(t0.words)) : null; // captions carry their word timings along
+      const capWords = () => { if (cw) { t0.words = cw; retimeWords(t0, o.s, o.e); } };
       const keyed = hasKeyframes(t0);
       d.onMove = (ev) => {
         const dt = dtOf(ev);
@@ -605,9 +649,10 @@ export class Timeline {
           let e2 = Math.max(o.s + 0.2, o.e + dt); const sn = this.snap(e2, id); if (sn.snapped) { e2 = Math.max(o.s + 0.2, sn.t); this.showSnap(e2); }
           t0.end = e2; tip('End ' + fmt(e2), e2);
         }
+        capWords();
         this.app.liveUpdate({ previewAt: handle === 'r' ? t0.end - 0.05 : t0.start + 0.01, keepTime: handle === 'body' });
       };
-      d.onUp = () => { if (moved) this.app.commit(type === 'blur' ? 'Move blur region' : 'Move text'); };
+      d.onUp = () => { if (moved) this.app.commit(type === 'blur' ? 'Move blur region' : type === 'caption' ? 'Edit caption' : 'Move text'); };
     } else if (type === 'audio') {
       const a = p.audio.find(x => x.id === id); const o = { s: a.start, i: a.in, out: a.out, span: audioSpan(a, lay0.total), ll: a.loopLen, kf: JSON.parse(JSON.stringify(a.keyframes || {})) };
       const sp = audioSpeed(a), keyed = hasKeyframes(a);
@@ -724,7 +769,7 @@ export class Timeline {
     });
   }
   _refocus(type, id) {
-    const n = this.nodes.get({ clip: 'c:', overlay: 'o:', text: 't:', blur: 'b:', audio: 'a:' }[type] + id);
+    const n = type === 'caption' ? (this.capNodes && this.capNodes.get(id)) : this.nodes.get({ clip: 'c:', overlay: 'o:', text: 't:', blur: 'b:', audio: 'a:' }[type] + id);
     if (n && document.activeElement !== n) n.focus({ preventScroll: true });
   }
 }

@@ -247,7 +247,7 @@ export function hasAudio(project, lay) { return audioSegments(project, lay).leng
  * Async generator of stereo AudioBuffers (CHUNK_SEC each, last one shorter) covering the whole timeline.
  * Memory use is a few seconds of audio per active source, independent of the timeline length.
  */
-export async function* mixChunks(project, lay, media, { sampleRate = 48000, chunkSec = CHUNK_SEC, onStatus, onWarn } = {}) {
+export async function* mixChunks(project, lay, media, { sampleRate = 48000, chunkSec = CHUNK_SEC, onStatus, onWarn, from = 0 } = {}) {
   const total = lay.total;
   const segs = audioSegments(project, lay).sort((a, b) => a.t0 - b.t0);
   const totalLen = Math.max(1, Math.ceil(total * sampleRate));
@@ -281,7 +281,9 @@ export async function* mixChunks(project, lay, media, { sampleRate = 48000, chun
     if (Math.abs(s.speed - 1) > 1e-3 && !stretchers.has(s)) stretchers.set(s, new Stretcher(st.reader, Math.round(s.srcIn * st.reader.sr), st.reader.sr, s.speed));
     return { reader: st.reader, stretch: stretchers.get(s) };
   };
-  for (let s0 = 0; s0 < totalLen; s0 += Math.round(chunkSec * sampleRate)) {
+  const step = Math.round(chunkSec * sampleRate);
+  // `from` (seconds) starts at the chunk containing it (so a range of a long timeline doesn't decode everything before it)
+  for (let s0 = from > 0 ? Math.floor(Math.round(from * sampleRate) / step) * step : 0; s0 < totalLen; s0 += step) {
     const n = Math.min(Math.round(chunkSec * sampleRate), totalLen - s0);
     const T0 = s0 / sampleRate, T1 = (s0 + n) / sampleRate;
     const ctx = new OfflineAudioContext(2, n, sampleRate);

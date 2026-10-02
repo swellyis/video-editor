@@ -1,5 +1,6 @@
 // Project data model, timeline layout, edit operations, audio envelopes, history.
 import { uid, clamp, deepClone } from './util.js';
+import { defaultCaptionStyle, normalizeCaptionStyle, normalizeCaptions, splitCaption } from './captions.js';
 
 export const SCHEMA = 5;
 export const MIN_CLIP = 0.1; // seconds on timeline
@@ -53,6 +54,7 @@ export function newProject(name) {
     settings: { ratio: '16:9', res: 1080, fps: 30, quality: 'high', format: 'auto', fit: 'contain', bg: 'black', bgColor: '#000000', imageDuration: 4, endFade: 0 },
     color: defaultColor(),
     clips: [], overlays: [], texts: [], blurs: [], audio: [], markers: [],
+    captions: [], captionStyle: defaultCaptionStyle(),
     logo: null,
     thumb: { time: null, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow', format: 'auto', fit: 'cover', type: 'jpg', pip: true, logo: true },
   };
@@ -71,6 +73,8 @@ export function migrate(p) {
   out.overlays = (p.overlays || []).map(o => normalizeOverlay(o));
   out.blurs = (Array.isArray(p.blurs) ? p.blurs : []).filter(b => b && typeof b === 'object').slice(0, 200).map(b => normalizeBlur(b));
   out.markers = (Array.isArray(p.markers) ? p.markers : []).filter(m => m && typeof m === 'object').map(m => ({ ...m, name: typeof m.name === 'string' ? m.name.slice(0, NAME_MAX) : '', time: num(m.time, 0, 1e6, 0) }));
+  out.captions = normalizeCaptions(p.captions);
+  out.captionStyle = normalizeCaptionStyle(p.captionStyle);
   if ((p.schema || 0) < 5 && out.thumb.time === 0) out.thumb.time = null; // before v5, 0 meant "not chosen yet"
   sanitizeProject(out);
   out.schema = SCHEMA;
@@ -623,6 +627,7 @@ export function outputDims(project, overrideRes) {
 export function rippleShift(project, from, delta, { texts = true, audio = true, markers = true } = {}) {
   if (!delta) return;
   if (texts) for (const b of project.blurs || []) if (b.start >= from - 1e-6) { b.start = Math.max(0, b.start + delta); b.end = Math.max(b.start + 0.1, b.end + delta); }
+  if (texts) for (const c of project.captions || []) if (c.start >= from - 1e-6) { c.start = Math.max(0, c.start + delta); c.end = Math.max(c.start + 0.05, c.end + delta); if (c.words) c.words = c.words.map(w => ({ ...w, start: Math.max(0, w.start + delta), end: Math.max(0, w.end + delta) })); }
   if (texts) for (const t of project.texts) if (t.start >= from - 1e-6) { t.start = Math.max(0, t.start + delta); t.end = Math.max(t.start + 0.1, t.end + delta); }
   if (audio) for (const a of project.audio) if (a.start >= from - 1e-6) a.start = Math.max(0, a.start + delta);
   if (audio) for (const o of project.overlays || []) if (o.start >= from - 1e-6) o.start = Math.max(0, o.start + delta);
@@ -684,6 +689,13 @@ export function splitItem(project, sel, t) {
     project.texts.push(b);
     return { type: 'text', item: b };
   }
+  if (sel.type === 'caption') {
+    const a = (project.captions || []).find(x => x.id === sel.id); if (!a) return fail('Nothing to split.');
+    const parts = splitCaption(a, t);
+    if (!parts) return fail('Move the playhead inside the selected caption (not at its edge) to split it.');
+    const i = project.captions.indexOf(a); project.captions.splice(i, 1, parts[0], parts[1]);
+    return { type: 'caption', item: parts[1] };
+  }
   if (sel.type === 'blur') {
     const a = (project.blurs || []).find(x => x.id === sel.id); if (!a) return fail('Nothing to split.');
     const u = t - a.start;
@@ -728,7 +740,7 @@ export function splitItem(project, sel, t) {
     project.overlays.splice(project.overlays.indexOf(o) + 1, 0, b);
     return { type: 'overlay', item: b };
   }
-  return fail('Markers can’t be split. Select a clip, text, overlay, blur region or audio track.');
+  return fail('Markers can’t be split. Select a clip, text, overlay, caption, blur region or audio track.');
 }
 
 /**
@@ -867,6 +879,8 @@ export class History {
     this.mergeKey = mergeKey || null; this.mergeAt = now;
     if (this.current != null) this.undoStack.push(this.current);
     if (this.undoStack.length > this.limit) this.undoStack.shift();
+    // captions for an hour-long video make each snapshot large: also bound the total memory (~80 MB of JSON)
+    for (let n = this.undoStack.reduce((a, x) => a + x.length, 0); n > 80e6 && this.undoStack.length > 5; n -= (this.undoStack.shift() || '').length);
     this.current = s; this.redoStack = [];
     return true;
   }

@@ -120,6 +120,7 @@
       <div class="tabs" role="tablist">
         <button class="active" data-tab="clip" type="button" role="tab">Clip</button>
         <button data-tab="text" type="button" role="tab">Text</button>
+        <button data-tab="captions" type="button" role="tab">Captions</button>
         <button data-tab="audio" type="button" role="tab">Audio</button>
         <button data-tab="pip" type="button" role="tab">PiP</button>
         <button data-tab="look" type="button" role="tab">Look</button>
@@ -282,6 +283,61 @@
             <div class="button-row" style="margin-top:12px"><button class="btn ghost danger" data-action="deleteText" type="button">Delete text</button></div>
           </section>
         </div>
+      </div>
+
+      <!-- CAPTIONS -->
+      <div class="tab-panel" id="tab-captions">
+        <section class="section">
+          <div class="section-head"><h2>Captions</h2><button class="btn primary small" data-action="transcribe" id="transBtn" type="button">✨ Generate…</button></div>
+          <p class="hint" id="capEmptyHint">Turn your speech into captions on this device (nothing is uploaded), import an .srt, or add them by hand. They show on a CAPS row of the timeline and are burned into the export.</p>
+          <div class="button-row"><button class="btn secondary small" data-action="addCaption" type="button">＋ Caption at playhead</button><span class="hint grow" id="capCount"></span></div>
+        </section>
+        <div id="capPanel" hidden>
+          <section class="section">
+            <div class="section-head"><h2 class="sh">Selected caption</h2><span class="cap-nav"><button class="btn ghost small" data-action="capPrev" type="button" aria-label="Previous caption">‹</button><button class="btn ghost small" data-action="capNext" type="button" aria-label="Next caption">›</button></span></div>
+            <label><span class="label">Text</span><textarea data-bind="cap.text" maxlength="300" placeholder="What is said"></textarea></label>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Start (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="cap.start" data-commit="change" /></label>
+              <label><span class="label">End (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="cap.end" data-commit="change" /></label>
+            </div>
+          </section>
+        </div>
+        <section class="section" id="capStyleSection">
+          <div class="section-head"><h2 class="sh">Style</h2><label class="switch"><input type="checkbox" data-bind="proj.captionStyle.show" /><span class="switch-ui" aria-hidden="true"></span> <span class="switch-label">Show</span></label></div>
+          <div class="segmented four" id="capPresets"><button data-preset="classic" type="button">Classic</button><button data-preset="shorts" type="button">Bold Shorts</button><button data-preset="highlight" type="button">Highlight</button><button data-preset="minimal" type="button">Minimal</button></div>
+          <details class="more" id="capMore">
+            <summary>Customize</summary>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Font</span><select data-bind="proj.captionStyle.font" id="capFontSelect"></select></label>
+              <label><span class="label">Position</span><select data-bind="proj.captionStyle.position"><option value="bottom">Bottom</option><option value="middle">Middle</option><option value="top">Top</option></select></label>
+            </div>
+            <div class="slider-row"><label>Size</label><input type="range" min="0.025" max="0.12" step="0.0025" data-bind="proj.captionStyle.size" /><output data-out="proj.captionStyle.size" data-fmt="size"></output></div>
+            <div class="slider-row"><label>Raise</label><input type="range" min="-0.1" max="0.3" step="0.005" data-bind="proj.captionStyle.offset" /><output data-out="proj.captionStyle.offset" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Words per caption</label><input type="range" min="1" max="12" step="1" data-bind="proj.captionStyle.maxWords" data-commit="change" id="capMaxWords" /><output data-out="proj.captionStyle.maxWords" data-fmt="int"></output></div>
+            <div class="slider-row"><label>Max lines</label><input type="range" min="1" max="4" step="1" data-bind="proj.captionStyle.maxLines" /><output data-out="proj.captionStyle.maxLines" data-fmt="int"></output></div>
+            <div class="field-row" style="margin-top:10px">
+              <label><span class="label">Text color</span><input class="field color" type="color" data-bind="proj.captionStyle.color" /></label>
+              <label><span class="label">Outline color</span><input class="field color" type="color" data-bind="proj.captionStyle.outlineColor" /></label>
+            </div>
+            <div class="slider-row"><label>Outline</label><input type="range" min="0" max="0.3" step="0.005" data-bind="proj.captionStyle.outline" /><output data-out="proj.captionStyle.outline" data-fmt="pct"></output></div>
+            <label class="check"><input type="checkbox" data-bind="proj.captionStyle.box" /> Dark box behind the text</label>
+            <div class="field-row" style="margin-top:6px">
+              <label><span class="label">Box color</span><input class="field color" type="color" data-bind="proj.captionStyle.boxColor" /></label>
+              <label><span class="label">Highlight color</span><input class="field color" type="color" data-bind="proj.captionStyle.highlight" /></label>
+            </div>
+            <div class="slider-row"><label>Box opacity</label><input type="range" min="0" max="1" step="0.01" data-bind="proj.captionStyle.boxOpacity" /><output data-out="proj.captionStyle.boxOpacity" data-fmt="pct"></output></div>
+            <label class="check"><input type="checkbox" data-bind="proj.captionStyle.hl" /> Highlight the word being spoken</label>
+            <label class="check"><input type="checkbox" data-bind="proj.captionStyle.caps" /> ALL CAPS</label>
+          </details>
+        </section>
+        <section class="section">
+          <h2 class="sh">Files &amp; fixes</h2>
+          <div class="button-row"><label class="btn secondary small" for="srtInput">Import .srt</label><input id="srtInput" type="file" accept=".srt,.vtt,text/plain,application/x-subrip" hidden /><button class="btn secondary small" data-action="downloadSrt" type="button">Download .srt</button><button class="btn ghost small danger" data-action="clearCaptions" type="button">Clear all</button></div>
+          <details class="more" id="capFix"><summary>Fix a word everywhere</summary>
+            <div class="field-row" style="margin-top:10px"><label><span class="label">Find</span><input class="field" type="text" id="capFind" autocomplete="off" /></label><label><span class="label">Replace with</span><input class="field" type="text" id="capReplace" autocomplete="off" /></label></div>
+            <div class="button-row" style="margin-top:8px"><button class="btn secondary small" data-action="capReplaceAll" type="button">Replace in all captions</button><span class="hint grow" id="capFixOut"></span></div>
+          </details>
+        </section>
       </div>
 
       <!-- AUDIO -->
@@ -652,6 +708,26 @@
 
 
 <!-- Extract audio -->
+<dialog class="sheet" id="transDialog" aria-labelledby="tdTitle">
+  <div class="sheet-head"><h2 id="tdTitle">Generate captions</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="tdClose">✕</button></div>
+  <p class="hint" id="tdSource"></p>
+  <div id="tdOptions">
+    <div class="field-row" style="margin-top:10px">
+      <label><span class="label">Quality</span><select id="tdModel"></select></label>
+      <label><span class="label">Language</span><select id="tdLang"></select></label>
+    </div>
+    <label style="display:block;margin-top:10px"><span class="label">Names &amp; terms (optional)</span><input class="field" type="text" id="tdCustom" maxlength="400" placeholder="Jesus, Hallelujah, Deuteronomy" autocomplete="off" /></label>
+    <p class="hint" style="margin-top:4px">Spellings to prefer: similar-sounding words are corrected to these afterwards.</p>
+    <label class="check" id="tdSelRow" hidden><input type="checkbox" id="tdSelOnly" /> <span id="tdSelText">Only the selected item</span></label>
+    <p class="hint" id="tdNote" style="margin-top:10px"></p>
+    <p class="hint warn" id="tdWarn" hidden></p>
+  </div>
+  <div class="progress" id="tdProgress" aria-live="polite">
+    <div class="progress-track"><div class="progress-bar" id="tdBar"></div></div>
+    <div class="progress-copy"><span id="tdStatus">Starting…</span><span id="tdPercent">0%</span></div>
+  </div>
+  <div class="button-row" style="margin-top:12px"><button class="btn primary" id="tdGo" type="button">Start</button><button class="btn ghost" id="tdCancel" type="button">Cancel</button><button class="btn ghost small" id="tdFree" type="button" hidden>Free up space</button></div>
+</dialog>
 <dialog class="sheet" id="extractDialog" aria-labelledby="exTitle">
   <div class="sheet-head"><h2 id="exTitle">Extract audio</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="exClose">✕</button></div>
   <p class="hint" id="exSource"></p>

@@ -16,6 +16,8 @@ import { Compositor, drawLogo, ensureFonts, fontCss, wrapLines, TEXT_ANIMS_IN, T
 import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { Timeline } from './timeline.js';
+import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
+import * as trans from './transcribe.js';
 import { extractAudio, exportTimelineAudio, ExtractCancelled } from './extract.js';
 import { runExport, capabilities, planFormat, ExportCancelled, createSink, canStreamToOPFS, cleanupExports, bitrateFor } from './exporter.js';
 
@@ -124,13 +126,14 @@ app.seek = (t) => { player.setTime(t); };
 app.select = (sel, opts = {}) => {
   app.selection = sel;
   if (sel) {
-    const tab = { clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip', blur: 'look' }[sel.type];
+    const tab = { clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip', blur: 'look', caption: 'captions' }[sel.type];
     if (tab) showTab(tab);
     if (opts.seekInto) {
       const t = player.t;
       if (sel.type === 'clip') { const it = layout(app.project).items.find(i => i.clip.id === sel.id); if (it && (t < it.start || t >= it.end)) player.setTime(it.start + 0.001); }
       if (sel.type === 'text') { const x = app.project.texts.find(i => i.id === sel.id); if (x && (t < x.start || t >= x.end)) player.setTime(x.start + 0.01); }
       if (sel.type === 'blur') { const x = (app.project.blurs || []).find(i => i.id === sel.id); if (x && (t < x.start || t >= x.end)) player.setTime(x.start + 0.01); }
+      if (sel.type === 'caption') { const x = (app.project.captions || []).find(i => i.id === sel.id); if (x && (t < x.start || t >= x.end)) player.setTime(x.start + 0.01); if (x) timeline.reveal(x.start); }
       if (sel.type === 'marker') { const m = app.project.markers.find(i => i.id === sel.id); if (m) player.setTime(m.time); }
       if (sel.type === 'overlay') { const o = app.project.overlays.find(i => i.id === sel.id); if (o && (t < o.start || t >= o.start + overlayLen(o))) player.setTime(o.start + 0.01); }
     }
@@ -148,6 +151,7 @@ function selected(type) {
   if (s.type === 'marker') return p.markers.find(c => c.id === s.id) || null;
   if (s.type === 'overlay') return (p.overlays || []).find(c => c.id === s.id) || null;
   if (s.type === 'blur') return (p.blurs || []).find(c => c.id === s.id) || null;
+  if (s.type === 'caption') return (p.captions || []).find(c => c.id === s.id) || null;
   return null;
 }
 /** Selected animatable item with its timeline start/length and the playhead's local time. */
@@ -189,6 +193,7 @@ function renderAll() {
 function syncHeads() {
   qs('.text-head').style.height = timeline.tTrack.offsetHeight + 'px';
   qs('.blur-head').style.height = timeline.bTrack.offsetHeight + 'px';
+  qs('.cap-head').style.height = timeline.cTrack.offsetHeight + 'px';
   qs('.overlay-head').style.height = timeline.oTrack.offsetHeight + 'px';
   qs('.audio-head').style.height = timeline.aTrack.offsetHeight + 'px';
 }
@@ -238,7 +243,7 @@ function onTime(t, force) {
 // ---------------------------------------------------------------- data binding
 function resolve(path) {
   const [root, ...rest] = path.split('.');
-  let obj = root === 'proj' ? app.project : root === 'clip' ? selected('clip') : root === 'text' ? selected('text') : root === 'audio' ? selected('audio') : root === 'ovl' ? selected('overlay') : root === 'blur' ? selected('blur') : null;
+  let obj = root === 'proj' ? app.project : root === 'clip' ? selected('clip') : root === 'text' ? selected('text') : root === 'audio' ? selected('audio') : root === 'ovl' ? selected('overlay') : root === 'blur' ? selected('blur') : root === 'cap' ? selected('caption') : null;
   if (!obj) return null;
   for (let i = 0; i < rest.length - 1; i++) { obj = obj[rest[i]]; if (obj == null) return null; }
   return { obj, key: rest[rest.length - 1] };
@@ -273,6 +278,14 @@ function afterSet(path, obj, old, before) {
     if (app.rippleEnabled) { const it = before.items.find(i => i.clip.id === obj.id); if (it) rippleShift(p, it.end - 1e-3, layout(p).total - before.total); }
   }
   if (path === 'text.start' || path === 'text.end') { obj.start = Math.max(0, obj.start); if (obj.end < obj.start + 0.1) obj.end = obj.start + 0.1; }
+  if (path === 'cap.text') reconcileWords(obj);
+  if (path === 'cap.start' || path === 'cap.end') {
+    const o0 = path === 'cap.start' ? old : obj.start, o1 = path === 'cap.end' ? old : obj.end;
+    obj.start = Math.max(0, obj.start); if (obj.end < obj.start + 0.1) { if (path === 'cap.start') obj.start = obj.end - 0.1; else obj.end = obj.start + 0.1; }
+    if (obj.start < 0) { obj.end -= obj.start; obj.start = 0; }
+    retimeWords(obj, o0, o1);
+  }
+  if (path === 'proj.captionStyle.maxWords') { obj.maxWords = Math.round(clamp(obj.maxWords, 1, 20)); resplitCaptions(); }
   if (path === 'audio.in' || path === 'audio.out') {
     obj.in = clamp(obj.in, 0, (obj.srcDuration || 1e9) - 0.2); obj.out = clamp(obj.out, obj.in + 0.2, obj.srcDuration || 1e9);
     if (path === 'audio.in' && hasKeyframes(obj)) obj.keyframes = rebaseKeyframes(obj.keyframes, (obj.in - old) / audioSpeed(obj)); // the volume envelope stays on the same sound
@@ -348,6 +361,7 @@ const TOOL_HINT = {
   duplicate: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Duplicate.' },
   delete: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Delete.' },
   addKeyframe: {
+    caption: 'A caption can’t be keyframed. Select a clip, text, overlay, music or voice track on the timeline, then tap Keyframe.',
     none: 'Nothing selected. Tap a clip, text, overlay, music or voice track on the timeline first, then tap Keyframe.',
     marker: 'A marker can\'t be keyframed. Select a clip, text, overlay, music or voice track on the timeline, then tap Keyframe.',
   },
@@ -400,6 +414,7 @@ function fillInspector() {
   const o = selected('overlay');
   const bl = selected('blur');
   stage.classList.toggle('text-edit', !!t || !!o);
+  fillCaptionsPanel();
   $('blurPanel').hidden = !bl; $('blurEmptyHint').hidden = (p.blurs || []).length > 0;
   if (bl) $('blurRadiusRow').hidden = bl.shape === 'ellipse';
   for (const [row, item, isClip] of [['detachClip', c, true], ['detachOvl', o, false]]) {
@@ -547,7 +562,7 @@ function volumeTarget() {
     return { item, bind: s.type === 'clip' ? 'clip.volume' : 'ovl.volume', name: item.name || (s.type === 'clip' ? 'Clip' : 'Overlay'), where: s.type === 'clip' ? 'the Clip tab' : 'the Picture-in-picture tab' };
   }
   if (s.type === 'audio') return { item, bind: 'audio.volume', name: item.name || (item.voice ? 'Voice' : 'Music'), where: 'the Audio tab' };
-  const what = { text: 'Text', blur: 'A blur region', marker: 'A marker' }[s.type] || 'This item';
+  const what = { text: 'Text', blur: 'A blur region', caption: 'A caption', marker: 'A marker' }[s.type] || 'This item';
   return { why: what + ' has no sound, so there is no volume to change. Select a video clip, overlay, music or voice track.' };
 }
 function stepSelectedVolume(dir, ev) {
@@ -572,7 +587,7 @@ const actions = {
     const r = splitItem(app.project, s, player.t);
     if (!r || r.fail) return toast(r ? r.reason : 'Nothing to split here.');
     app.selection = { type: r.type, id: r.item.id };
-    const what = { clip: 'Clip', text: 'Text', audio: 'Audio', overlay: 'Overlay', blur: 'Blur region' }[r.type];
+    const what = { clip: 'Clip', text: 'Text', audio: 'Audio', overlay: 'Overlay', blur: 'Blur region', caption: 'Caption' }[r.type];
     app.commit('Split'); toast(what + ' split at ' + fmtPrecise(player.t, app.project.settings.fps));
   },
   duplicate() {
@@ -583,13 +598,14 @@ const actions = {
     else if (s.type === 'audio') { const b = deepClone(item); b.id = uid('aud'); b.start = item.start + audioSpan(item, layout(app.project).total); app.project.audio.push(b); app.selection = { type: 'audio', id: b.id }; }
     else if (s.type === 'overlay') { const b = deepClone(item); b.id = uid('ovl'); b.start = item.start + overlayLen(item); app.project.overlays.push(b); app.selection = { type: 'overlay', id: b.id }; }
     else if (s.type === 'blur') { const b = deepClone(item); b.id = uid('blr'); b.start = item.end; b.end = item.end + (item.end - item.start); app.project.blurs.push(b); app.selection = { type: 'blur', id: b.id }; }
+    else if (s.type === 'caption') { const b = deepClone(item); b.id = uid('cap'); const len = item.end - item.start; b.start = item.end; b.end = item.end + len; if (b.words) b.words = b.words.map(w => ({ ...w, start: w.start + len, end: w.end + len })); app.project.captions.push(b); app.selection = { type: 'caption', id: b.id }; }
     else if (s.type === 'marker') {
       // a copy of the marker at the playhead (or a second later when the playhead is already on it)
       const total = layout(app.project).total, here = Math.abs(player.t - item.time) > 0.05 ? player.t : Math.min(total, item.time + 1);
       const b = { ...deepClone(item), id: uid('mk'), time: here, name: 'Marker ' + (app.project.markers.length + 1) };
       app.project.markers.push(b); app.selection = { type: 'marker', id: b.id };
     } else return toast(TOOL_HINT.duplicate.none);
-    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', marker: 'Marker' }[s.type];
+    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', caption: 'Caption', marker: 'Marker' }[s.type];
     app.commit('Duplicate'); toast(what + ' duplicated.');
   },
   delete() {
@@ -602,8 +618,9 @@ const actions = {
     else if (s.type === 'marker') p.markers = p.markers.filter(t => t.id !== s.id);
     else if (s.type === 'overlay') p.overlays = p.overlays.filter(t => t.id !== s.id);
     else if (s.type === 'blur') p.blurs = p.blurs.filter(t => t.id !== s.id);
+    else if (s.type === 'caption') p.captions = p.captions.filter(t => t.id !== s.id);
     else return toast(TOOL_HINT.delete.none);
-    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', marker: 'Marker' }[s.type];
+    const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', caption: 'Caption', marker: 'Marker' }[s.type];
     app.selection = null; app.commit('Delete'); toast(what + ' deleted. Undo (Ctrl+Z) brings it back.');
   },
   volumeDown(_b, ev) { stepSelectedVolume(-1, ev); },
@@ -1625,7 +1642,7 @@ async function thumbFrame(t, F) {
     } catch { /* an overlay that can't be decoded is left out */ }
   }
   const single = { ...lay, items: [{ ...it, xIn: 0, fadeInBlack: 0, fadeOutBlack: 0 }] };
-  thumb.comp.render(c.getContext('2d'), F.width, F.height, p, single, tt, () => src, { getOverlaySource: (o) => ovSrc.get(o.id) || null });
+  thumb.comp.render(c.getContext('2d'), F.width, F.height, p, single, tt, () => src, { getOverlaySource: (o) => ovSrc.get(o.id) || null, noCaptions: true });
   return c;
 }
 let thumbBg = null;
@@ -1908,6 +1925,201 @@ function extractSource() {
   const it = items.find(i => player.t >= i.start && player.t < i.end) || items[0];
   return it ? { item: it.clip, type: 'clip' } : null;
 }
+
+// ---------------------------------------------------------------- captions (tab, SRT, find/replace, auto-transcribe)
+for (const k of FONT_KEYS) $('capFontSelect').append(el('option', { value: k, text: FONTS[k].label }));
+const sortedCaptions = () => [...(app.project.captions || [])].sort((a, b) => a.start - b.start);
+/** Re-split every caption to the style's words-per-caption (text is kept; word timings are carried along). */
+function resplitCaptions() {
+  const p = app.project, n0 = p.captions.length; if (!n0) return;
+  p.captions = rechunk(p.captions, { maxWords: p.captionStyle.maxWords });
+  if (app.selection && app.selection.type === 'caption' && !selected('caption')) app.selection = null;
+  toast('Captions re-split into ' + p.captions.length + ' (about ' + p.captionStyle.maxWords + ' words each). Undo (Ctrl+Z) brings the old split back.', 4500);
+}
+function fillCaptionsPanel() {
+  if (!$('capPanel')) return; // (a stale cached page)
+  const p = app.project, n = (p.captions || []).length, c = selected('caption');
+  $('capPanel').hidden = !c;
+  $('capEmptyHint').hidden = n > 0;
+  $('capCount').textContent = n ? n + (n === 1 ? ' caption' : ' captions') : '';
+  $('transBtn').textContent = n ? '↻ Re-transcribe…' : '✨ Generate…';
+  for (const b of qsa('#capPresets button')) b.classList.toggle('selected', b.dataset.preset === p.captionStyle.preset);
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('#capPresets button'); if (!b) return;
+  const p = app.project, before = p.captionStyle.maxWords;
+  p.captionStyle = applyPreset(p.captionStyle, b.dataset.preset);
+  if (p.captionStyle.maxWords !== before) resplitCaptions();
+  app.commit('Caption style');
+});
+actions.addCaption = function addCaption() {
+  const p = app.project, total = layout(p).total;
+  if (!p.clips.length) return toast('Add a video first, then add captions at the playhead.', 4000);
+  if (p.captions.length >= MAX_CAPTIONS) return toast('That is the maximum number of captions.', 4000);
+  let start = Math.min(player.t, Math.max(0, total - 0.5));
+  const here = p.captions.find(c => start >= c.start && start < c.end); if (here) start = here.end; // never on top of another
+  const next = sortedCaptions().find(c => c.start > start + 0.05);
+  let end = start + 2; if (next && next.start < end) end = Math.max(start + 0.3, next.start);
+  const c = newCaption(start, end, 'New caption');
+  p.captions.push(c); app.selection = { type: 'caption', id: c.id };
+  app.commit('Add caption'); player.setTime(c.start + 0.01); timeline.reveal(c.start); showTab('captions');
+  const ta = qs('[data-bind="cap.text"]'); if (ta && !matchMedia('(pointer:coarse)').matches) { ta.focus(); ta.select(); }
+};
+function stepCaption(dir) {
+  const list = sortedCaptions(); if (!list.length) return toast('No captions yet.');
+  const cur = selected('caption');
+  const ref = cur ? cur.start : player.t - (dir > 0 ? 0 : 1e-3);
+  const hit = dir > 0 ? list.find(c => c.start > ref + (cur ? 1e-6 : 1e-3)) : [...list].reverse().find(c => c.start < ref - (cur ? 1e-6 : 0));
+  if (!hit) return toast(dir > 0 ? 'That is the last caption.' : 'That is the first caption.', 1800);
+  app.select({ type: 'caption', id: hit.id }, { seekInto: true });
+}
+actions.capPrev = () => stepCaption(-1);
+actions.capNext = () => stepCaption(1);
+actions.downloadSrt = function downloadSrt() {
+  const p = app.project; if (!p.captions.length) return toast('No captions to download yet.');
+  const name = safeName(p.name, 'captions') + '.srt';
+  download(new File([formatSrt(p.captions)], name, { type: 'application/x-subrip' }), name);
+  toast('Saved ' + name, 3000);
+};
+actions.clearCaptions = function clearCaptions() {
+  const p = app.project, n = p.captions.length; if (!n) return toast('There are no captions to clear.');
+  if (!confirm('Remove all ' + n + ' captions? You can undo this (Ctrl+Z).')) return;
+  p.captions = []; if (app.selection && app.selection.type === 'caption') app.selection = null;
+  app.commit('Clear captions'); toast('Captions cleared. Undo brings them back.', 3500);
+};
+actions.capReplaceAll = function capReplaceAll() {
+  const find = $('capFind').value.trim(), rep = $('capReplace').value;
+  if (!find) return toast('Type the word to find first.');
+  const re = new RegExp('(^|[^\\p{L}\\p{N}])' + find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}])', 'giu');
+  let n = 0;
+  for (const c of app.project.captions) {
+    const t = c.text.replace(re, (_m, pre) => { n++; return pre + rep; });
+    if (t !== c.text) { c.text = t.replace(/\s+/g, ' ').trim(); reconcileWords(c); }
+  }
+  $('capFixOut').textContent = n ? n + (n === 1 ? ' fix made.' : ' fixes made.') : 'Not found.';
+  if (n) app.commit('Replace in captions');
+};
+bind('srtInput', 'change', async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  if (f.size > 20e6) return toast('That file is too large to be a subtitle file.', 4000);
+  const { captions: list, skipped } = parseSrt(await f.text());
+  if (!list.length) return toast('No captions found in “' + f.name + '”. It should be an .srt (or .vtt) subtitle file.', 5000);
+  const p = app.project;
+  if (p.captions.length && !confirm('Replace the ' + p.captions.length + ' captions you have with the ' + list.length + ' from “' + f.name + '”? You can undo this.')) return;
+  p.captions = list.slice(0, MAX_CAPTIONS); app.selection = null;
+  app.commit('Import captions'); toast(list.length + ' captions imported from “' + f.name + '”' + (skipped ? ' (' + skipped + ' unreadable skipped)' : '') + '.', 4000);
+});
+
+// ---- auto-transcribe dialog
+let transJob = null, transScope = null;
+const fmtEta = (s) => s == null || !isFinite(s) ? '' : s < 90 ? Math.max(1, Math.round(s)) + ' s left' : Math.round(s / 60) + ' min left';
+const isPhone = () => matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) < 700;
+function transSelection() {
+  const s = app.selection, item = s && selected(s.type), lay = layout(app.project);
+  if (!item) return null;
+  if (s.type === 'clip') { const it = lay.items.find(i => i.clip.id === item.id); return it && it.clip.kind === 'video' && it.clip.hasAudio !== false ? { start: it.start, end: it.end, name: item.name } : null; }
+  if (s.type === 'overlay') return item.kind === 'video' && item.hasAudio !== false ? { start: item.start, end: Math.min(lay.total, item.start + overlayLen(item)), name: item.name } : null;
+  if (s.type === 'audio') return { start: item.start, end: Math.min(lay.total, item.start + audioSpan(item, lay.total)), name: item.name };
+  return null;
+}
+let transCached = false;
+async function refreshTransNote() {
+  const model = $('tdModel').value, lang = $('tdLang').value, repo = trans.repoFor(model, lang), m = trans.MODELS[model];
+  const cached = transCached = await trans.isModelCached(repo);
+  $('tdNote').textContent = cached
+    ? 'Already on this device (' + m.note + '), so it works offline and nothing is downloaded. Your audio never leaves this device.'
+    : 'First time only: downloads about ' + m.mb + ' MB (' + m.note + ') plus a ' + trans.RUNTIME_MB + ' MB speech engine. It is kept on this device so it works offline afterwards. Your audio never leaves this device.';
+  $('tdGo').textContent = cached ? 'Start' : 'Download ' + (m.mb + trans.RUNTIME_MB) + ' MB & start';
+  $('tdFree').hidden = !(await trans.anyModelCached());
+}
+function refreshTransWarn() {
+  const sc = $('tdSelOnly').checked && transScope ? transScope : null, total = layout(app.project).total;
+  const dur = sc ? sc.end - sc.start : total;
+  const speed = trans.hooks.engine ? 1 : isPhone() ? 1.5 : 5; // rough realtime multiple of the tiny model in WebAssembly
+  const warn = $('tdWarn');
+  const slow = dur > 600 && isPhone() || dur > 2400;
+  warn.hidden = !slow && dur < 900;
+  warn.textContent = isPhone() && dur > 600
+    ? 'This is ' + fmtDuration(dur) + ' of audio. On a phone it can take roughly ' + Math.round(dur / speed / 60) + '+ min and the screen must stay on. A laptop is much faster: use Fast quality, or generate on a laptop and import the .srt here.'
+    : 'This is ' + fmtDuration(dur) + ' of audio. It can take roughly ' + Math.max(1, Math.round(dur / speed / 60)) + ' min on this device. Keep this window open.';
+}
+actions.transcribe = async function transcribeAction() {
+  if (transJob) return openDialog('transDialog');
+  const p = app.project;
+  if (!p.clips.length) return toast('Add a video first, then generate captions from its speech.', 4000);
+  if (!trans.hooks.engine && typeof Worker === 'undefined') return toast('This browser can’t run the speech engine.', 5000);
+  const total = layout(p).total;
+  if (!layout(p).items.some(i => i.clip.kind === 'video' && i.clip.hasAudio !== false && !i.clip.muted) && !(p.audio || []).some(a => a.voice && !a.muted)) return toast('There is no speech to caption: the clips are silent, muted or photos. (Voice and detached audio tracks count.)', 6000);
+  transScope = transSelection();
+  const n = p.captions.length;
+  $('tdSource').textContent = (n ? 'This replaces the ' + n + ' captions you have now (undo brings them back). ' : '') + 'Speech from your clips, voiceovers and detached audio (' + fmt(total) + '). Music is ignored.';
+  $('tdSelRow').hidden = !transScope; $('tdSelOnly').checked = false;
+  if (transScope) $('tdSelText').textContent = 'Only “' + (transScope.name || 'the selected item') + '” (' + fmt(transScope.start) + ' – ' + fmt(transScope.end) + '). Other captions stay.';
+  $('tdOptions').hidden = false; $('tdProgress').classList.remove('show'); $('tdBar').style.width = '0%';
+  $('tdGo').disabled = false; $('tdGo').classList.remove('busy'); $('tdCancel').textContent = 'Cancel';
+  refreshTransWarn(); await refreshTransNote();
+  openDialog('transDialog');
+};
+bind('tdModel', 'change', () => { refreshTransNote(); try { localStorage.setItem('ve-trans-model', $('tdModel').value); } catch { /* optional */ } });
+bind('tdLang', 'change', () => { refreshTransNote(); try { localStorage.setItem('ve-trans-lang', $('tdLang').value); } catch { /* optional */ } });
+bind('tdSelOnly', 'change', refreshTransWarn);
+bind('tdCustom', 'change', () => { try { localStorage.setItem('ve-trans-words', $('tdCustom').value); } catch { /* optional */ } });
+(() => {
+  for (const [k, m] of Object.entries(trans.MODELS)) $('tdModel').append(el('option', { value: k, text: m.label + ' (' + m.mb + ' MB' + (k === 'fast' ? ', best on phones' : ', slower') + ')' }));
+  for (const [k, l] of trans.LANGUAGES) $('tdLang').append(el('option', { value: k, text: l }));
+  try { const m = localStorage.getItem('ve-trans-model'), l = localStorage.getItem('ve-trans-lang'), w = localStorage.getItem('ve-trans-words'); if (trans.MODELS[m]) $('tdModel').value = m; if (l && [...$('tdLang').options].some(o => o.value === l)) $('tdLang').value = l; if (w) $('tdCustom').value = w; } catch { /* optional */ }
+})();
+bind('tdFree', 'click', async () => { if (await trans.clearModels()) { toast('Downloaded speech models removed.', 3000); refreshTransNote(); } });
+bind('tdGo', 'click', async () => {
+  if (transJob) return;
+  const p = app.project, ctl = new AbortController();
+  const model = $('tdModel').value, language = $('tdLang').value, custom = $('tdCustom').value;
+  const scope = $('tdSelOnly').checked && transScope ? { start: transScope.start, end: transScope.end } : null;
+  let engine = null;
+  transJob = { abort: () => { ctl.abort(); try { engine && engine.terminate(); } catch { /* gone */ } } };
+  $('tdOptions').hidden = true; $('tdProgress').classList.add('show'); $('tdGo').disabled = true; $('tdGo').classList.add('busy'); $('tdFree').hidden = true;
+  const set = (f, txt, right) => { $('tdBar').style.width = Math.round(clamp(f, 0, 1) * 100) + '%'; $('tdStatus').textContent = txt; $('tdPercent').textContent = right != null ? right : Math.round(clamp(f, 0, 1) * 100) + '%'; };
+  set(0, 'Starting…');
+  try { await navigator.wakeLock?.request('screen').then(l => (app._wakeT = l)); } catch { /* optional */ }
+  try { await navigator.storage?.persist?.(); } catch { /* optional */ }
+  const t0 = performance.now();
+  try {
+    const words = await trans.transcribe({
+      project: p, media, range: scope, language, model, custom, signal: ctl.signal, setEngine: (e) => { engine = e; },
+      onProgress: (m) => {
+        if (m.phase === 'download') set(m.frac, m.bytes && !transCached ? 'Downloading the speech model… ' + (m.bytes / 1048576).toFixed(0) + ' of ~' + (m.totalBytes / 1048576).toFixed(0) + ' MB' : 'Loading the speech model…');
+        else if (m.phase === 'load') set(1, 'Getting ready…', '');
+        else set(m.frac, 'Listening… ' + fmt(m.doneSec) + ' of ' + fmt(m.totalSec) + (m.etaSec != null && m.frac < 1 ? ' · ' + fmtEta(m.etaSec) : ''));
+      },
+    });
+    if (ctl.signal.aborted) throw new trans.TranscribeCancelled();
+    if (!words.length) { $('tdStatus').textContent = 'No speech was found.'; toast('No speech was found, so no captions were made. Check that the clip has audible speech.', 6000); return; }
+    const made = trans.wordsToCaptions(words, p.captionStyle.maxWords);
+    const keep = scope ? p.captions.filter(c => c.end <= scope.start + 1e-3 || c.start >= scope.end - 1e-3) : [];
+    p.captions = [...keep, ...made].sort((a, b) => a.start - b.start).slice(0, MAX_CAPTIONS);
+    p.captionStyle.show = true; app.selection = null;
+    app.commit('Generate captions');
+    set(1, 'Done', '100%');
+    closeDialog('transDialog'); showTab('captions');
+    const secs = Math.round((performance.now() - t0) / 1000);
+    toast(made.length + ' captions made in ' + (secs < 90 ? secs + ' s' : Math.round(secs / 60) + ' min') + '. Tap one on the timeline to fix a word. Names may need a check.', 7000);
+  } catch (e) {
+    if (e instanceof trans.TranscribeCancelled || ctl.signal.aborted) { toast('Captions cancelled. Nothing was changed.', 3500); closeDialog('transDialog'); }
+    else {
+      console.warn('Transcribe:', e);
+      const offline = !navigator.onLine;
+      const msg = (offline ? 'The speech model needs to be downloaded once, and this device is offline. Connect to the internet and try again. ' : 'Could not make captions: ') + (offline ? '' : ((e && e.message) || e));
+      $('tdOptions').hidden = false; $('tdProgress').classList.remove('show'); $('tdWarn').hidden = false; $('tdWarn').textContent = msg; toast(msg, 8000);
+    }
+  } finally {
+    transJob = null; try { app._wakeT && app._wakeT.release(); } catch { /* ignore */ }
+    $('tdGo').disabled = false; $('tdGo').classList.remove('busy');
+    if ($('transDialog').open && !$('tdOptions').hidden) { refreshTransNote(); }
+  }
+});
+bind('tdCancel', 'click', () => { if (transJob) transJob.abort(); else closeDialog('transDialog'); });
+bind('transDialog', 'close', () => { if (transJob) transJob.abort(); });
 actions.extractAudio = async function extractAudioAction() {
   if (extractJob) { openDialog('extractDialog'); return; }
   const src = extractSource();

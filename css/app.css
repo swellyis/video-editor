@@ -138,6 +138,16 @@ html[data-installed] .install-btn,html[data-installed] .install-help,html[data-i
 .tl-video{height:68px;background:repeating-linear-gradient(90deg,transparent 0 40px,rgba(255,255,255,.012) 40px 80px)}
 .tl-video.empty::after{content:"Your clips appear here — drag to reorder, drag edges to trim";position:absolute;left:14px;top:24px;font-size:11px;color:#6d6d67;pointer-events:none;white-space:nowrap}
 .tl-text{min-height:34px}
+.tl-caps{min-height:34px}
+.tl-capitem{height:24px;background:#0f6b5c;color:#fff;overflow:hidden}
+.tl-capitem span{pointer-events:none}
+.tl-capitem.sel{outline:2px solid #fff;outline-offset:-2px}
+.cap-head{flex:0 0 auto}
+.cap-nav{display:inline-flex;gap:6px}
+.cap-nav .btn{min-width:40px;font-size:18px;line-height:1}
+details.more{margin-top:12px}
+details.more>summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);min-height:32px;display:flex;align-items:center}
+details.more[open]>summary{color:var(--ink)}
 .tl-blur{min-height:44px}
 .tl-blurritem{height:26px;background:#2d6b8f;color:#fff}
 .tl-blurritem.animated span::after{content:" ✦";opacity:.8}
@@ -186,7 +196,7 @@ html[data-installed] .install-btn,html[data-installed] .install-help,html[data-i
 
 /* inspector */
 .inspector{grid-area:inspector;min-width:0;background:var(--surface);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;contain:size}
-.tabs{display:grid;grid-template-columns:repeat(6,1fr);height:44px;border-bottom:1px solid var(--line);flex:none}
+.tabs{display:grid;grid-template-columns:repeat(7,1fr);height:44px;border-bottom:1px solid var(--line);flex:none}
 .tabs button{border:0;background:transparent;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;padding:0}
 .tabs button.active{color:var(--ink);box-shadow:inset 0 -2px var(--accent)}
 .tab-panel{display:none;padding:16px;overflow-y:auto;min-height:0;flex:1}
