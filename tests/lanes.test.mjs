@@ -1,7 +1,7 @@
 // Free placement: gaps on the main track, stacked lanes, no same-lane overlap, clip <-> overlay conversion, old-project migration.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newProject, migrate, layout, normalizeClip, newText, newBlur, newAudio, normalizeOverlay, ensureLanes, laneOf, byLane, placeLaneItem, moveClipTo, removeClip, clipToOverlay, overlayToClip, overlaysAt, insertLane, freeSpot, nearestFree, splitItem } from '../js/model.js';
+import { newProject, migrate, layout, normalizeClip, newText, newBlur, newAudio, normalizeOverlay, ensureLanes, laneOf, byLane, placeItem, planItem, moveClipTo, removeClip, clipToOverlay, overlaysAt, insertLane, nearestFree, splitItem, findItem, laneCount } from '../js/model.js';
 
 const clip = (id, out, extra = {}) => normalizeClip({ id, mediaId: 'm_' + id, name: id, kind: 'video', srcDuration: 60, in: 0, out, ...extra });
 const proj = (...clips) => { const p = newProject('T'); p.clips = clips; return p; };
@@ -45,61 +45,113 @@ test('deleting a clip: Ripple on closes the hole, Ripple off keeps the next clip
   assert.equal(layout(c).items[0].start, 4);
 });
 
-test('texts without lanes stack on what they overlap, in list order (same picture as before lanes)', () => {
-  const p = newProject('T'); p.clips = [clip('a', 20)];
-  p.texts = [txt('t1', 0, 5), txt('t2', 2, 6), txt('t3', 10, 12), txt('t4', 3, 4)];
+const laneIds = (p, kind) => p[{ text: 'texts', overlay: 'overlays', audio: 'audio', blur: 'blurs', clip: 'clips', caption: 'captions' }[kind]].map(x => [x.id, laneOf(x)]);
+const cap = (id, s, e) => ({ id, start: s, end: e, text: id });
+
+test('new items without a lane: same kind shares a free lane, overlap opens a lane above, kinds sit where the old tracks were', () => {
+  const p = newProject('T'); p.clips = [clip('a', 30)];
+  p.texts = [txt('t1', 0, 5), txt('t2', 8, 9), txt('t3', 3, 6)];
+  p.overlays = [ovl('o1', 0, 4)]; p.audio = [Object.assign(newAudio({ id: 'm1', duration: 30 }, 1), { id: 'au1' })];
   ensureLanes(p);
-  assert.deepEqual(p.texts.map(laneOf), [0, 1, 0, 2]);
-  assert.deepEqual(byLane(p.texts).map(t => t.id), ['t1', 't3', 't2', 't4']);
+  // audio at the bottom, then the clip, the overlay above it, and the texts on top (t3 overlaps t1, so it gets its own lane)
+  assert.equal(laneOf(p.audio[0]), 0); assert.equal(laneOf(p.clips[0]), 1); assert.equal(laneOf(p.overlays[0]), 2);
+  assert.deepEqual(p.texts.map(laneOf), [3, 3, 4]);
+  assert.equal(laneCount(p), 5);
 });
 
-test('overlap inside one lane is split into a new lane; empty lanes close up', () => {
-  const p = newProject('T'); p.clips = [clip('a', 20)];
-  p.texts = [{ ...txt('t1', 0, 5), lane: 0 }, { ...txt('t2', 4, 8), lane: 0 }, { ...txt('t3', 9, 10), lane: 3 }];
+test('lanes are generic: any kind of item can share a lane when they do not overlap in time, and overlap splits them', () => {
+  const p = newProject('T'); p.clips = [clip('a', 30)];
+  p.texts = [{ ...txt('t1', 0, 5), lane: 0 }]; p.captions = [{ ...cap('c1', 10, 12), lane: 0 }]; p.audio = [{ ...newAudio({ id: 'm1', duration: 30 }, 14), id: 'au', lane: 0, out: 4 }];
+  p.clips[0].lane = 1; p.laneModel = 2;
   ensureLanes(p);
-  assert.deepEqual(p.texts.map(laneOf), [0, 1, 2]); // t2 pushed up, t3's empty lanes closed
+  assert.deepEqual([laneOf(p.texts[0]), laneOf(p.captions[0]), laneOf(p.audio[0])], [0, 0, 0]); // text, caption and music on ONE lane
+  p.texts[0].start = 9.5; p.texts[0].end = 11; ensureLanes(p); // now over the caption
+  assert.notEqual(laneOf(p.captions[0]), laneOf(p.texts[0])); // one of them moved to a new lane
+  assert.equal(laneOf(p.clips[0]), 2); // the lane above was opened and everything higher moved up
 });
 
-test('placeLaneItem: nearest free spot when close, otherwise a new lane above; new lane zones', () => {
+test('empty lanes close up', () => {
+  const p = newProject('T'); p.clips = [clip('a', 20)]; p.clips[0].lane = 5;
+  p.texts = [{ ...txt('t1', 0, 5), lane: 2 }, { ...txt('t2', 4, 8), lane: 9 }]; p.laneModel = 2;
+  ensureLanes(p);
+  assert.deepEqual([laneOf(p.texts[0]), laneOf(p.texts[1]), laneOf(p.clips[0])], [0, 2, 1]);
+});
+
+test('placeItem: nearest free spot when close, otherwise a new lane above; new-lane drops at either end', () => {
   const p = newProject('T'); p.clips = [clip('a', 30)];
   p.texts = [txt('t1', 0, 4), txt('t2', 8, 12), txt('m', 20, 22)]; ensureLanes(p);
-  const m = p.texts[2];
-  let r = placeLaneItem(p, 'text', m, 4.5, 0); // free gap 4..8 holds 2 s
-  assert.deepEqual([r.lane, r.start, r.pushed], [0, 4.5, false]);
-  r = placeLaneItem(p, 'text', m, 3, 0); // overlaps t1: nearest free is 4 (1 s away, within half the length 1.0)
-  assert.equal(r.start, 4); assert.equal(r.lane, 0);
-  r = placeLaneItem(p, 'text', m, 9, 0); // inside t2: nearest free spot is far -> new lane above
-  assert.equal(r.pushed, true); assert.equal(m.lane, 1); assert.equal(m.start, 9); assert.equal(m.end, 11);
-  placeLaneItem(p, 'text', m, 30, { newAt: 0 }); // a new lane below everything
-  assert.equal(m.lane, 0); assert.deepEqual(p.texts.filter(t => t.id !== 'm').map(laneOf), [1, 1]);
+  const m = p.texts[2], L = laneOf(p.texts[0]);
+  let r = placeItem(p, 'text', m, 4.5, L); // free gap 4..8 holds 2 s
+  assert.deepEqual([r.lane, r.start, r.pushed], [L, 4.5, false]);
+  r = placeItem(p, 'text', m, 3, L); // overlaps t1: nearest free is 4 (within half its length)
+  assert.equal(r.start, 4); assert.equal(r.lane, L);
+  r = placeItem(p, 'text', m, 9, L); // inside t2: nearest free spot is far -> a new lane above
+  assert.equal(r.pushed, true); assert.equal(laneOf(m), L + 1); assert.equal(m.start, 9); assert.equal(m.end, 11);
+  placeItem(p, 'text', m, 30, { newAt: 0 }); // a new lane below everything (the text now sits under the clip)
+  assert.equal(laneOf(m), 0); assert.ok(laneOf(p.texts[0]) > laneOf(p.clips[0]) - 1);
 });
 
-test('clipToOverlay and overlayToClip convert in place and keep the timing', () => {
-  const p = proj(clip('a', 4), clip('b', 4, { speed: 2, volume: 0.5 }), clip('c', 4));
-  const o = clipToOverlay(p, 'b', false);
-  assert.equal(o.start, 4); assert.equal(o.speed, 2); assert.equal(o.volume, 0.5);
-  assert.deepEqual(layout(p).items.map(i => [i.clip.id, i.start]), [['a', 0], ['c', 6]]); // Ripple off: c stays where it was
-  const c2 = overlayToClip(p, o.id, 4.2);
-  assert.equal(p.overlays.length, 0);
-  assert.deepEqual(layout(p).items.map(i => [i.clip.id === 'a' || i.clip.id === 'c' ? i.clip.id : 'new', i.start]), [['a', 0], ['new', 4], ['c', 6]]);
-  assert.equal(c2.speed, 2);
+test('any item on any lane: text under the clip, music above, a video on a lane with captions', () => {
+  const p = newProject('T'); p.clips = [clip('a', 30)]; p.texts = [txt('t', 2, 4)]; p.audio = [Object.assign(newAudio({ id: 'm1', duration: 30 }, 0), { id: 'au', out: 4 })];
+  p.captions = [cap('c1', 5, 8)]; ensureLanes(p);
+  const t = p.texts[0], au = p.audio[0], c = p.captions[0];
+  placeItem(p, 'text', t, 2, { newAt: 0 }); // the text goes to a new lowest lane
+  assert.equal(laneOf(t), 0); assert.ok(laneOf(p.clips[0]) > 0);
+  const top = laneCount(p);
+  placeItem(p, 'audio', au, 0, { newAt: top }); // music on the very top lane
+  assert.equal(laneOf(au), laneCount(p) - 1);
+  placeItem(p, 'caption', c, 12, laneOf(au)); // a caption onto the music lane (free there)
+  assert.equal(laneOf(c), laneOf(au)); assert.equal(c.start, 12);
+});
+
+test('captions never overlap each other, even on different lanes', () => {
+  const p = newProject('T'); p.clips = [clip('a', 30)]; p.captions = [cap('c1', 1, 3), cap('c2', 6, 8)]; ensureLanes(p);
+  const r = placeItem(p, 'caption', p.captions[1], 2, { newAt: 0 });
+  assert.ok(r.start >= 3 - 1e-6 || r.start + 2 <= 1 + 1e-6);
+});
+
+test('a main clip dropped over another main clip becomes a full-frame layer; elsewhere it stays a clip with its lane', () => {
+  const p = proj(clip('a', 4), clip('b', 4, { speed: 2, volume: 0.5, width: 1920, height: 1080 }), clip('c', 4)); ensureLanes(p);
+  p.texts = [txt('t', 0, 2)]; ensureLanes(p);
+  const l0 = laneOf(p.clips[0]);
+  const r = placeItem(p, 'clip', p.clips[1], 1, { newAt: l0 + 1 }); // over clip a (0..4) on a new lane
+  assert.equal(r.stack, true); assert.equal(r.kind, 'overlay');
+  assert.equal(p.overlays.length, 1); assert.equal(p.overlays[0].start, 1); assert.equal(p.overlays[0].speed, 2); assert.equal(p.overlays[0].volume, 0.5);
+  assert.equal(p.overlays[0].x, 0.5); assert.equal(p.overlays[0].w, 1); assert.equal(laneOf(p.overlays[0]), l0 + 1);
+  const q = proj(clip('a', 4), clip('b', 4)); ensureLanes(q);
+  const r2 = placeItem(q, 'clip', q.clips[1], 9, { newAt: 5 }); // far past the end, on a lane of its own: stays a clip
+  assert.equal(r2.kind, 'clip'); assert.equal(q.clips[1].gap, 5); assert.equal(laneOf(q.clips[1]) > laneOf(q.clips[0]), true);
 });
 
 test('overlays: higher lane is drawn later (on top)', () => {
   const p = newProject('T'); p.clips = [clip('a', 20)];
   p.overlays = [ovl('o1', 0, 10), ovl('o2', 0, 10)]; ensureLanes(p);
   assert.deepEqual(overlaysAt(p, 1).map(o => o.id), ['o1', 'o2']);
-  p.overlays[0].lane = 1; p.overlays[1].lane = 0;
+  p.overlays[0].lane = laneOf(p.overlays[1]) + 1; ensureLanes(p);
   assert.deepEqual(overlaysAt(p, 1).map(o => o.id), ['o2', 'o1']);
 });
 
-test('migrate: old projects keep clips, order and timing; gaps and lanes default to the old look', () => {
-  const old = { schema: 5, name: 'Old', clips: [clip('a', 4), clip('b', 4)], texts: [txt('t1', 0, 3), txt('t2', 1, 2)], overlays: [], audio: [newAudio({ id: 'm1', duration: 30 }, 2)], blurs: [newBlur(0, 2)] };
+test('migrate: an old project (no lanes at all) keeps its drawing order: sound below, clips, overlays, blur, text, captions', () => {
+  const old = { schema: 5, name: 'Old', clips: [clip('a', 4), clip('b', 4)], texts: [txt('t1', 0, 3), txt('t2', 1, 2)], overlays: [ovl('o1', 0, 3), ovl('o2', 1, 2)], audio: [newAudio({ id: 'm1', duration: 30 }, 2)], blurs: [newBlur(0, 2)], captions: [cap('c1', 0, 2)] };
   for (const c of old.clips) delete c.gap;
   const p = migrate(JSON.parse(JSON.stringify(old)));
   assert.deepEqual(layout(p).items.map(i => [i.start, i.end]), [[0, 4], [4, 8]]);
-  assert.deepEqual(p.texts.map(laneOf), [0, 1]); assert.equal(p.audio[0].lane, 0); assert.equal(p.blurs[0].lane, 0);
   assert.ok(p.clips.every(c => c.gap === 0));
+  const ln = (x) => laneOf(x);
+  assert.equal(p.laneModel, 2);
+  assert.ok(ln(p.audio[0]) < ln(p.clips[0]) && ln(p.clips[0]) === ln(p.clips[1]));
+  assert.ok(ln(p.clips[0]) < ln(p.overlays[0]) && ln(p.overlays[0]) < ln(p.overlays[1]));
+  assert.ok(ln(p.overlays[1]) < ln(p.blurs[0]) && ln(p.blurs[0]) < ln(p.texts[0]) && ln(p.texts[0]) < ln(p.texts[1]) && ln(p.texts[1]) < ln(p.captions[0]));
+});
+
+test('migrate: a project saved with per-kind lanes (the previous version) keeps its stacking inside each kind', () => {
+  const old = { schema: 5, name: 'Prev', clips: [clip('a', 20)], texts: [{ ...txt('t1', 0, 3), lane: 0 }, { ...txt('t2', 1, 2), lane: 1 }], overlays: [{ ...ovl('o1', 0, 3), lane: 1 }, { ...ovl('o2', 1, 2), lane: 0 }] };
+  const p = migrate(JSON.parse(JSON.stringify(old)));
+  assert.ok(laneOf(p.overlays[1]) < laneOf(p.overlays[0]));
+  assert.ok(laneOf(p.texts[0]) < laneOf(p.texts[1]));
+  assert.ok(laneOf(p.overlays[0]) < laneOf(p.texts[0]));
+  const again = migrate(JSON.parse(JSON.stringify(p))); // migrating twice changes nothing
+  assert.deepEqual(laneIds(again, 'text'), laneIds(p, 'text')); assert.deepEqual(laneIds(again, 'overlay'), laneIds(p, 'overlay'));
 });
 
 test('splitting a clip after a gap keeps the gap before the first half only', () => {
@@ -109,10 +161,11 @@ test('splitting a clip after a gap keeps the gap before the first half only', ()
   assert.deepEqual(layout(p).items.map(i => [i.start, i.end]), [[0, 4], [7, 10], [10, 13]]);
 });
 
-test('insertLane / freeSpot / nearestFree basics', () => {
+test('insertLane / findItem / nearestFree basics', () => {
   assert.equal(nearestFree([[2, 4]], 1, 3).dist, 1);
   assert.equal(nearestFree([[2, 4], [5, 9]], 1, 4.2).start, 4);
-  const p = newProject('T'); p.clips = [clip('a', 30)]; p.texts = [{ ...txt('t', 0, 2), lane: 0 }, { ...txt('u', 0, 2), lane: 1 }];
-  insertLane(p, 'text', 1); assert.deepEqual(p.texts.map(laneOf), [0, 2]);
-  assert.equal(freeSpot(p, 'text', 0, p.texts[1], 2, 1, 30).start, 2);
+  const p = newProject('T'); p.clips = [clip('a', 30)]; p.laneModel = 2; p.clips[0].lane = 0; p.texts = [{ ...txt('t', 0, 2), lane: 1 }, { ...txt('u', 0, 2), lane: 2 }];
+  insertLane(p, 1); assert.deepEqual(p.texts.map(laneOf), [2, 3]);
+  assert.equal(findItem(p, 'u').kind, 'text'); assert.equal(findItem(p, 'a').kind, 'clip'); assert.equal(findItem(p, 'zzz'), null);
+  assert.ok(planItem(p, 'text', p.texts[0], 5, 3));
 });

@@ -53,7 +53,7 @@ export function newProject(name) {
     schema: SCHEMA, id: uid('prj'), name, created: now, updated: now,
     settings: { ratio: '16:9', res: 1080, fps: 30, quality: 'high', format: 'auto', fit: 'contain', bg: 'black', bgColor: '#000000', imageDuration: 4, endFade: 0 },
     color: defaultColor(),
-    clips: [], overlays: [], texts: [], blurs: [], audio: [], markers: [],
+    laneModel: 2, clips: [], overlays: [], texts: [], blurs: [], audio: [], markers: [],
     captions: [], captionStyle: defaultCaptionStyle(),
     logo: null,
     thumb: { time: null, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow', format: 'auto', fit: 'cover', type: 'jpg', pip: true, logo: true },
@@ -77,6 +77,7 @@ export function migrate(p) {
   out.captionStyle = normalizeCaptionStyle(p.captionStyle);
   if ((p.schema || 0) < 5 && out.thumb.time === 0) out.thumb.time = null; // before v5, 0 meant "not chosen yet"
   sanitizeProject(out);
+  out.laneModel = p.laneModel === 2 ? 2 : 0; // 0: saved before every kind of item shared one set of lanes
   ensureLanes(out);
   out.schema = SCHEMA;
   return out;
@@ -871,14 +872,27 @@ export function moveClip(project, from, to) {
 }
 
 
-// ---------- free placement: lanes and gaps ----------
+// ---------- free placement: one stack of lanes for every kind of item, and gaps on the main sequence ----------
 const round3 = (v) => Math.round(v * 1000) / 1000;
 const EPS = 1e-3;
-/** Items that live in stacked lanes. Lane 0 is the bottom one; a higher lane is drawn on top (picture) and shown higher up in the timeline. */
-export const LANE_KINDS = ['overlay', 'text', 'blur', 'audio'];
-export const laneList = (project, kind) => (kind === 'overlay' ? project.overlays : kind === 'text' ? project.texts : kind === 'blur' ? project.blurs : kind === 'audio' ? project.audio : null) || [];
+/**
+ * Every item of the timeline (main clips, overlays, text, blur regions, music/voice, captions) sits on a `lane`: an integer, 0 = the
+ * bottom lane. Lanes are generic: any kind of item can be on any lane, and lanes only exist while an item is on them. A higher lane is
+ * drawn on top in the preview and the export (audio from every lane is mixed). Markers belong to the ruler, not to a lane.
+ * RANK is only used to choose a lane for something that has none yet (it goes where the old fixed tracks used to be) and to convert
+ * projects saved before lanes were shared: picture < overlays < blur < text < captions, with sound below everything.
+ */
+export const ITEM_KINDS = ['audio', 'clip', 'overlay', 'blur', 'text', 'caption'];
+const RANK = { audio: 0, clip: 1, overlay: 2, blur: 3, text: 4, caption: 5 };
+export const listOf = (project, kind) => (kind === 'clip' ? project.clips : kind === 'overlay' ? project.overlays : kind === 'text' ? project.texts : kind === 'blur' ? project.blurs : kind === 'audio' ? project.audio : kind === 'caption' ? project.captions : null) || [];
 export const laneOf = (it) => (Number.isInteger(it.lane) && it.lane >= 0 ? it.lane : 0);
-/** [start, end] on the timeline of a lane item. */
+const hasLane = (it) => Number.isInteger(it.lane) && it.lane >= 0;
+/** Spans (start/end on the timeline) of all items, computed once per call: `span(kind, item)`. */
+export function spanCtx(project) {
+  const lay = layout(project), cs = new Map(lay.items.map(i => [i.clip, [i.start, i.end]]));
+  return { lay, total: lay.total, span: (kind, it) => (kind === 'clip' ? cs.get(it) || [0, 0] : laneSpan(kind, it, lay.total)) };
+}
+/** [start, end] on the timeline of a lane item (not main clips: those come from layout). */
 export function laneSpan(kind, it, total) {
   if (kind === 'overlay') return [it.start, it.start + overlayLen(it)];
   if (kind === 'audio') return [it.start, it.start + audioSpan(it, total)];
@@ -889,50 +903,95 @@ export function byLane(list) {
   if (!list.some(x => laneOf(x))) return list;
   return list.map((x, i) => [x, i]).sort((a, b) => laneOf(a[0]) - laneOf(b[0]) || a[1] - b[1]).map(a => a[0]);
 }
+export function allItems(project, ctx = spanCtx(project)) {
+  const out = [];
+  for (const kind of ITEM_KINDS) for (const item of listOf(project, kind)) out.push({ kind, item, span: ctx.span(kind, item) });
+  return out;
+}
+const overlaps = (a, b) => a[0] < b[1] - EPS && b[0] < a[1] - EPS;
+/** Open a new, empty lane at index `at` (items at `at` and above move up one). */
+export function insertLane(project, at) { for (const k of ITEM_KINDS) for (const it of listOf(project, k)) if (hasLane(it) && it.lane >= at) it.lane += 1; }
+export const laneCount = (project) => ITEM_KINDS.reduce((n, k) => listOf(project, k).reduce((m, it) => Math.max(m, laneOf(it) + 1), n), 0);
+/** Lanes used before lanes were shared by all kinds (one set of lanes per kind): stack them in the order the kinds used to be drawn. */
+function legacyLanes(project) {
+  const total = layout(project).total;
+  const perKind = (kind, list, span) => {
+    if (!list.length) return 0;
+    const sp = new Map(list.map(it => [it, span(it)]));
+    const placed = list.filter(hasLane);
+    for (const it of list) {
+      if (hasLane(it)) continue;
+      let l = 0; for (const o of placed) if (overlaps(sp.get(it), sp.get(o))) l = Math.max(l, laneOf(o) + 1);
+      it.lane = l; placed.push(it);
+    }
+    const byStart = [...list].sort((a, b) => laneOf(a) - laneOf(b) || sp.get(a)[0] - sp.get(b)[0]), done = new Set();
+    for (const it of byStart) {
+      const own = laneOf(it);
+      const fits = (l) => !list.some(o => o !== it && laneOf(o) === l && (l !== own || done.has(o)) && overlaps(sp.get(it), sp.get(o)));
+      if (!fits(own)) { let l = own + 1; while (!fits(l)) l++; it.lane = l; }
+      done.add(it);
+    }
+    const used = [...new Set(list.map(laneOf))].sort((a, b) => a - b);
+    for (const it of list) it.lane = used.indexOf(laneOf(it));
+    return used.length;
+  };
+  let base = 0;
+  for (const kind of ITEM_KINDS) {
+    const list = listOf(project, kind);
+    const n = kind === 'clip' ? (list.length ? 1 : 0) : perKind(kind, list, (it) => laneSpan(kind, it, total));
+    if (kind === 'clip') for (const c of list) c.lane = 0;
+    for (const it of list) it.lane += base;
+    base += n;
+  }
+}
 /**
- * Give every lane item a lane. Items that have none (old projects, items just added) are stacked on top of whatever they overlap in
- * time, in list order, which keeps the picture exactly as it was drawn before lanes existed. Two items that overlap inside one lane
- * (after a trim or a typed time) are separated: the later one moves to the next lane up where it fits. Empty lanes are closed up.
+ * Give every item a lane and keep the lanes tidy. Items without a lane (just added, or a project from before lanes) go to a free lane
+ * that holds the same kind of item, else to a new lane where that kind used to sit (sound at the bottom, pictures above it, captions
+ * on top). Two items that overlap inside one lane (after a trim, a ripple or a typed time) are separated: the later one gets a new
+ * lane just above. Main clips never push each other (a crossfade overlaps by design). Empty lanes are closed up.
  * Returns true if anything changed.
  */
 export function ensureLanes(project) {
   let changed = false;
-  const total = layout(project).total;
-  for (const kind of LANE_KINDS) {
-    const list = laneList(project, kind); if (!list.length) continue;
-    const sp = new Map(list.map(it => [it, laneSpan(kind, it, total)]));
-    const ovl = (a, b) => a[0] < b[1] - EPS && b[0] < a[1] - EPS;
-    const placed = list.filter(it => Number.isInteger(it.lane) && it.lane >= 0);
-    for (const it of list) {
-      if (placed.includes(it)) continue;
-      let l = 0; for (const o of placed) if (ovl(sp.get(it), sp.get(o))) l = Math.max(l, laneOf(o) + 1);
-      it.lane = l; placed.push(it); changed = true;
+  if (project.laneModel !== 2) { legacyLanes(project); project.laneModel = 2; changed = true; }
+  const ctx = spanCtx(project), items = allItems(project, ctx);
+  // 1. items without a lane
+  for (const x of items) {
+    if (hasLane(x.item)) continue;
+    const placed = items.filter(y => hasLane(y.item));
+    const lanes = [...new Set(placed.map(y => y.item.lane))].sort((a, b) => a - b);
+    let pick = lanes.find(l => placed.every(y => y.item.lane !== l || (y.kind === x.kind && (x.kind === 'clip' || !overlaps(y.span, x.span)))) && placed.some(y => y.item.lane === l));
+    if (pick === undefined) {
+      let at = 0;
+      if (x.kind !== 'audio') for (const y of placed) if (RANK[y.kind] <= RANK[x.kind]) at = Math.max(at, y.item.lane + 1);
+      insertLane(project, at); pick = at;
     }
-    const byStart = [...list].sort((a, b) => laneOf(a) - laneOf(b) || sp.get(a)[0] - sp.get(b)[0]);
-    const done = new Set();
-    for (const it of byStart) {
-      const own = laneOf(it);
-      // in its own lane only the items already settled count (the earlier one stays); in lanes above, everything counts
-      const fits = (l) => !list.some(o => o !== it && laneOf(o) === l && (l !== own || done.has(o)) && ovl(sp.get(it), sp.get(o)));
-      if (!fits(own)) { let l = own + 1; while (!fits(l)) l++; it.lane = l; changed = true; }
-      done.add(it);
-    }
-    const used = [...new Set(list.map(laneOf))].sort((a, b) => a - b);
-    if (used.some((l, i) => l !== i)) { for (const it of list) it.lane = used.indexOf(laneOf(it)); changed = true; }
+    x.item.lane = pick; changed = true;
   }
+  // 2. overlaps inside one lane
+  for (let round = 0; round < 40; round++) {
+    const byL = new Map();
+    for (const x of items) { const l = x.item.lane; if (!byL.has(l)) byL.set(l, []); byL.get(l).push(x); }
+    let moved = false;
+    for (const l of [...byL.keys()].sort((a, b) => a - b).reverse()) {
+      const list = byL.get(l).sort((a, b) => a.span[0] - b.span[0] || (a.kind === 'clip' ? -1 : 0) - (b.kind === 'clip' ? -1 : 0));
+      const movers = []; let last = null;
+      for (const x of list) {
+        if (last && x.span[0] < last.span[1] - EPS && !(x.kind === 'clip' && last.kind === 'clip')) {
+          // keep the main clip where it is; otherwise the later one moves up
+          if (last.kind === 'clip' || x.kind !== 'clip') movers.push(x); else { movers.push(last); last = x; }
+        } else if (!last || x.span[1] > last.span[1]) last = x;
+      }
+      if (movers.length) { insertLane(project, l + 1); for (const x of movers) x.item.lane = l + 1; moved = true; changed = true; break; }
+    }
+    if (!moved) break;
+  }
+  // 3. close up empty lanes
+  const used = [...new Set(items.map(x => x.item.lane))].sort((a, b) => a - b);
+  if (used.some((l, i) => l !== i)) { for (const x of items) x.item.lane = used.indexOf(x.item.lane); changed = true; }
   return changed;
 }
-/** Open a new, empty lane at index `at` (items at `at` and above move up one). */
-export function insertLane(project, kind, at) { for (const it of laneList(project, kind)) if (laneOf(it) >= at) it.lane = laneOf(it) + 1; }
-export const laneCount = (project, kind) => laneList(project, kind).reduce((n, it) => Math.max(n, laneOf(it) + 1), 1);
-/**
- * Where an item of length `len` can sit in `lane` without touching its neighbours, as close to `desired` as possible.
- * Returns { start, dist } (dist 0 = the wish is free). `skip` is the item being moved.
- */
-export function freeSpot(project, kind, lane, skip, len, desired, total) {
-  const others = laneList(project, kind).filter(o => o !== skip && laneOf(o) === lane).map(o => laneSpan(kind, o, total)).sort((a, b) => a[0] - b[0]);
-  return nearestFree(others, len, desired);
-}
+/** The nearest start to `desired` where an item of length `len` fits between `spans` (sorted or not). Returns { start, dist }. */
 export function nearestFree(spans, len, desired) {
   const want = Math.max(0, desired);
   const fits = (s) => s >= -1e-9 && spans.every(o => s + len <= o[0] + EPS || s >= o[1] - EPS);
@@ -944,31 +1003,61 @@ export function nearestFree(spans, len, desired) {
   }
   return best || { start: want, dist: 0 };
 }
+/** The item {kind,item} lookup by id across every list. */
+export function findItem(project, id) {
+  for (const kind of ITEM_KINDS) { const item = listOf(project, kind).find(x => x.id === id); if (item) return { kind, item }; }
+  return null;
+}
 /**
- * Move one lane item to `start` in `lane`. `lane` may be an existing lane number, or { newAt: n } to open a new lane at index n first.
- * Same-lane overlap is never created: the item takes the nearest free spot of its lane when that is close (half its length, at least half
- * a second), otherwise it gets a new lane just above. Returns { lane, start, pushed }.
+ * Where would this item land if dropped at `start` on `lane`? `lane` is an existing lane number or { newAt: n } (a new lane opened at n).
+ * Never overlaps inside a lane (CapCut): the item takes the nearest free spot of the lane when that is close (half its length, at least
+ * half a second), otherwise it gets a new lane just above. Captions also never overlap each other in time (there is one caption
+ * line on screen). A main clip that would sit over another main clip is `stack`ed: it becomes a full-frame layer.
+ * Returns { lane, newAt, start, pushed, stack }.
  */
-export function planLaneItem(project, kind, item, start, lane) {
-  const total = layout(project).total, [s0, e0] = laneSpan(kind, item, total), len = e0 - s0;
-  if (lane && typeof lane === 'object') return { lane: lane.newAt, newAt: lane.newAt, start: Math.max(0, start), pushed: false };
-  const spot = freeSpot(project, kind, lane, item, len, start, total);
-  if (spot.dist <= Math.max(len / 2, 0.5) + 1e-9) return { lane, newAt: null, start: spot.start, pushed: false };
-  return { lane: lane + 1, newAt: lane + 1, start: Math.max(0, start), pushed: true };
+export function planItem(project, kind, item, start, lane, ctx = spanCtx(project)) {
+  const [s0, e0] = ctx.span(kind, item), len = e0 - s0;
+  const others = (l) => {
+    const sp = [];
+    for (const k of ITEM_KINDS) for (const o of listOf(project, k)) {
+      if (o === item) continue;
+      if (laneOf(o) === l || (kind === 'caption' && k === 'caption')) sp.push(ctx.span(k, o));
+    }
+    return sp;
+  };
+  let plan;
+  if (lane && typeof lane === 'object') {
+    const sp = others(-1), spot = kind === 'caption' ? nearestFree(sp, len, start) : { start: Math.max(0, start) };
+    plan = { lane: lane.newAt, newAt: lane.newAt, start: spot.start, pushed: false };
+  } else {
+    const spot = nearestFree(others(lane), len, start);
+    plan = spot.dist <= Math.max(len / 2, 0.5) + 1e-9
+      ? { lane, newAt: null, start: spot.start, pushed: false }
+      : { lane: lane + 1, newAt: lane + 1, start: kind === 'caption' ? nearestFree(others(-1), len, start).start : Math.max(0, start), pushed: true };
+  }
+  plan.stack = kind === 'clip' && ctx.lay.items.some(i => i.clip !== item && overlaps([plan.start, plan.start + len], [i.start, i.end]));
+  return plan;
 }
-export function placeLaneItem(project, kind, item, start, lane) {
-  const plan = planLaneItem(project, kind, item, start, lane);
-  if (plan.newAt != null) insertLane(project, kind, plan.newAt);
-  setLaneItemStart(kind, item, plan.start);
-  item.lane = plan.lane;
+/** Move any item to `start` on `lane` (see planItem). A main clip over another main clip becomes a layer. Returns the plan (+ `item`, the item now on the timeline). */
+export function placeItem(project, kind, item, start, lane, opts = {}) {
+  const plan = planItem(project, kind, item, start, lane);
+  if (plan.newAt != null) insertLane(project, plan.newAt);
+  plan.item = item; plan.kind = kind;
+  if (kind === 'clip') {
+    if (plan.stack) {
+      const o = clipToOverlay(project, item.id, opts.ripple, plan.start); o.lane = plan.lane; plan.item = o; plan.kind = 'overlay';
+    } else { item.lane = plan.lane; setClipStart(project, item.id, plan.start); }
+  } else { setItemStart(kind, item, plan.start); item.lane = plan.lane; }
   ensureLanes(project);
-  return { lane: item.lane, start: plan.start, pushed: plan.pushed };
+  return plan;
 }
-/** Set where a lane item starts (texts, blurs keep their length). */
-export function setLaneItemStart(kind, item, start) {
+/** Set where a non-clip item starts (texts, blurs and captions keep their length; caption words move along). */
+export function setItemStart(kind, item, start) {
   start = Math.max(0, start);
-  if (kind === 'text' || kind === 'blur') { const len = item.end - item.start; item.start = start; item.end = start + len; }
-  else item.start = start;
+  if (kind === 'text' || kind === 'blur' || kind === 'caption') {
+    const len = item.end - item.start, d = start - item.start; item.start = start; item.end = start + len;
+    if (kind === 'caption' && item.words) for (const w of item.words) { w.start += d; w.end += d; }
+  } else item.start = start;
 }
 
 /**
@@ -980,7 +1069,12 @@ export function moveClipTo(project, id, desired) {
   const lay = layout(project), it = lay.items.find(i => i.clip.id === id);
   if (!it) return null;
   const others = lay.items.filter(i => i !== it).map(i => [i.start, i.end]).sort((a, b) => a[0] - b[0]);
-  const start = nearestFree(others, it.len, desired).start;
+  return setClipStart(project, id, nearestFree(others, it.len, desired).start);
+}
+/** Put a main clip exactly at `start` (order and gaps follow; the caller made sure it does not run into another clip). */
+export function setClipStart(project, id, start) {
+  const lay = layout(project), it = lay.items.find(i => i.clip.id === id);
+  if (!it) return null;
   const entries = lay.items.map(i => ({ clip: i.clip, start: i.clip === it.clip ? start : i.start, prev: i.index ? lay.items[i.index - 1].clip : null }));
   arrangeMain(project, entries);
   return round3(start);
@@ -1011,40 +1105,25 @@ export function holdNextClip(project, id, lay0) {
   const want = n0.start - layout(project).items[i].end;
   next.gap = want > 1e-3 ? round3(want) : 0;
 }
-/** Put a clip that is not on the track yet at `start` (nearest free spot). Returns its start. */
-export function addClipAt(project, clip, desired) {
-  const lay = layout(project);
-  const start = nearestFree(lay.items.map(i => [i.start, i.end]).sort((a, b) => a[0] - b[0]), clipLen(clip), desired).start;
-  const entries = lay.items.map(i => ({ clip: i.clip, start: i.start, prev: i.index ? lay.items[i.index - 1].clip : null }));
-  entries.push({ clip, start, prev: undefined });
-  arrangeMain(project, entries);
-  return round3(start);
-}
 const volumeOnly = (item) => { const k = {}; if (item.keyframes && item.keyframes.volume) k.volume = deepClone(item.keyframes.volume); return k; };
-/** Turn a main-track clip into a picture-in-picture overlay at the same time (it leaves the main track; `ripple` closes the hole). Returns the overlay. */
+/**
+ * A main clip that is dropped over another main clip becomes a layer on top of it: an overlay that covers the frame the way the clip did
+ * (same time, source range, speed, volume, mute, opacity and fades). Transitions, colour grade, motion keyframes and fit do not carry over.
+ * `ripple` closes the hole it leaves on the main sequence. Returns the overlay.
+ */
 export function clipToOverlay(project, id, ripple, start) {
   const it = layout(project).items.find(i => i.clip.id === id); if (!it) return null;
-  const c = it.clip;
+  const c = it.clip, { width: W, height: H } = outputDims(project);
+  const aspect = c.width > 0 && c.height > 0 ? c.width / c.height : W / H;
   const o = normalizeOverlay({
     kind: c.kind, mediaId: c.mediaId, name: c.name, srcDuration: c.srcDuration, width: c.width, height: c.height, hasAudio: c.hasAudio,
-    start: start ?? it.start, in: c.in, out: c.out, speed: c.speed, volume: c.volume, muted: c.muted, opacity: c.opacity, fadeIn: Math.max(0.25, c.fadeIn || 0), fadeOut: Math.max(0.25, c.fadeOut || 0),
-    keyframes: volumeOnly(c),
+    start: start ?? it.start, in: c.in, out: c.out, speed: c.speed, volume: c.volume, muted: c.muted, opacity: c.opacity, fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0,
+    x: 0.5, y: 0.5, w: Math.min(1, H * aspect / W), radius: 0, shadow: false, keyframes: volumeOnly(c),
   });
   removeClip(project, id, ripple);
   if (!project.overlays) project.overlays = [];
   project.overlays.push(o);
   return o;
-}
-/** Turn an overlay into a main-track clip (nearest free spot to `start`, or, with `index`, inserted there like a reorder). Returns the clip. */
-export function overlayToClip(project, id, start, index) {
-  const o = (project.overlays || []).find(x => x.id === id); if (!o) return null;
-  const c = normalizeClip({
-    kind: o.kind, mediaId: o.mediaId, name: o.name, srcDuration: o.srcDuration, width: o.width, height: o.height, hasAudio: o.hasAudio,
-    in: o.in, out: o.out, speed: o.speed || 1, volume: o.volume, muted: o.muted, opacity: o.opacity, fadeIn: 0, fadeOut: 0, keyframes: volumeOnly(o),
-  });
-  project.overlays.splice(project.overlays.indexOf(o), 1);
-  if (index != null) project.clips.splice(clamp(index, 0, project.clips.length), 0, c); else addClipAt(project, c, start);
-  return c;
 }
 
 // ---------- History (snapshot based) ----------

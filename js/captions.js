@@ -64,6 +64,7 @@ export function normalizeCaption(c) {
   const s = Math.max(0, start), e = Math.max(s + 0.05, end);
   const text = String(c.text == null ? '' : c.text).replace(/\s+/g, ' ').trim().slice(0, MAX_CAPTION_CHARS);
   const out = { id: typeof c.id === 'string' && c.id ? c.id.slice(0, 40) : uid('cap'), start: round3(s), end: round3(e), text };
+  if (Number.isInteger(c.lane) && c.lane >= 0 && c.lane < 1000) out.lane = c.lane;
   if (Array.isArray(c.words) && c.words.length && c.words.length <= 120) {
     const ws = [];
     for (const w of c.words) {
@@ -119,7 +120,9 @@ export function splitCaption(c, t) {
   if (ws.length >= 2) k = clamp(k, 1, ws.length - 1);
   const left = ws.slice(0, k), right = ws.slice(k);
   const mk = (arr, s, e, id) => ({ id, start: round3(s), end: round3(e), text: arr.map(w => w.w).join(' '), ...(c.words ? { words: arr.map(w => ({ w: w.w, start: round3(w.start), end: round3(w.end) })) } : {}) });
-  return [mk(left, c.start, t, c.id), mk(right, t, c.end, uid('cap'))];
+  const out = [mk(left, c.start, t, c.id), mk(right, t, c.end, uid('cap'))];
+  if (c.lane !== undefined) for (const x of out) x.lane = c.lane;
+  return out;
 }
 
 // ---------------------------------------------------------------- chunking

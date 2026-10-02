@@ -1,6 +1,6 @@
 // Frame compositor shared by preview, thumbnail maker and export.
 import { captionAt, captionWords } from './captions.js';
-import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasMotion, overlaysAt, EASES, blurAt, byLane } from './model.js';
+import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasMotion, overlaysAt, EASES, blurAt, laneOf } from './model.js';
 import { clamp } from './util.js';
 import { BlurFX } from './blur.js';
 
@@ -492,73 +492,77 @@ export class Compositor {
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
     const act = activeAt(lay, t);
-    let missing = 0;
-    for (const { it, alpha, black } of act) {
-      const src = getSource(it);
-      if (!src) { missing++; continue; }
-      let c = it.clip;
-      const bg = c.bg && c.bg !== 'inherit' ? bgOf(c.bg) : projBg;
-      let kOpacity = c.opacity ?? 1;
-      if (hasMotion(c)) {
-        const A = animated('clip', c, t - it.start);
-        c = { ...c, transform: { ...c.transform, x: A.x, y: A.y, zoom: Math.max(0.05, A.scale), angle: A.rotation } };
-        kOpacity = A.opacity;
-      }
-      const fit = c.fit && c.fit !== 'inherit' ? c.fit : s.fit;
-      const tr0 = c.transform || {}, kb0 = tr0.kbFrom ?? 0, kb1 = tr0.kbTo ?? 1; // Ken Burns range (split clips carry a sub-range)
-      const prog = kb0 + (kb1 - kb0) * (it.len > 0 ? clamp((t - it.start) / it.len, 0, 1) : 0);
-      const col = effectiveColor(project, c);
-      const a = alpha * black * clamp(kOpacity, 0, 1);
-      if (a <= 0.001) continue;
-      const gl = colorIsNeutral(col) ? null : this._gl();
-      if (!gl && (colorIsNeutral(col) || !this.filterOK)) {
-        ctx.globalAlpha = a;
-        this.drawSource(ctx, src, c, W, H, fit, prog, bg);
-      } else {
-        if (this.layer.width !== W || this.layer.height !== H) { this.layer.width = W; this.layer.height = H; }
-        const l = this.lctx;
-        l.globalAlpha = 1; l.filter = 'none';
-        this.drawSource(l, src, c, W, H, fit, prog, bg);
-        ctx.globalAlpha = a;
-        if (gl) ctx.drawImage(gl.process(this.layer, W, H, col), 0, 0);
-        else {
-          emulateGrade(l, W, H, col); // warmth / fade / vignette, which CSS filters don't have
-          ctx.filter = `brightness(${1 + col.brightness / 200}) contrast(${1 + col.contrast / 100}) saturate(${1 + col.saturation / 100}) sepia(${col.sepia / 100})`;
-          ctx.drawImage(this.layer, 0, 0);
-          ctx.filter = 'none';
+    let missing = 0, nBlur = 0;
+    const boxes = [];
+    // Every layer is drawn in lane order: a higher lane is on top, whatever kind of item it holds (sound lanes draw nothing).
+    const steps = [];
+    if (act.length) steps.push({ lane: Math.max(...act.map(x => laneOf(x.it.clip))), run: () => {
+      for (const { it, alpha, black } of act) {
+        const src = getSource(it);
+        if (!src) { missing++; continue; }
+        let c = it.clip;
+        const bg = c.bg && c.bg !== 'inherit' ? bgOf(c.bg) : projBg;
+        let kOpacity = c.opacity ?? 1;
+        if (hasMotion(c)) {
+          const A = animated('clip', c, t - it.start);
+          c = { ...c, transform: { ...c.transform, x: A.x, y: A.y, zoom: Math.max(0.05, A.scale), angle: A.rotation } };
+          kOpacity = A.opacity;
+        }
+        const fit = c.fit && c.fit !== 'inherit' ? c.fit : s.fit;
+        const tr0 = c.transform || {}, kb0 = tr0.kbFrom ?? 0, kb1 = tr0.kbTo ?? 1; // Ken Burns range (split clips carry a sub-range)
+        const prog = kb0 + (kb1 - kb0) * (it.len > 0 ? clamp((t - it.start) / it.len, 0, 1) : 0);
+        const col = effectiveColor(project, c);
+        const a = alpha * black * clamp(kOpacity, 0, 1);
+        if (a <= 0.001) continue;
+        const gl = colorIsNeutral(col) ? null : this._gl();
+        if (!gl && (colorIsNeutral(col) || !this.filterOK)) {
+          ctx.globalAlpha = a;
+          this.drawSource(ctx, src, c, W, H, fit, prog, bg);
+        } else {
+          if (this.layer.width !== W || this.layer.height !== H) { this.layer.width = W; this.layer.height = H; }
+          const l = this.lctx;
+          l.globalAlpha = 1; l.filter = 'none';
+          this.drawSource(l, src, c, W, H, fit, prog, bg);
+          ctx.globalAlpha = a;
+          if (gl) ctx.drawImage(gl.process(this.layer, W, H, col), 0, 0);
+          else {
+            emulateGrade(l, W, H, col); // warmth / fade / vignette, which CSS filters don't have
+            ctx.filter = `brightness(${1 + col.brightness / 200}) contrast(${1 + col.contrast / 100}) saturate(${1 + col.saturation / 100}) sepia(${col.sepia / 100})`;
+            ctx.drawImage(this.layer, 0, 0);
+            ctx.filter = 'none';
+          }
         }
       }
-    }
-    // Blur > whole-clip blur (Clip tab): the clip's picture, under overlays / text / logo
-    let nBlur = 0;
-    for (const { it, alpha, black } of act) {
-      const cb = it.clip.blur;
-      if (cb && cb.enabled && nBlur < 12 && alpha * black > 0.002) { this._fx().apply(ctx, W, H, { shape: cb.shape, mode: cb.mode, radius: cb.radius, strength: cb.strength, feather: cb.feather, invert: !!cb.keep, x: cb.x, y: cb.y, w: cb.w, h: cb.h, amount: alpha * black, full: !cb.keep }); nBlur++; }
-    }
-    ctx.globalAlpha = 1;
-    const boxes = [];
+      // Blur > whole-clip blur (Clip tab): the clip's picture, under whatever is on higher lanes
+      for (const { it, alpha, black } of act) {
+        const cb = it.clip.blur;
+        if (cb && cb.enabled && nBlur < 12 && alpha * black > 0.002) { this._fx().apply(ctx, W, H, { shape: cb.shape, mode: cb.mode, radius: cb.radius, strength: cb.strength, feather: cb.feather, invert: !!cb.keep, x: cb.x, y: cb.y, w: cb.w, h: cb.h, a: 1 }); nBlur++; }
+      }
+      ctx.globalAlpha = 1;
+    } });
     // picture-in-picture overlays
-    for (const o of overlaysAt(project, t)) {
+    for (const o of overlaysAt(project, t)) steps.push({ lane: laneOf(o), run: () => {
       const src = opts.getOverlaySource ? opts.getOverlaySource(o) : null;
-      if (!src || !src.w) { missing++; continue; }
+      if (!src || !src.w) { missing++; return; }
       boxes.push(this.drawOverlay(ctx, W, H, o, src, t - o.start));
-    }
-    ctx.globalAlpha = 1;
-    // Blur / Privacy regions: over the picture and overlays, under text and logo
-    for (const b of byLane(project.blurs || [])) {
-      if (nBlur >= 12) break;
+      ctx.globalAlpha = 1;
+    } });
+    // Blur / Privacy regions blur everything on the lanes below them
+    for (const b of project.blurs || []) {
       const reg = blurAt(b, t); if (!reg) continue;
-      this._fx().apply(ctx, W, H, reg); nBlur++;
+      steps.push({ lane: laneOf(b), run: () => { if (nBlur >= 12) return; this._fx().apply(ctx, W, H, reg); nBlur++; ctx.globalAlpha = 1; } });
     }
-    ctx.globalAlpha = 1;
     // texts
-    for (const tl of byLane(project.texts)) {
+    for (const tl of project.texts) {
       if (t < tl.start || t >= tl.end || !tl.text) continue;
-      const a = Math.min(tl.fadeIn > 0 ? (t - tl.start) / tl.fadeIn : 1, tl.fadeOut > 0 ? (tl.end - t) / tl.fadeOut : 1);
-      boxes.push(drawText(ctx, W, H, tl, clamp(a, 0, 1), t - tl.start));
+      steps.push({ lane: laneOf(tl), run: () => {
+        const a = Math.min(tl.fadeIn > 0 ? (t - tl.start) / tl.fadeIn : 1, tl.fadeOut > 0 ? (tl.end - t) / tl.fadeOut : 1);
+        boxes.push(drawText(ctx, W, H, tl, clamp(a, 0, 1), t - tl.start));
+      } });
     }
-    // captions: over everything but the logo
-    if (!opts.noCaptions) drawCaptions(ctx, W, H, project, t);
+    // captions
+    if (!opts.noCaptions) { const cap = captionAt(project.captions || [], t); steps.push({ lane: cap ? laneOf(cap) : 1e9, run: () => drawCaptions(ctx, W, H, project, t) }); }
+    steps.map((st, i) => [st, i]).sort((a, b) => a[0].lane - b[0].lane || a[1] - b[1]).forEach(([st]) => st.run());
     // logo / watermark
     const lg = project.logo && opts.getLogo ? opts.getLogo() : null;
     if (lg) drawLogo(ctx, W, H, project.logo, lg);
