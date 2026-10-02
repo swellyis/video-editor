@@ -1,7 +1,7 @@
 // Free placement: gaps on the main track, stacked lanes, no same-lane overlap, clip <-> overlay conversion, old-project migration.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newProject, migrate, layout, normalizeClip, newText, newBlur, newAudio, normalizeOverlay, ensureLanes, laneOf, byLane, placeItem, planItem, moveClipTo, removeClip, clipToOverlay, overlaysAt, insertLane, nearestFree, splitItem, findItem, laneCount } from '../js/model.js';
+import { newProject, migrate, layout, normalizeClip, newText, newBlur, newAudio, normalizeOverlay, ensureLanes, laneOf, placeItem, planItem, moveClipTo, removeClip, overlaysAt, insertLane, nearestFree, splitItem, findItem, laneCount } from '../js/model.js';
 
 const clip = (id, out, extra = {}) => normalizeClip({ id, mediaId: 'm_' + id, name: id, kind: 'video', srcDuration: 60, in: 0, out, ...extra });
 const proj = (...clips) => { const p = newProject('T'); p.clips = clips; return p; };

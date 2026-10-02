@@ -270,7 +270,7 @@ export class Timeline {
     // overlays (picture-in-picture)
     for (const o of p.overlays || []) {
       const n = this._node('o:' + o.id, () => {
-        const d = el('div', { class: 'tl-item tl-ovlitem' }, el('span'), el('div', { class: 'kfs' }), el('div', { class: 'volenv' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
+        const d = el('div', { class: 'tl-item tl-ovlitem' }, el('div', { class: 'strip' }), el('span'), el('div', { class: 'kfs' }), el('div', { class: 'volenv' }), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'overlay', d._id));
         this.keyable(d, 'overlay');
         return d;
@@ -282,7 +282,9 @@ export class Timeline {
       if (lab._key !== lk) { lab._key = lk; lab.replaceChildren(icon(keyed ? 'key' : 'pip', 'ico item-ico'), ' ' + o.name, ...(om ? [' ', muteBadge('Muted')] : [])); }
       n.classList.toggle('sel', sel.type === 'overlay' && sel.id === o.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.setAttribute('aria-label', `Overlay ${o.name}${om ? ' (muted)' : ''}, ${fmt(o.start)} to ${fmt(o.start + overlayLen(o))}`);
-      n.classList.toggle('offline', !this.app.media.peek(o.mediaId));
+      const orec = this.app.media.peek(o.mediaId);
+      n.classList.toggle('offline', !orec);
+      this.renderStrip(n.querySelector('.strip'), o, orec, Math.max(8, overlayLen(o) * this.pps));
       this.renderKfs(n, o, o.start, overlayLen(o));
       this.renderVolEnv(n, o, 'overlay', o.start, overlayLen(o), ITEM_H, sel.type === 'overlay' && sel.id === o.id && hasSound(o));
     }
