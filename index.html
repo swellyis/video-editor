@@ -227,6 +227,17 @@
                 <div class="progress-copy"><span id="syncProgText">Starting…</span><button class="linkish" type="button" id="syncCancel">Cancel</button></div>
               </div>
             </div>
+            <div class="clean-box beat-box" id="beatBox" hidden>
+              <div class="clean-head"><span class="label" id="beatLabel">Beats</span><span class="clean-state" id="beatState" aria-live="polite"></span></div>
+              <button class="btn secondary small" type="button" id="beatFind">Find beats</button>
+              <label class="check" id="beatSnapRow" hidden><input type="checkbox" id="beatSnap" /> <span>Snap other items to these beats</span></label>
+              <p class="hint" id="beatHint"></p>
+              <button class="linkish" type="button" id="beatClear" hidden>Clear beats</button>
+              <div class="progress" id="beatProg" aria-live="polite">
+                <div class="progress-track"><div class="progress-bar" id="beatBar"></div></div>
+                <div class="progress-copy"><span id="beatProgText">Starting…</span><button class="linkish" type="button" id="beatCancel">Cancel</button></div>
+              </div>
+            </div>
             <button type="button" class="mute-btn" data-toggle="clip.muted" aria-pressed="false"><svg class="ico spk-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 5.2a3.6 3.6 0 010 5.6M13 3.4a6.2 6.2 0 010 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><svg class="ico spk-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 6l4 4M15 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mute this clip</span><span class="mb-state" aria-hidden="true">Sound on</span></button>
             <div class="detach-row"><button type="button" class="btn secondary detach-btn" data-action="detachAudio" id="detachClipBtn"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 3v10M13.5 5v6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.5 2"/></svg><span>Detach audio</span></button><p class="hint" id="detachClipHint">Copies this video&rsquo;s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.</p><button type="button" class="btn secondary detach-btn extract-btn" data-action="extractAudio"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Extract audio as a file…</span></button><p class="hint">Saves just the sound (trimmed part) as an M4A, Opus or WAV file you can keep or share. The clip itself is not changed.</p></div>
             

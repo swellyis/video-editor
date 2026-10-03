@@ -2,6 +2,7 @@
 import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX, laneOf, laneCount, insertLane, spanCtx, findItem, planItem, placeItem, moveClipTo, holdNextClip } from './model.js';
 import { clamp, fmt, el, icon, toast } from './util.js';
 import { retimeWords } from './captions.js';
+import { timelineBeats, thin } from './beat.js';
 
 function muteBadge(title, extra = '') {
   const i = icon('spkOff', 'ico badge-ico mute-badge' + (extra ? ' ' + extra : ''));
@@ -185,6 +186,8 @@ export class Timeline {
     for (const b of p.blurs || []) if (b.id !== exclude) pts.push(b.start, b.end);
     for (const c of p.captions || []) if (c.id !== exclude) pts.push(c.start, c.end);
     for (const a of p.audio) if (a.id !== exclude) pts.push(a.start, a.start + audioSpan(a, lay.total));
+    this._beatPts = new Set();   // Snap to beat: the beats of every music item that has "Snap to beats" on (thinned when zoomed out so they never form a wall)
+    for (const a of p.audio) if (a.id !== exclude && a.beat && a.beat.on !== false && !a.loop) for (const t of thin(timelineBeats(a), this.pps, 16)) { pts.push(t); this._beatPts.add(t); }
     for (const m of p.markers) if (m.id !== exclude) pts.push(m.time);
     for (const o of p.overlays || []) if (o.id !== exclude) pts.push(o.start, o.start + overlayLen(o));
     return pts;
@@ -192,9 +195,11 @@ export class Timeline {
   snap(t, exclude, candidates) {
     if (!this.app.snapEnabled || this._noSnap) { this.snapLine.style.display = 'none'; return { t, snapped: false }; }
     const th = 9 / this.pps; let best = null, bd = th;
-    for (const p of this.snapPoints(exclude)) for (const c of (candidates || [0])) { const d = Math.abs(t + c - p); if (d < bd) { bd = d; best = p - c; } }
+    let bp = null;
+    for (const p of this.snapPoints(exclude)) for (const c of (candidates || [0])) { const d = Math.abs(t + c - p); if (d < bd) { bd = d; best = p - c; bp = p; } }
     if (best == null) { this.snapLine.style.display = 'none'; return { t, snapped: false }; }
-    return { t: best, snapped: true };
+    this.snapLine.classList.toggle('beat', this._beatPts.has(bp));   // the guide is a different colour when it is a beat you snapped to
+    return { t: best, snapped: true, beat: this._beatPts.has(bp) };
   }
   showSnap(time) { this.snapLine.style.display = 'block'; this.snapLine.style.left = this.x(time) + 'px'; }
 
@@ -351,6 +356,7 @@ export class Timeline {
       this.renderVolEnv(n, a, 'audio', a.start, span, ITEM_H, sel.type === 'audio' && sel.id === a.id);
     }
     this.renderSilences(top);
+    this.renderBeats(top);
     // remove stale
     for (const [k, n] of this.nodes) if (n._seen !== this._gen) { n.remove(); this.nodes.delete(k); }
     this.lanes.classList.toggle('empty', this.geo.n === 0);
@@ -367,6 +373,21 @@ export class Timeline {
       const n = this._node('s:' + k++, () => { const d = document.createElement('div'); d.className = 'tl-sil'; return d; }, this.lanes);
       n.style.left = this.x(m.t0) + 'px'; n.style.width = Math.max(3, (m.t1 - m.t0) * this.pps) + 'px'; n.style.top = top(item) + 'px';
       n.classList.toggle('cur', !!m.cur); n.title = 'Silence · ' + fmt(m.t1 - m.t0) + ' to remove';
+    }
+  }
+  /** Snap to beat: small ticks on a music item whose beats are known (only the visible ones, thinned when zoomed out; no lane of their own). */
+  renderBeats(top) {
+    const vw = Math.max(1, this.scroll.clientWidth), t0 = (this.scroll.scrollLeft - vw - 12) / this.pps, t1 = (this.scroll.scrollLeft + 2 * vw) / this.pps;
+    let k = 0;
+    for (const a of this.project.audio) {
+      if (!a.beat || a.loop) continue;
+      const all = timelineBeats(a); if (!all.length) continue;
+      const ts = thin(all, this.pps), y = top(a), on = a.beat.on !== false;
+      for (const t of ts) {
+        if (t < t0 || t > t1) continue;
+        const n = this._node('b:' + k++, () => { const d = document.createElement('div'); d.className = 'tl-beat'; return d; }, this.lanes);
+        n.style.left = this.x(t) + 'px'; n.style.top = (y + 24) + 'px'; n.classList.toggle('off', !on);
+      }
     }
   }
   /** Captions: only the blocks near the visible part are in the DOM (an hour of speech is thousands). */

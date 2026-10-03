@@ -559,3 +559,9 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .sync-box .sync-move{margin-top:8px}
 .sync-box .sync-move .label{display:block;margin-bottom:4px}
 .sync-box .hint.ok{color:var(--accent)}
+
+/* Snap to beat */
+.tl-beat{position:absolute;width:2px;height:10px;margin-left:-1px;border-radius:1px;background:rgba(255,255,255,.85);box-shadow:0 0 0 1px rgba(0,0,0,.45);pointer-events:none;z-index:7}
+.tl-beat.off{opacity:.35}
+.tl-snapline.beat{background:#4dd0e1;width:2px}
+.beat-box .hint.ok{color:var(--accent)}

@@ -130,6 +130,7 @@ export function sanitizeProject(p) {
     a.fadeIn = num(a.fadeIn, 0, 60, 0); a.fadeOut = num(a.fadeOut, 0, 60, 0); a.speed = num(a.speed, 0.25, 4, 1);
   }
   for (const it of [...p.clips, ...p.overlays, ...p.audio]) { cleanVolumeKeys(it); cleanClean(it); cleanChange(it); }
+  for (const a of p.audio) cleanBeat(a);
   if (p.logo) { const L = p.logo; L.size = num(L.size, 0.01, 1, 0.14); L.opacity = num(L.opacity, 0, 1, 0.85); L.margin = num(L.margin, 0, 0.5, 0.035); L.position = oneOf(L.position, ['tl', 'tr', 'bl', 'br', 'center'], 'tr'); }
   return p;
 }
@@ -324,6 +325,18 @@ function cleanChange(it) {
   if (!changeIsOn(it.change)) { delete it.change; return; }
   it.change = normChange(it.change);
 }
+/** A stored beat record from a file or an undo state: only finite, ascending numbers, a sane tempo; anything else is dropped. */
+export function cleanBeat(item) {
+  const b = item.beat;
+  if (!b || typeof b !== 'object' || !Array.isArray(b.t)) { delete item.beat; return item; }
+  const t = []; let prev = -1;
+  for (const v of b.t) { const x = +v; if (v !== null && v !== '' && Number.isFinite(x) && x >= 0 && x < 1e6 && x > prev) { t.push(Math.round(x * 1000) / 1000); prev = x; if (t.length >= 100000) break; } }
+  if (t.length < 4) { delete item.beat; return item; }
+  const num = (v, lo, hi, d) => (v !== null && v !== '' && Number.isFinite(+v) ? Math.max(lo, Math.min(hi, +v)) : d);
+  item.beat = { on: b.on !== false, bpm: num(b.bpm, 20, 400, 120), conf: num(b.conf, 0, 1, 0.5), from: num(b.from, 0, 1e6, t[0]), to: num(b.to, 0, 1e6, t[t.length - 1]), t };
+  return item;
+}
+
 function cleanClean(it) {
   if (!it.clean || typeof it.clean !== 'object') { delete it.clean; return; }
   it.clean = { level: CLEAN_LEVELS.includes(it.clean.level) ? it.clean.level : 'off' };
