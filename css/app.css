@@ -607,3 +607,15 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
   #tab-trans .section{display:flex;flex-direction:column}
   #tab-trans .section-head{order:0}#trJoin{order:1}.tr-controls{order:2;position:static;margin:0 0 12px;padding:0 0 10px;border-top:0;border-bottom:1px solid var(--line)}#trTypes{order:3}
 }
+
+/* Effects library (first section of the Effects tab) */
+.fx-stack{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+.fx-stack:empty{display:none}
+.fx-chip{min-height:44px;padding:0 12px;border:2px solid var(--line);border-radius:22px;background:var(--surface-2);color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
+.fx-chip.selected{border-color:var(--accent);background:var(--accent-soft);font-weight:600}
+.fx-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.fx-controls{margin:0 0 6px}
+.fx-controls .tr-dur{margin-top:2px}
+.tr-actions .fx-mv{flex:0 0 44px;padding:0;font-size:14px}
+.fx-card.selected::after{content:"✓";position:absolute;top:6px;right:8px;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;line-height:18px;text-align:center}
+.fx-card{position:relative}

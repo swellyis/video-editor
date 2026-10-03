@@ -21,6 +21,7 @@ import { initSilenceUI } from './silence-ui.js';
 import { initSyncUI } from './sync-ui.js';
 import { initBeatUI } from './beat-ui.js';
 import { initTransitionUI } from './transition-ui.js';
+import { initEffectsUI } from './effects-ui.js';
 import { Timeline } from './timeline.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
@@ -59,6 +60,7 @@ const app = {
 if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has('debug')) window.__app = app;
 startLongTaskMonitor(); app.perf = perf; // main-thread health (long tasks), used by the polite background jobs and by tests
 let trUI = { render() { }, open() { }, close() { } };
+let fxUI = { render() { } };
 let cleanUI = null, voiceUI = null, silenceUI = null, syncUI = null, beatUI = null; // Clean voice / Change voice / Remove silences controls (set up below)
 let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
 
@@ -80,6 +82,7 @@ silenceUI = initSilenceUI({ $, app, media, player, toast, commit: (l) => app.com
 syncUI = initSyncUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
 beatUI = initBeatUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
 trUI = initTransitionUI({ $, app, commit: (l) => app.commit(l), showTab });
+fxUI = initEffectsUI({ $, app, commit: (l) => app.commit(l) });
 app.openTransition = (id, opts) => trUI.open(id, opts);
 
 // ---------------------------------------------------------------- persistence
@@ -143,7 +146,7 @@ app.select = (sel, opts = {}) => {
   if (sel) {
     const tab = { clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip', blur: 'look', caption: 'captions' }[sel.type];
     if (sel.type === 'clip') app.trTarget = null; // the Transitions tab follows the selected clip again
-    if (tab && !(sel.type === 'clip' && qs('.tabs button.active')?.dataset.tab === 'trans')) showTab(tab); // selecting a clip while browsing transitions stays on that tab
+    if (tab && !((sel.type === 'clip' && qs('.tabs button.active')?.dataset.tab === 'trans') || ((sel.type === 'clip' || sel.type === 'overlay') && qs('.tabs button.active')?.dataset.tab === 'look'))) showTab(tab); // selecting a clip while browsing transitions stays on that tab
     if (opts.seekInto) {
       const t = player.t;
       if (sel.type === 'clip') { const it = layout(app.project).items.find(i => i.clip.id === sel.id); if (it && (t < it.start || t >= it.end)) player.setTime(it.start + 0.001); }
@@ -396,6 +399,7 @@ function fillInspector() {
   }
   fillOutputs();
   trUI.render();
+  fxUI.render();
   // clip panel
   const c = selected('clip');
   $('clipPanel').hidden = !c; $('clipEmptyHint').hidden = !!c;
@@ -1230,6 +1234,7 @@ function showTab(name) {
   qsa('.tab-panel').forEach(x => x.classList.toggle('active', x.id === 'tab-' + name));
   const act = qs('.tabs button.active'); if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   if (app.timeline) app.timeline.render(); // the join markers show which join the Transitions tab is editing
+  if (name === 'look') fxUI.render(); // draws the effect previews the first time the tab is shown
 }
 // ARIA tabs: tab <-> panel wiring, roving focus with arrow keys / Home / End
 (() => {

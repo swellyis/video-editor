@@ -124,7 +124,7 @@
         <button data-tab="captions" type="button" role="tab">Captions</button>
         <button data-tab="audio" type="button" role="tab">Audio</button>
         <button data-tab="pip" type="button" role="tab">PiP</button>
-        <button data-tab="look" type="button" role="tab">Look</button>
+        <button data-tab="look" type="button" role="tab">Effects</button>
         <button data-tab="connect" type="button" role="tab">Connect</button>
       </div>
 
@@ -548,6 +548,18 @@
 
       <!-- LOOK -->
       <div class="tab-panel" id="tab-look">
+        <section class="section" id="fxSection">
+          <div class="section-head"><h2>Effects</h2></div>
+          <p class="tr-join" id="fxFor" aria-live="polite"></p>
+          <div class="fx-stack" id="fxStack" role="group" aria-label="Effects on this clip"></div>
+          <div class="fx-controls">
+            <div class="slider-row tr-dur"><label for="fxAmt">Intensity</label><input type="range" id="fxAmt" min="0" max="100" step="1" value="50" /><output id="fxAmtOut" for="fxAmt">50%</output></div>
+            <p class="hint tr-note" id="fxNote" role="status" aria-live="polite"></p>
+            <div class="tr-actions"><button type="button" class="btn secondary fx-mv" id="fxEarlier" aria-label="Move this effect earlier (applied first)" title="Earlier">◀</button><button type="button" class="btn secondary fx-mv" id="fxLater" aria-label="Move this effect later (applied after the others)" title="Later">▶</button><button type="button" class="btn secondary" id="fxAll" title="Put this clip's effects on every clip in its lane" aria-label="Apply to all clips on this lane">Apply to all</button><button type="button" class="btn ghost" id="fxRemove">Remove</button></div>
+          </div>
+          <div id="fxTypes" class="tr-types"></div>
+          <p class="hint">Up to 3 effects on a clip. Black &amp; white, vintage, warm and vignette are in <b>Clip color</b> (Clip tab). To hide a face or blur a region, use <b>Blur / Privacy</b> below.</p>
+        </section>
         <section class="section" id="blurSection">
           <div class="section-head"><h2>Blur / Privacy</h2><button class="btn primary" data-action="addBlur" type="button">＋ Blur region</button></div>
           <div class="item-list" id="blurList"></div>
