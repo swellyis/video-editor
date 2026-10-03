@@ -56,8 +56,7 @@ export function initBeatUI(ctx) {
       const r = analyze(env, from), live = app.project.audio.find(a => a.id === item.id);
       if (!live) return;
       if (!r.ok) {
-        const c = Math.round(r.confidence * 100);
-        refused.set(item.id, `No clear beat found (confidence ${c} %), so nothing was added. This works best with drums or a steady pulse; speech, ambient pads and free-time playing don’t have a beat to find. ${r.reason === 'short' ? 'The part you use is also very short.' : 'If this does have a beat, try a longer part or one with louder drums.'}`);
+        refused.set(item.id, `No clear beat found, so nothing was added. This works best with drums or a steady pulse; speech, ambient pads and free-time playing don’t have a beat to find. ${r.reason === 'short' ? 'The part you use is also very short.' : 'If this does have a beat, try a longer part or one with louder drums.'}`);
       } else {
         live.beat = { on: true, bpm: Math.round(r.bpm * 100) / 100, conf: Math.round(r.confidence * 100) / 100, from, to, t: r.beats.map(t => Math.round(t * 1000) / 1000) };
         commit('Find beats');
