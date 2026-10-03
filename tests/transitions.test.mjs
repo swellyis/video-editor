@@ -112,3 +112,9 @@ test('delete and reorder: a transition belongs to one join, so it is removed whe
   const r = proj([4, 4, 4], { 1: { type: 'zoomout', duration: 0.5 }, 2: { type: 'wipeup', duration: 0.5 } });
   moveClip(r, 1, 1); assert.deepEqual(r.clips.map(c => c.transition.type), ['cut', 'zoomout', 'wipeup']);
 });
+test('library groups: Basic (cut, dissolve, blur, two dips) / Wipe / Slide / Zoom, in that order', () => {
+  const g = {}; for (const t of TYPES) (g[t.group] ||= []).push(t.id);
+  assert.deepEqual(Object.keys(g), ['Basic', 'Wipe', 'Slide', 'Zoom']);
+  assert.deepEqual(g.Basic, ['cut', 'crossfade', 'blur', 'fade', 'dipwhite']);
+  assert.deepEqual(g.Zoom, ['zoomin', 'zoomout']); assert.equal(g.Wipe.length, 4); assert.equal(g.Slide.length, 4);
+});
