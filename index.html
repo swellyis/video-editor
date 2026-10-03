@@ -124,7 +124,7 @@
         <button data-tab="captions" type="button" role="tab">Captions</button>
         <button data-tab="audio" type="button" role="tab">Audio</button>
         <button data-tab="pip" type="button" role="tab">PiP</button>
-        <button data-tab="look" type="button" role="tab">Effects</button>
+        <button data-tab="look" type="button" role="tab">Looks</button>
         <button data-tab="connect" type="button" role="tab">Connect</button>
       </div>
 
@@ -287,7 +287,7 @@
           </section>
           <section class="section">
             <div class="section-head"><h2>Clip color</h2><button class="btn ghost small" data-action="resetClipColor" type="button">Reset</button></div>
-            <div class="chips" data-bind="clip.color.preset" data-presets="1"></div>
+            <p class="hint" id="clipFilterNote">One-tap looks (warm, B&amp;W, teal &amp; orange…) are in the <b>Looks</b> tab. These sliders fine-tune on top.</p>
             <div class="slider-row"><label>Brightness</label><input type="range" min="-100" max="100" data-bind="clip.color.brightness" /><output data-out="clip.color.brightness"></output></div>
             <div class="slider-row"><label>Contrast</label><input type="range" min="-100" max="100" data-bind="clip.color.contrast" /><output data-out="clip.color.contrast"></output></div>
             <div class="slider-row"><label>Saturation</label><input type="range" min="-100" max="100" data-bind="clip.color.saturation" /><output data-out="clip.color.saturation"></output></div>
@@ -548,7 +548,19 @@
 
       <!-- LOOK -->
       <div class="tab-panel" id="tab-look">
-        <section class="section" id="fxSection">
+        <div class="segmented look-seg" id="lookSeg" role="group" aria-label="Looks"><button type="button" data-look="filters" class="selected" aria-pressed="true">Filters</button><button type="button" data-look="effects" aria-pressed="false">Effects</button></div>
+        <section class="section" id="flSection">
+          <div class="section-head"><h2>Filters</h2></div>
+          <p class="tr-join" id="flFor" aria-live="polite"></p>
+          <div class="fx-controls">
+            <div class="slider-row tr-dur"><label for="flAmt">Intensity</label><input type="range" id="flAmt" min="0" max="100" step="1" value="100" /><output id="flAmtOut" for="flAmt">100%</output></div>
+            <p class="hint tr-note" id="flNote" role="status" aria-live="polite"></p>
+            <div class="tr-actions"><button type="button" class="btn secondary" id="flAll" title="Put this filter on every clip in its lane" aria-label="Apply to all clips on this lane">Apply to all</button><button type="button" class="btn ghost" id="flRemove">Remove</button></div>
+          </div>
+          <div id="flTypes" class="tr-types"></div>
+          <p class="hint">Each preview is your own picture. Fine-tune brightness, contrast and the rest in <b>Clip color</b> (Clip tab); a filter for the whole video is in <b>Global color</b> below.</p>
+        </section>
+        <section class="section" id="fxSection" hidden>
           <div class="section-head"><h2>Effects</h2></div>
           <p class="tr-join" id="fxFor" aria-live="polite"></p>
           <div class="fx-stack" id="fxStack" role="group" aria-label="Effects on this clip"></div>
@@ -613,7 +625,8 @@
         </section>
         <section class="section">
           <div class="section-head"><h2>Global color</h2><button class="btn ghost small" data-action="resetGlobalColor" type="button">Reset</button></div>
-          <div class="chips" data-bind="proj.color.preset" data-presets="1"></div>
+          <label class="fl-global"><span class="label">Filter for the whole video</span><select id="globalFilter" data-bind="proj.color.preset"></select></label>
+          <div class="slider-row"><label>Filter intensity</label><input type="range" min="0" max="1" step="0.01" data-bind="proj.color.filterAmount" /><output data-out="proj.color.filterAmount" data-fmt="pct"></output></div>
           <div class="slider-row"><label>Brightness</label><input type="range" min="-100" max="100" data-bind="proj.color.brightness" /><output data-out="proj.color.brightness"></output></div>
           <div class="slider-row"><label>Contrast</label><input type="range" min="-100" max="100" data-bind="proj.color.contrast" /><output data-out="proj.color.contrast"></output></div>
           <div class="slider-row"><label>Saturation</label><input type="range" min="-100" max="100" data-bind="proj.color.saturation" /><output data-out="proj.color.saturation"></output></div>

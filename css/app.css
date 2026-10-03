@@ -619,3 +619,10 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .tr-actions .fx-mv{flex:0 0 44px;padding:0;font-size:14px}
 .fx-card.selected::after{content:"✓";position:absolute;top:6px;right:8px;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;line-height:18px;text-align:center}
 .fx-card{position:relative}
+/* Looks tab: Filters | Effects switch, global filter picker */
+.look-seg{grid-template-columns:repeat(2,1fr);margin:0 0 10px}
+.look-seg button{min-height:44px}
+.look-seg button.selected{background:var(--accent);color:#fff;font-weight:600}
+#flSection[hidden],#fxSection[hidden]{display:none}
+.fl-global{display:flex;flex-direction:column;gap:4px;margin:4px 0 8px}
+.fl-global select{min-height:44px;font:inherit}

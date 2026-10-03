@@ -8,7 +8,7 @@ import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
-  moveClip, rippleShift, ensureLanes, holdNextClip, matchImageToAudio, stepVolume, History, PRESETS, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
+  moveClip, rippleShift, ensureLanes, holdNextClip, matchImageToAudio, stepVolume, History, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, MOTION_PROPS, detachAudio, soundTargets, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
@@ -22,6 +22,8 @@ import { initSyncUI } from './sync-ui.js';
 import { initBeatUI } from './beat-ui.js';
 import { initTransitionUI } from './transition-ui.js';
 import { initEffectsUI } from './effects-ui.js';
+import { initFiltersUI } from './filters-ui.js';
+import { FILTERS, GROUPS as FILTER_GROUPS } from './filters.js';
 import { Timeline } from './timeline.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
@@ -61,6 +63,7 @@ if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearc
 startLongTaskMonitor(); app.perf = perf; // main-thread health (long tasks), used by the polite background jobs and by tests
 let trUI = { render() { }, open() { }, close() { } };
 let fxUI = { render() { } };
+let flUI = { render() { } };
 let cleanUI = null, voiceUI = null, silenceUI = null, syncUI = null, beatUI = null; // Clean voice / Change voice / Remove silences controls (set up below)
 let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
 
@@ -83,6 +86,7 @@ syncUI = initSyncUI({ $, app, media, toast, commit: (l) => app.commit(l), curren
 beatUI = initBeatUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
 trUI = initTransitionUI({ $, app, commit: (l) => app.commit(l), showTab });
 fxUI = initEffectsUI({ $, app, commit: (l) => app.commit(l) });
+flUI = initFiltersUI({ $, app, commit: (l) => app.commit(l) });
 app.openTransition = (id, opts) => trUI.open(id, opts);
 
 // ---------------------------------------------------------------- persistence
@@ -401,6 +405,7 @@ function fillInspector() {
   fillOutputs();
   trUI.render();
   fxUI.render();
+  flUI.render();
   // clip panel
   const c = selected('clip');
   $('clipPanel').hidden = !c; $('clipEmptyHint').hidden = !!c;
@@ -1235,7 +1240,7 @@ function showTab(name) {
   qsa('.tab-panel').forEach(x => x.classList.toggle('active', x.id === 'tab-' + name));
   const act = qs('.tabs button.active'); if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   if (app.timeline) app.timeline.render(); // the join markers show which join the Transitions tab is editing
-  if (name === 'look') fxUI.render(); // draws the effect previews the first time the tab is shown
+  if (name === 'look') { flUI.render(); fxUI.render(); } // draws the effect previews the first time the tab is shown
 }
 // ARIA tabs: tab <-> panel wiring, roving focus with arrow keys / Home / End
 (() => {
@@ -1276,7 +1281,10 @@ function showTab(name) {
 })();
 
 // preset chips + fonts
-for (const box of qsa('[data-presets]')) for (const [k, v] of Object.entries(PRESETS)) box.append(el('button', { type: 'button', 'data-value': k, text: v.label }));
+{ // the project-wide filter picker uses the same library as the Looks tab
+  const sel = $('globalFilter'); sel.append(el('option', { value: 'none', text: 'None' }));
+  for (const g of FILTER_GROUPS) { const og = el('optgroup', { label: g }); for (const f of FILTERS.filter(x => x.group === g)) og.append(el('option', { value: f.id, text: f.label })); sel.append(og); }
+}
 for (const [k, v] of Object.entries(FONTS)) { $('fontSelect').append(el('option', { value: k, text: v.label })); $('thumbFont').append(el('option', { value: k, text: v.label })); }
 
 // ---------------------------------------------------------------- preview interactions (drag text/overlays on canvas, pick key color, tap to play)

@@ -11,7 +11,7 @@ const TW = 160, TH = 90;
 const pct = (v) => Math.round(v * 100) + '%';
 
 /** The sample picture the previews are drawn on: warm sky, sun, hills and a cross, with a few fine lines so sharpen / grain / pixelate show. */
-function samplePicture() {
+export function samplePicture() {
   const c = document.createElement('canvas'); c.width = TW; c.height = TH; const x = c.getContext('2d');
   const sky = x.createLinearGradient(0, 0, 0, TH); sky.addColorStop(0, '#2f4f8f'); sky.addColorStop(0.55, '#e08a55'); sky.addColorStop(1, '#f6c27a');
   x.fillStyle = sky; x.fillRect(0, 0, TW, TH);
