@@ -1,6 +1,6 @@
 // Clean voice: the one control (Off / Light / Strong + compare) that lives under the Volume slider of the selected sound.
 // This file only drives that control; the audio work is in clean.js (worker) and the playback / export hooks are in player.js / audio.js.
-import { cleanId, cleanLevelOf } from './model.js';
+import { cleanId, cleanLevelOf, changeTarget } from './model.js';
 
 const esc = (n) => (n < 0 ? 0 : n);
 /** "about 40 s left" / "about 3 min left" */
@@ -68,7 +68,8 @@ export function initCleanUI(ctx) {
     $('cleanProg').classList.toggle('show', !!here);
     $('cleanAsk').hidden = !(ask === item.id && !here);
     $('cleanNow').hidden = !(stale && !(err && err.itemId === item.id)) ;
-    $('cleanCompareRow').hidden = !ready;
+    const ct = changeTarget(item);
+    $('cleanCompareRow').hidden = !(ready || (ct && media.has(ct))); // one compare switch for Clean voice and Change voice
     if (here) renderProgress();
     if (ask === item.id && !here) {
       const mb = api ? api.STRONG_MB : 22;
@@ -94,11 +95,12 @@ export function initCleanUI(ctx) {
     it.clean = { level };
     commit('Clean voice: ' + level);
     player.invalidate();
+    if (ctx.afterClean) setTimeout(() => ctx.afterClean(type, id), 0); // Change voice goes on top of the new cleaned sound (after this job has ended)
   }
   async function startJob(cur, level) {
     const { item, type } = cur;
     const ctl = new AbortController();
-    job = { itemId: item.id, type, mediaId: item.mediaId, level, phase: 'process', frac: 0, eta: null, loaded: 0, total: 0, ctl };
+    job = { kind: 'clean', itemId: item.id, type, mediaId: item.mediaId, level, phase: 'process', frac: 0, eta: null, loaded: 0, total: 0, ctl };
     app.cleanJob = job; err = null; ask = null; render();
     let wake = null; try { wake = await navigator.wakeLock?.request('screen'); } catch { /* optional */ }
     try {
@@ -127,6 +129,7 @@ export function initCleanUI(ctx) {
     const cur = current(); if (!cur) return;
     const { item, type } = cur;
     err = null;
+    if (app.cleanJob && !job) return toast('Another sound is being processed. Wait for it or cancel it first.', 4000);
     if (job) {
       if (job.itemId !== item.id) return toast('Another sound is being cleaned. Wait for it or cancel it first.', 4000);
       if (job.level === level) return;
@@ -154,5 +157,5 @@ export function initCleanUI(ctx) {
     else if (b.id === 'cleanNow') startJob(cur, cleanLevelOf(cur.item));
   });
   $('cleanCompare').addEventListener('change', (e) => { player.cleanBypass = e.target.checked; player.invalidate(); });
-  return { render, get job() { return job; } };
+  return { render, current, findItem, get job() { return job; } };
 }

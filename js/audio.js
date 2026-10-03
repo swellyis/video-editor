@@ -2,7 +2,7 @@
 // clip audio (speed, fades, transitions) + overlay audio + music/voice tracks (looping, ducking).
 // Sources are decoded on demand with WebCodecs (via Mediabunny) — never whole files — and time-stretched with a
 // streaming WSOLA when a clip's speed isn't 1×.
-import { cleanTarget, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioLen, audioSpan, audioSpeed, overlayLen, overlayGain } from './model.js';
+import { soundTargets, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioLen, audioSpan, audioSpeed, overlayLen, overlayGain } from './model.js';
 import { loadMediabunny } from './media.js';
 import { yieldToMain } from './util.js';
 
@@ -218,11 +218,11 @@ export function audioSegments(project, lay) {
   for (const it of lay.items) {
     const c = it.clip;
     if (c.kind !== 'video' || !c.hasAudio || c.muted || c.volume <= 0) continue;
-    segs.push({ kind: 'clip', mediaId: c.mediaId, cleanId: cleanTarget(c), name: c.name, t0: it.start, t1: it.end, srcIn: c.in, speed: c.speed || 1, gain: (t) => clipGain(it, t), marks: envMarks(c, it.start) });
+    segs.push({ kind: 'clip', mediaId: c.mediaId, cleanIds: soundTargets(c), name: c.name, t0: it.start, t1: it.end, srcIn: c.in, speed: c.speed || 1, gain: (t) => clipGain(it, t), marks: envMarks(c, it.start) });
   }
   for (const o of project.overlays || []) {
     if (o.kind !== 'video' || !o.hasAudio || o.muted || o.volume <= 0 || o.start >= total) continue;
-    segs.push({ kind: 'overlay', mediaId: o.mediaId, cleanId: cleanTarget(o), name: o.name, t0: o.start, t1: Math.min(total, o.start + overlayLen(o)), srcIn: o.in, speed: o.speed || 1, gain: (t) => overlayGain(o, t), marks: envMarks(o, o.start) });
+    segs.push({ kind: 'overlay', mediaId: o.mediaId, cleanIds: soundTargets(o), name: o.name, t0: o.start, t1: Math.min(total, o.start + overlayLen(o)), srcIn: o.in, speed: o.speed || 1, gain: (t) => overlayGain(o, t), marks: envMarks(o, o.start) });
   }
   for (const a of project.audio || []) {
     if (a.muted || a.volume <= 0 || a.start >= total) continue;
@@ -230,12 +230,12 @@ export function audioSegments(project, lay) {
     const gain = (t) => musicGain(a, t, iv, total);
     const end = Math.min(total, a.start + audioSpan(a, total));
     const sp = audioSpeed(a), marks = envMarks(a, a.start);
-    if (!a.loop) { segs.push({ kind: 'music', mediaId: a.mediaId, cleanId: cleanTarget(a), name: a.name, t0: a.start, t1: end, srcIn: a.in, speed: sp, gain, marks }); continue; }
+    if (!a.loop) { segs.push({ kind: 'music', mediaId: a.mediaId, cleanIds: soundTargets(a), name: a.name, t0: a.start, t1: end, srcIn: a.in, speed: sp, gain, marks }); continue; }
     const L = audioLen(a); // one pass on the timeline; the source section is L * speed long
     let t = a.start, src = a.in + ((a.phase || 0) % L) * sp;
     for (let n = 0; t < end - 1e-4 && n < 100000; n++) {
       const passEnd = Math.min(end, t + (a.in + L * sp - src) / sp);
-      segs.push({ kind: 'music', mediaId: a.mediaId, cleanId: cleanTarget(a), name: a.name, t0: t, t1: passEnd, srcIn: src, speed: sp, gain, marks, loopPass: n, share: 'loop:' + a.id });
+      segs.push({ kind: 'music', mediaId: a.mediaId, cleanIds: soundTargets(a), name: a.name, t0: t, t1: passEnd, srcIn: src, speed: sp, gain, marks, loopPass: n, share: 'loop:' + a.id });
       t = passEnd; src = a.in;
     }
   }
@@ -263,11 +263,12 @@ export async function* mixChunks(project, lay, media, { sampleRate = 48000, chun
     const key = keyOf(s);
     if (!open.has(key)) {
       let st = null;
-      if (s.cleanId && !badClean.has(s.cleanId)) { // Clean voice: the cleaned copy made on this device stands in for the original sound
-        const crec = await media.get(s.cleanId).catch(() => null);
-        if (crec) { try { st = { reader: await new SourceReader(crec.blob, crec.name, crec.duration).open() }; } catch (e) { badClean.add(s.cleanId); } }
-        else badClean.add(s.cleanId);
-        if (!st && !warnedClean.has(s.cleanId)) { warnedClean.add(s.cleanId); onWarn && onWarn(`Clean voice isn’t ready on this device for “${s.name}”, so its original sound was used.`); }
+      for (const cid of s.cleanIds || []) { // Clean voice / Change voice: the processed copy made on this device stands in for the original sound (changed voice first)
+        if (st || badClean.has(cid)) continue;
+        const crec = await media.get(cid).catch(() => null);
+        if (crec && crec.blob) { try { st = { reader: await new SourceReader(crec.blob, crec.name, crec.duration).open() }; } catch (e) { badClean.add(cid); } }
+        else badClean.add(cid);
+        if (!st && !warnedClean.has(cid)) { warnedClean.add(cid); onWarn && onWarn(`The ${cid.startsWith('chg_') ? 'Change voice' : 'Clean voice'} copy isn’t ready on this device for “${s.name}”, so ${s.cleanIds.length > 1 && cid === s.cleanIds[0] ? 'the next best' : 'its original'} sound was used.`); }
       }
       const rec = st ? null : await media.get(s.mediaId);
       if (rec && !failed.has(s.mediaId)) {

@@ -1,18 +1,21 @@
-// "Clean voice" worker: runs the speech cleaner off the main thread, one stream per file.
+// "Clean voice" / "Change voice" worker: runs the speech cleaner (or the voice changer) off the main thread, one stream per file.
+//   voice  -> pitch / tone / radio (voice-dsp.js, plain JavaScript, no download)
 //   light  -> RNNoise (WebAssembly, ~110 KB, ships with the app, works offline at once)
 //   strong -> DPDFNet (ONNX neural network) on onnxruntime-web (WebAssembly); its files are downloaded once on request
 // Protocol: {type:'init', level, strong:{mjs, wasm, model, init}}  -> {type:'ready'}
 //           {type:'push', id, samples}  -> {type:'out', id, samples}      (48 kHz mono; may be shorter or empty)
 //           {type:'finish', id}         -> {type:'out', id, samples, done:true}
 import { RnStream, DfStream } from './clean-dsp.js';
+import { VoiceStream } from './voice-dsp.js';
 
 let stream = null, sess = null, ort = null, mod = null;
 const post = (m, t) => self.postMessage(m, t || []);
 const DRY = { light: 0.18, strong: 0 }; // share of the original sound kept in the result
 
-async function init({ level, strong }) {
+async function init({ level, strong, params }) {
   if (stream && stream.close) stream.close();
   stream = null;
+  if (level === 'voice') { stream = new VoiceStream(params || {}); return; } // Change voice: pure JavaScript, nothing to load
   if (level === 'strong') {
     if (!strong) throw new Error('The Strong model files are missing.');
     if (!ort) ort = await import(strong.ort);

@@ -1,4 +1,4 @@
-import { cleanIdsOf } from './model.js';
+import { cleanIdsOf, changeIdsOf } from './model.js';
 // IndexedDB persistence: projects (JSON) + media (Blobs) + inbox (shared files from the OS share sheet)
 const DB_NAME = 'video-editor-pro';
 const DB_VERSION = 1;
@@ -109,7 +109,7 @@ function askOtherTabs(timeout = 350) {
 
 export function mediaIdsOf(p) {
   const ids = new Set();
-  for (const it of [...(p.clips || []), ...(p.audio || []), ...(p.overlays || [])]) for (const id of cleanIdsOf(it)) ids.add(id);
+  for (const it of [...(p.clips || []), ...(p.audio || []), ...(p.overlays || [])]) for (const id of [...cleanIdsOf(it), ...changeIdsOf(it)]) ids.add(id);
   (p.clips || []).forEach(c => c.mediaId && ids.add(c.mediaId));
   (p.audio || []).forEach(a => a.mediaId && ids.add(a.mediaId));
   (p.overlays || []).forEach(o => o.mediaId && ids.add(o.mediaId));

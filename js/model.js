@@ -129,7 +129,7 @@ export function sanitizeProject(p) {
     a.in = num(a.in, 0, 1e6, 0); a.out = num(a.out, a.in + 0.01, 1e6, a.in + 1); a.loopLen = num(a.loopLen, 0, 1e6, 0); a.phase = num(a.phase, 0, 1e6, 0);
     a.fadeIn = num(a.fadeIn, 0, 60, 0); a.fadeOut = num(a.fadeOut, 0, 60, 0); a.speed = num(a.speed, 0.25, 4, 1);
   }
-  for (const it of [...p.clips, ...p.overlays, ...p.audio]) { cleanVolumeKeys(it); cleanClean(it); }
+  for (const it of [...p.clips, ...p.overlays, ...p.audio]) { cleanVolumeKeys(it); cleanClean(it); cleanChange(it); }
   if (p.logo) { const L = p.logo; L.size = num(L.size, 0.01, 1, 0.14); L.opacity = num(L.opacity, 0, 1, 0.85); L.margin = num(L.margin, 0, 0.5, 0.035); L.position = oneOf(L.position, ['tl', 'tr', 'bl', 'br', 'center'], 'tr'); }
   return p;
 }
@@ -298,6 +298,32 @@ export const cleanLevelOf = (item) => (item && item.clean && (item.clean.level =
 export const cleanTarget = (item) => { const l = cleanLevelOf(item); return l === 'off' || !item.mediaId ? null : cleanId(item.mediaId, l); };
 /** Every derived id an item may refer to (kept alive by storage cleanup even while switched off, so switching back is instant). */
 export const cleanIdsOf = (item) => (item && item.clean && item.mediaId ? [cleanId(item.mediaId, 'light'), cleanId(item.mediaId, 'strong')] : []);
+// ---- Change voice: a per-item setting { pitch, tone, radio } (semitones, semitones of colour, telephone/radio effect). The changed sound is a derived
+// media file made from the cleaned copy when Clean voice is on (Clean voice first, then Change voice), else from the original.
+export const CHANGE_VERSION = 1;
+export const CHANGE_PRESETS = {
+  off: { pitch: 0, tone: 0, radio: false },
+  deeper: { pitch: -4, tone: -1, radio: false },
+  higher: { pitch: 4, tone: 1, radio: false },
+  radio: { pitch: 0, tone: 0, radio: true },
+};
+const q5 = (v, lim) => { const n = Number(v); return Number.isFinite(n) ? Math.max(-lim, Math.min(lim, Math.round(n * 2) / 2)) : 0; };
+export const normChange = (c) => ({ pitch: q5(c && c.pitch, 12), tone: q5(c && c.tone, 6), radio: !!(c && c.radio === true) });
+export const changeIsOn = (c) => { const n = normChange(c); return n.pitch !== 0 || n.tone !== 0 || n.radio; };
+/** Which preset (off / deeper / higher / radio) the settings are, or 'custom'. */
+export const changePresetOf = (c) => { const n = normChange(c); for (const [k, p] of Object.entries(CHANGE_PRESETS)) if (p.pitch === n.pitch && p.tone === n.tone && p.radio === n.radio) return k; return 'custom'; };
+export const changeKey = (c) => { const n = normChange(c); return String(Math.round(n.pitch * 2)).replace('-', 'n') + '_' + String(Math.round(n.tone * 2)).replace('-', 'n') + '_' + (n.radio ? 'r' : 'x'); };
+export const changeId = (mediaId, cleanLevel, c) => 'chg_' + String(mediaId) + '_' + (cleanLevel === 'light' || cleanLevel === 'strong' ? cleanLevel : 'off') + '_' + changeKey(c) + '_v' + CHANGE_VERSION;
+export const changeTarget = (item) => (item && item.change && changeIsOn(item.change) && item.mediaId ? changeId(item.mediaId, cleanLevelOf(item), item.change) : null);
+/** Derived ids kept alive by storage cleanup while Change voice is on (any Clean voice level, so switching it keeps the copy). */
+export const changeIdsOf = (item) => (item && item.change && changeIsOn(item.change) && item.mediaId ? ['off', 'light', 'strong'].map(l => changeId(item.mediaId, l, item.change)) : []);
+/** Derived sounds to play / export instead of the original, best first (changed voice, else cleaned). The caller uses the first one that is stored here. */
+export const soundTargets = (item) => [changeTarget(item), cleanTarget(item)].filter(Boolean);
+function cleanChange(it) {
+  if (!it.change || typeof it.change !== 'object') { delete it.change; return; }
+  if (!changeIsOn(it.change)) { delete it.change; return; }
+  it.change = normChange(it.change);
+}
 function cleanClean(it) {
   if (!it.clean || typeof it.clean !== 'object') { delete it.clean; return; }
   it.clean = { level: CLEAN_LEVELS.includes(it.clean.level) ? it.clean.level : 'off' };
@@ -856,6 +882,7 @@ export function detachAudio(project, sel) {
     name: ((src.name || 'Video') + ' (audio)').slice(0, NAME_MAX), in: src.in, out: src.out, srcDuration: src.srcDuration, speed, volume: vol, muted: false,
     fadeIn, fadeOut, duck: false, loop: false, voice: true, keyframes: {},
   });
+  if (src.change) a.change = deepClone(src.change);
   if (src.clean) a.clean = deepClone(src.clean); // the detached sound keeps the cleaning of the picture it came from
   if (hasKeyframes(src, 'volume')) a.keyframes.volume = deepClone(src.keyframes.volume);
   project.audio.push(a);
@@ -1137,6 +1164,7 @@ export function clipToOverlay(project, id, ripple, start) {
     start: start ?? it.start, in: c.in, out: c.out, speed: c.speed, volume: c.volume, muted: c.muted, opacity: c.opacity, fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0,
     x: 0.5, y: 0.5, w: Math.min(1, H * aspect / W), radius: 0, shadow: false, keyframes: volumeOnly(c),
   });
+  if (c.change) o.change = deepClone(c.change);
   if (c.clean) o.clean = deepClone(c.clean);
   removeClip(project, id, ripple);
   if (!project.overlays) project.overlays = [];

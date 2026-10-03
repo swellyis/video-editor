@@ -175,6 +175,21 @@
                 <div class="button-row"><button class="btn primary small" type="button" id="cleanAskGo">Download &amp; clean</button><button class="btn secondary small" type="button" id="cleanAskNo">Not now</button></div>
               </div>
               <button class="btn secondary small" type="button" id="cleanNow" hidden>Clean now</button>
+            </div>
+            <div class="clean-box voice-box" id="voiceBox" hidden>
+              <div class="clean-head"><span class="label" id="voiceLabel">Change voice</span><span class="clean-state" id="voiceState" aria-live="polite"></span></div>
+              <div class="segmented four" id="voiceSeg" role="group" aria-labelledby="voiceLabel"><button type="button" data-voice="off">Off</button><button type="button" data-voice="deeper">Deeper</button><button type="button" data-voice="higher">Higher</button><button type="button" data-voice="radio">Radio</button></div>
+              <div id="voiceTune" hidden>
+                <div class="slider-row"><label for="voicePitch">Pitch</label><input type="range" id="voicePitch" min="-12" max="12" step="0.5" /><output id="voicePitchOut"></output></div>
+                <div class="slider-row"><label for="voiceTone">Tone</label><input type="range" id="voiceTone" min="-6" max="6" step="0.5" /><output id="voiceToneOut"></output></div>
+                <button class="linkish" type="button" id="voiceReset">Reset</button>
+              </div>
+              <p class="hint" id="voiceHint"></p>
+              <div class="progress" id="voiceProg" aria-live="polite">
+                <div class="progress-track"><div class="progress-bar" id="voiceBar"></div></div>
+                <div class="progress-copy"><span id="voiceProgText">Starting…</span><button class="linkish" type="button" id="voiceCancel">Cancel</button></div>
+              </div>
+              <button class="btn secondary small" type="button" id="voiceNow" hidden>Apply now</button>
               <label class="check" id="cleanCompareRow" hidden><input type="checkbox" id="cleanCompare" /> Hear the original (compare)</label>
             </div>
             <button type="button" class="mute-btn" data-toggle="clip.muted" aria-pressed="false"><svg class="ico spk-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 5.2a3.6 3.6 0 010 5.6M13 3.4a6.2 6.2 0 010 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><svg class="ico spk-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 6l4 4M15 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mute this clip</span><span class="mb-state" aria-hidden="true">Sound on</span></button>

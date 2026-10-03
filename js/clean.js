@@ -7,7 +7,7 @@ import { loadMediabunny } from './media.js';
 import { SourceReader } from './audio.js';
 import { Resampler, SR } from './clean-dsp.js';
 import { db } from './db.js';
-import { cleanId, CLEAN_VERSION } from './model.js';
+import { cleanId, CLEAN_VERSION, changeId, changeKey, normChange, changeIsOn, CHANGE_VERSION } from './model.js';
 import { yieldToMain } from './util.js';
 
 export class CleanCancelled extends Error { constructor() { super('Cleaning cancelled'); this.name = 'CleanCancelled'; } }
@@ -93,7 +93,7 @@ class WorkerEngine {
     };
     this.w.onerror = (e) => { const err = new Error('The cleaning engine could not start' + (e && e.message ? ': ' + e.message : '.')); if (this.ready) this.ready.rej(err); for (const p of this.waiting.values()) p.rej(err); this.waiting.clear(); };
   }
-  init(level, strong) { return new Promise((res, rej) => { this.ready = { res, rej }; this.w.postMessage({ type: 'init', level, strong: strong ? { ort: strong.ort, mjs: strong.mjs, wasm: strong.wasm, model: strong.model, init: strong.init } : null }); }); }
+  init(level, strong, params) { return new Promise((res, rej) => { this.ready = { res, rej }; this.w.postMessage({ type: 'init', level, params: params || null, strong: strong ? { ort: strong.ort, mjs: strong.mjs, wasm: strong.wasm, model: strong.model, init: strong.init } : null }); }); }
   _call(msg, transfer) { return new Promise((res, rej) => { const id = ++this.seq; this.waiting.set(id, { res, rej }); this.w.postMessage({ ...msg, id }, transfer || []); }); }
   push(samples) { return this._call({ type: 'push', samples }, [samples.buffer]); }
   finish() { return this._call({ type: 'finish' }); }
@@ -117,13 +117,27 @@ const SRC_CHUNK_SEC = 10;
  */
 export async function cleanMedia(media, mediaId, { level = 'light', onProgress, signal } = {}) {
   if (level !== 'light' && level !== 'strong') throw new CleanError('level', 'Unknown level.');
+  return derive(media, mediaId, { engine: level, id: cleanId(mediaId, level), meta: { cleanOf: mediaId, cleanLevel: level, cleanV: CLEAN_VERSION }, label: 'Clean voice', onProgress, signal });
+}
+/**
+ * Change voice: make the changed-voice copy `changeId(mediaId, clean, params)` of a media file. Clean voice comes first: when `clean` is
+ * 'light' / 'strong' its cleaned copy must already be stored and is the input. params: { pitch, tone, radio }.
+ */
+export async function changeMedia(media, mediaId, { clean = 'off', params, onProgress, signal } = {}) {
+  if (!changeIsOn(params)) throw new CleanError('level', 'Nothing to change.');
+  const p = normChange(params), src = clean === 'off' ? mediaId : cleanId(mediaId, clean);
+  if (clean !== 'off' && !(await hasCleaned(media, mediaId, clean))) throw new CleanError('needclean', 'Apply Clean voice first (“Clean now”), then Change voice.');
+  return derive(media, src, { engine: 'voice', params: p, id: changeId(mediaId, clean, p), meta: { changeOf: mediaId, changeKey: changeKey(p), changeV: CHANGE_VERSION, cleanLevel: clean === 'off' ? undefined : clean }, label: 'Change voice', onProgress, signal });
+}
+async function derive(media, mediaId, { engine, params, id, meta, label, onProgress, signal }) {
+  const level = engine;
   if (signal && signal.aborted) throw new CleanCancelled();
   const rec = await media.get(mediaId);
   if (!rec || !rec.blob) throw new CleanError('missing', 'The original file is not on this device.');
   const mb = await loadMediabunny();
   const store = await pickStore(mb);
   const dur = rec.duration > 0 ? rec.duration : 0;
-  if (store.fmt === 'wav' && dur > WAV_MAX_SEC) throw new CleanError('toolong', 'This browser cannot store a cleaned copy of a recording this long (it has no audio encoder).');
+  if (store.fmt === 'wav' && dur > WAV_MAX_SEC) throw new CleanError('toolong', 'This browser cannot store a processed copy of a recording this long (it has no audio encoder).');
   let eng = null, strong = null, reader = null, output = null;
   const cleanup = async (ok) => {
     try { eng && eng.close && eng.close(); } catch { /* ignore */ }
@@ -138,7 +152,7 @@ export async function cleanMedia(media, mediaId, { level = 'light', onProgress, 
     onProgress && onProgress({ frac: 0, etaSec: null, phase: 'starting' });
     if (level === 'strong') { if (!hooks.engine) strong = await strongUrls(); }
     eng = hooks.engine ? hooks.engine() : new WorkerEngine();
-    await eng.init(level, strong);
+    await eng.init(engine, strong, params);
     if (signal && signal.aborted) throw new CleanCancelled();
     try { reader = await new SourceReader(rec.blob, rec.name, rec.duration).open(); }
     catch (e) { if (e.noAudio) throw new CleanError('noaudio', 'This file has no sound to clean.'); throw new CleanError('unreadable', 'This browser cannot read the sound of this file (' + (e.message || 'unknown format') + ').'); }
@@ -179,8 +193,7 @@ export async function cleanMedia(media, mediaId, { level = 'light', onProgress, 
     src.close(); await output.finalize();
     const blob = new Blob([output.target.buffer], { type: store.mime });
     if (!blob.size) throw new CleanError('failed', 'No sound was produced.');
-    const id = cleanId(mediaId, level);
-    const out = { id, kind: 'audio', name: 'Clean voice · ' + (rec.name || 'audio'), type: store.mime, size: blob.size, created: Date.now(), blob, duration: written / SR, hasAudio: true, cleanOf: mediaId, cleanLevel: level, cleanV: CLEAN_VERSION };
+    const out = { id, kind: 'audio', name: label + ' · ' + String(rec.name || 'audio').replace(/^(Clean|Change) voice · /, ''), type: store.mime, size: blob.size, created: Date.now(), blob, duration: written / SR, hasAudio: true, ...meta };
     await db.putMedia(out);
     media.forget(id); media.recs.set(id, (await db.getMedia(id)) || out);
     onProgress && onProgress({ frac: 1, etaSec: 0, phase: 'done' });
@@ -203,4 +216,11 @@ export async function hasCleaned(media, mediaId, level) {
 /** Delete the cleaned copies of a media file (both levels). */
 export async function deleteCleaned(media, mediaId) {
   for (const level of ['light', 'strong']) { const id = cleanId(mediaId, level); media.forget(id); await db.deleteMedia(id).catch(() => { }); }
+}
+
+/** Is there a stored changed-voice copy for this media / Clean voice level / settings? */
+export async function hasChanged(media, mediaId, clean, params) {
+  if (!changeIsOn(params)) return false;
+  const r = await media.get(changeId(mediaId, clean, params)).catch(() => null);
+  return !!(r && r.blob && r.changeV === CHANGE_VERSION);
 }

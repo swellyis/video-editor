@@ -537,3 +537,8 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .clean-box .check{margin-top:8px}
 .clean-box .linkish{min-height:32px;padding:0 4px}
 .clean-box [hidden]{display:none!important}
+
+.voice-box{margin-top:8px}
+.segmented.four{grid-template-columns:repeat(4,1fr)}
+.voice-box .slider-row{margin-top:8px}
+.voice-box #voiceReset{margin-top:4px}

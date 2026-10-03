@@ -1,5 +1,5 @@
 // Real-time preview engine: plays the whole sequence across clips with a shared clock.
-import { layout, sourceTime, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioSpan, audioSpeed, audioSourceTime, overlayLen, overlaySourceTime, overlayGain, hasKeyframes, cleanTarget } from './model.js';
+import { layout, sourceTime, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioSpan, audioSpeed, audioSourceTime, overlayLen, overlaySourceTime, overlayGain, hasKeyframes, soundTargets } from './model.js';
 import { clamp } from './util.js';
 
 const POOL_MAX = 8;
@@ -98,8 +98,8 @@ export class Player {
     try { v.gain && v.gain.disconnect(); } catch { }
     this.videos.delete(id);
   }
-  /** The cleaned (Clean voice) copy to play instead of an item's own sound, when it is switched on, ready on this device, and not being compared. */
-  _cleanFor(item) { if (this.cleanBypass) return null; const id = cleanTarget(item); return id && this.media.has(id) ? id : null; }
+  /** The processed (Change voice, else Clean voice) copy to play instead of an item's own sound, when it is switched on, ready on this device, and not being compared. */
+  _cleanFor(item) { if (this.cleanBypass) return null; for (const id of soundTargets(item)) if (this.media.has(id)) return id; return null; }
   _getAux(item, cid) {
     let e = this.aux.get(item.id);
     if (e && e.mediaId === cid) return e;
