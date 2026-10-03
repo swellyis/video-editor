@@ -4,6 +4,8 @@ import { look as trLook } from './transitions.js';
 import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasMotion, overlaysAt, EASES, blurAt, laneOf } from './model.js';
 import { clamp } from './util.js';
 import { BlurFX } from './blur.js';
+import { FxGL } from './fx-gl.js';
+import { activeFx } from './effects.js';
 
 const VERT = `attribute vec2 p;varying vec2 uv;void main(){uv=vec2((p.x+1.0)*0.5,1.0-(p.y+1.0)*0.5);gl_Position=vec4(p,0.0,1.0);}`;
 const FRAG = `precision mediump float;varying vec2 uv;uniform sampler2D tex;
@@ -376,6 +378,8 @@ export function drawLogo(ctx, W, H, L, lg) {
 let blurFX = null; // one WebGL context shared by every compositor (preview, thumbnails, export)
 const sharedBlurFX = () => blurFX || (blurFX = new BlurFX());
 export function blurEngine() { return sharedBlurFX(); }
+const fxPool = []; // the effects engines: one for whole pictures, one for overlays (different sizes), shared by every compositor
+const sharedFx = (i = 0) => { const f = fxPool[i] || (fxPool[i] = new FxGL()); return f.ok ? f : null; };
 export class Compositor {
   constructor() {
     this.layer = document.createElement('canvas');
@@ -387,7 +391,7 @@ export class Compositor {
   _fx() { return sharedBlurFX(); }
   _key() { if (!this.key) this.key = new KeyGL(); return this.key.ok ? this.key : null; }
 
-  drawOverlay(ctx, W, H, o, src, local) {
+  drawOverlay(ctx, W, H, o, src, local, opts = {}) {
     const A = animated('overlay', o, local);
     const len = Math.max(0.01, (o.out - o.in) / (o.kind === 'image' ? 1 : (o.speed || 1)));
     let a = clamp(A.opacity, 0, 1);
@@ -405,6 +409,15 @@ export class Compositor {
         this.ovlX.drawImage(src.img, 0, 0, cw, chh);
         img = k.process(this.ovl, cw, chh, o.chroma);
       }
+    }
+    const ofx = activeFx(o.fx), fxg = ofx.length ? sharedFx(1) : null;
+    if (fxg) { // effects on the overlay's own picture (before it is placed, rotated and framed)
+      const cw = Math.round(Math.min(src.w, bw * 1.25, 1920)), chh = Math.max(2, Math.round(cw * src.h / src.w));
+      if (!this.ovl2) { this.ovl2 = document.createElement('canvas'); this.ovl2X = this.ovl2.getContext('2d'); }
+      if (this.ovl2.width !== cw || this.ovl2.height !== chh) { this.ovl2.width = cw; this.ovl2.height = chh; }
+      this.ovl2X.clearRect(0, 0, cw, chh); this.ovl2X.drawImage(img, 0, 0, cw, chh);
+      const r2 = fxg.process(this.ovl2, cw, chh, ofx, opts.t || 0);
+      if (r2) img = r2;
     }
     const cx = A.x * W, cy = A.y * H;
     const r = clamp(o.radius || 0, 0, 1) * Math.min(bw, bh) / 2;
@@ -528,7 +541,8 @@ export class Compositor {
         // (filling its background at partial opacity would darken the other picture underneath)
         const unit = !!L && L.alpha < 0.999;
         const gl = colorIsNeutral(col) ? null : this._gl();
-        if (!unit && !gl && (colorIsNeutral(col) || !this.filterOK)) {
+        const fxl = activeFx(it.clip.fx), fxg = fxl.length ? sharedFx(0) : null;
+        if (!unit && !gl && !fxg && (colorIsNeutral(col) || !this.filterOK)) {
           ctx.globalAlpha = a;
           if (bf) ctx.filter = bf;
           this.drawSource(ctx, src, c, W, H, fit, prog, bg);
@@ -538,7 +552,21 @@ export class Compositor {
           l.globalAlpha = 1; l.filter = 'none';
           this.drawSource(l, src, c, W, H, fit, prog, bg);
           ctx.globalAlpha = a;
-          if (gl) { if (bf) ctx.filter = bf; ctx.drawImage(gl.process(this.layer, W, H, col), 0, 0); }
+          if (fxg) { // colour first, then the clip's effects (Effects tab), then the transition's blur / fade
+            let pic = this.layer;
+            if (gl) pic = gl.process(this.layer, W, H, col);
+            else if (!colorIsNeutral(col) && this.filterOK) {
+              emulateGrade(l, W, H, col);
+              if (!this.layer2) { this.layer2 = document.createElement('canvas'); this.l2ctx = this.layer2.getContext('2d'); }
+              if (this.layer2.width !== W || this.layer2.height !== H) { this.layer2.width = W; this.layer2.height = H; }
+              this.l2ctx.filter = `brightness(${1 + col.brightness / 200}) contrast(${1 + col.contrast / 100}) saturate(${1 + col.saturation / 100}) sepia(${col.sepia / 100})`;
+              this.l2ctx.drawImage(this.layer, 0, 0); this.l2ctx.filter = 'none'; pic = this.layer2;
+            }
+            pic = fxg.process(pic, W, H, fxl, t) || pic;
+            if (bf) ctx.filter = bf;
+            ctx.drawImage(pic, 0, 0); ctx.filter = 'none';
+          }
+          else if (gl) { if (bf) ctx.filter = bf; ctx.drawImage(gl.process(this.layer, W, H, col), 0, 0); }
           else if (colorIsNeutral(col)) { if (bf) ctx.filter = bf; ctx.drawImage(this.layer, 0, 0); ctx.filter = 'none'; }
           else {
             emulateGrade(l, W, H, col); // warmth / fade / vignette, which CSS filters don't have
@@ -563,7 +591,7 @@ export class Compositor {
     for (const o of overlaysAt(project, t)) steps.push({ lane: laneOf(o), run: () => {
       const src = opts.getOverlaySource ? opts.getOverlaySource(o) : null;
       if (!src || !src.w) { missing++; return; }
-      boxes.push(this.drawOverlay(ctx, W, H, o, src, t - o.start));
+      boxes.push(this.drawOverlay(ctx, W, H, o, src, t - o.start, { t }));
       ctx.globalAlpha = 1;
     } });
     // Blur / Privacy regions blur everything on the lanes below them

@@ -1,6 +1,7 @@
 // Project data model, timeline layout, edit operations, audio envelopes, history.
 import { uid, clamp, deepClone } from './util.js';
 import { normalize as normTransition, isOverlap, isDip, typeInfo, effective as effTransition, soundGain } from './transitions.js';
+import { normFx } from './effects.js';
 import { defaultCaptionStyle, normalizeCaptionStyle, normalizeCaptions, splitCaption } from './captions.js';
 
 export const SCHEMA = 5;
@@ -213,6 +214,7 @@ export function normalizeClip(c) {
     transform: Object.assign(defaultTransform(), c.transform || {}),
     transition: normTransition(c.transition),
     blur: Object.assign(defaultClipBlur(), c.blur && typeof c.blur === 'object' ? c.blur : {}),
+    fx: normFx(c.fx),
   });
 }
 
@@ -252,7 +254,7 @@ export function normalizeOverlay(o) {
     id: uid('ovl'), kind: 'video', mediaId: null, name: 'Overlay', srcDuration: 1, width: 16, height: 9, hasAudio: false,
     start: 0, in: 0, out: 1, speed: 1, x: 0.76, y: 0.26, w: 0.36, radius: 0.12, opacity: 1, rotation: 0, scale: 1,
     border: 0, borderColor: '#ffffff', shadow: true, volume: 1, muted: true, fadeIn: 0.25, fadeOut: 0.25,
-  }, o, { chroma: Object.assign(defaultChroma(), o.chroma || {}), keyframes: o.keyframes || {} });
+  }, o, { chroma: Object.assign(defaultChroma(), o.chroma || {}), keyframes: o.keyframes || {}, fx: normFx(o.fx) });
 }
 export function newOverlay(media, start, settings) {
   const isImg = media.kind === 'image';
@@ -1193,6 +1195,7 @@ export function clipToOverlay(project, id, ripple, start) {
     start: start ?? it.start, in: c.in, out: c.out, speed: c.speed, volume: c.volume, muted: c.muted, opacity: c.opacity, fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0,
     x: 0.5, y: 0.5, w: Math.min(1, H * aspect / W), radius: 0, shadow: false, keyframes: volumeOnly(c),
   });
+  o.fx = normFx(c.fx);
   if (c.change) o.change = deepClone(c.change);
   if (c.clean) o.clean = deepClone(c.clean);
   removeClip(project, id, ripple);
