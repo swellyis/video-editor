@@ -284,7 +284,7 @@ export class Timeline {
         b.addEventListener('click', e => { e.stopPropagation(); this.app.openTransition && this.app.openTransition(b._id, b); });
         return b;
       }, this.lanes);
-      n._id = c.id;
+      n._id = c.id; n.dataset.clip = c.id;
       const gx = this.x(it.start + (it.xIn > 0 ? it.xIn / 2 : 0));
       n.style.left = gx + 'px'; n.style.top = top(c) + 'px';
       const roomy = prev.len * this.pps >= 36 && it.len * this.pps >= 36 && !(c.gap > 1e-6);
