@@ -9,16 +9,22 @@ import { activeFx } from './effects.js';
 
 const VERT = `attribute vec2 p;varying vec2 uv;void main(){uv=vec2((p.x+1.0)*0.5,1.0-(p.y+1.0)*0.5);gl_Position=vec4(p,0.0,1.0);}`;
 const FRAG = `precision mediump float;varying vec2 uv;uniform sampler2D tex;
-uniform float bri,con,sat,tmp,sep,fad,vig;uniform vec2 asp;
-void main(){vec3 c=texture2D(tex,uv).rgb;
+uniform float bri,con,sat,tmp,sep,fad,vig,gam,crv;uniform vec4 ts,th;uniform vec2 asp;
+void main(){vec4 t0=texture2D(tex,uv);vec3 c=t0.rgb;
 c+=bri;c=(c-0.5)*con+0.5;
 float l=dot(c,vec3(0.2126,0.7152,0.0722));c=mix(vec3(l),c,sat);
 c.r+=tmp*0.09;c.g+=tmp*0.02;c.b-=tmp*0.09;
 vec3 s=vec3(dot(c,vec3(.393,.769,.189)),dot(c,vec3(.349,.686,.168)),dot(c,vec3(.272,.534,.131)));c=mix(c,s,sep);
 c=mix(c,vec3(0.08)+c*0.86,fad);
+if(gam!=1.0)c=pow(max(c,0.0),vec3(1.0/gam));
+if(crv>0.0)c=mix(c,c*c*(3.0-2.0*c),crv);
+if(ts.a>0.0||th.a>0.0){float lm=dot(clamp(c,0.0,1.0),vec3(0.2126,0.7152,0.0722));
+c+=(ts.rgb-vec3(dot(ts.rgb,vec3(0.3333))))*(ts.a*1.2*(1.0-smoothstep(0.0,0.6,lm)));
+c+=(th.rgb-vec3(dot(th.rgb,vec3(0.3333))))*(th.a*1.2*smoothstep(0.4,1.0,lm));}
 vec2 d=(uv-0.5)*asp;float r=length(d)*1.5;c*=1.0-vig*smoothstep(0.45,1.25,r);
-gl_FragColor=vec4(clamp(c,0.0,1.0),1.0);}`;
+gl_FragColor=vec4(clamp(c,0.0,1.0),t0.a);}`;
 
+export { ColorGL };
 class ColorGL {
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -44,7 +50,7 @@ class ColorGL {
       const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      this.u = {}; for (const n of ['bri', 'con', 'sat', 'tmp', 'sep', 'fad', 'vig', 'asp']) this.u[n] = gl.getUniformLocation(pr, n);
+      this.u = {}; for (const n of ['bri', 'con', 'sat', 'tmp', 'sep', 'fad', 'vig', 'asp', 'gam', 'crv', 'ts', 'th']) this.u[n] = gl.getUniformLocation(pr, n);
       this.gl = gl; this.ok = !gl.isContextLost();
     } catch (e) { console.warn('WebGL color pipeline unavailable', e); this.ok = false; }
   }
@@ -60,6 +66,8 @@ class ColorGL {
     gl.uniform1f(this.u.sep, c.sepia / 100);
     gl.uniform1f(this.u.fad, c.fade / 100);
     gl.uniform1f(this.u.vig, c.vignette / 100);
+    gl.uniform1f(this.u.gam, c.gamma || 1); gl.uniform1f(this.u.crv, c.curve || 0);
+    const ts = c.ts || [0, 0, 0, 0], th = c.th || [0, 0, 0, 0]; gl.uniform4f(this.u.ts, ts[0], ts[1], ts[2], ts[3]); gl.uniform4f(this.u.th, th[0], th[1], th[2], th[3]);
     const m = Math.max(W, H); gl.uniform2f(this.u.asp, W / m, H / m);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     return this.canvas;
@@ -388,6 +396,7 @@ export class Compositor {
     this.filterOK = canvasFilterSupported();
   }
   _gl() { if (!this.gl) this.gl = new ColorGL(); return this.gl.ok ? this.gl : null; }
+  _glo() { if (!this.glo) this.glo = new ColorGL(); return this.glo.ok ? this.glo : null; }
   _fx() { return sharedBlurFX(); }
   _key() { if (!this.key) this.key = new KeyGL(); return this.key.ok ? this.key : null; }
 
@@ -409,6 +418,14 @@ export class Compositor {
         this.ovlX.drawImage(src.img, 0, 0, cw, chh);
         img = k.process(this.ovl, cw, chh, o.chroma);
       }
+    }
+    const ocol = effectiveColor({}, o), gk = colorIsNeutral(ocol) ? null : this._glo();
+    if (gk) { // the overlay's own filter (Looks tab): same colour pass as the clips
+      const cw = Math.round(Math.min(src.w, bw * 1.25, 1920)), chh = Math.max(2, Math.round(cw * src.h / src.w));
+      if (!this.ovl3) { this.ovl3 = document.createElement('canvas'); this.ovl3X = this.ovl3.getContext('2d'); }
+      if (this.ovl3.width !== cw || this.ovl3.height !== chh) { this.ovl3.width = cw; this.ovl3.height = chh; }
+      this.ovl3X.clearRect(0, 0, cw, chh); this.ovl3X.drawImage(img, 0, 0, cw, chh);
+      img = gk.process(this.ovl3, cw, chh, ocol);
     }
     const ofx = activeFx(o.fx), fxg = ofx.length ? sharedFx(1) : null;
     if (fxg) { // effects on the overlay's own picture (before it is placed, rotated and framed)

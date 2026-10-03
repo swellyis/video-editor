@@ -7,16 +7,8 @@ import { defaultCaptionStyle, normalizeCaptionStyle, normalizeCaptions, splitCap
 export const SCHEMA = 5;
 export const MIN_CLIP = 0.1; // seconds on timeline
 
-export const PRESETS = {
-  none: { label: 'None' },
-  warm: { label: 'Warm', temperature: 30, saturation: 8, brightness: 2 },
-  cool: { label: 'Cool', temperature: -30, saturation: -4 },
-  bw: { label: 'B&W', saturation: -100, contrast: 12 },
-  vintage: { label: 'Vintage', sepia: 38, contrast: -8, fade: 14, saturation: -12, vignette: 30 },
-  vivid: { label: 'Vivid', saturation: 38, contrast: 14 },
-  dramatic: { label: 'Dramatic', contrast: 28, saturation: -22, vignette: 40, brightness: -4 },
-  golden: { label: 'Golden hour', temperature: 42, sepia: 12, saturation: 14, vignette: 18 },
-};
+import { PRESETS, KEYS as COLOR_KEYS, filterParams, amountOf, normFilter } from './filters.js';
+export { PRESETS };
 export const FONTS = {
   sans: { label: 'Plex Sans Bold', css: '700 {s}px "IBM Plex Sans", system-ui, sans-serif' },
   condensed: { label: 'Plex Condensed', css: '700 {s}px "IBM Plex Sans Condensed", "IBM Plex Sans", sans-serif' },
@@ -27,7 +19,7 @@ export const FONTS = {
 };
 export const RATIOS = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5 };
 
-export const defaultColor = () => ({ preset: 'none', brightness: 0, contrast: 0, saturation: 0, temperature: 0, vignette: 0 });
+export const defaultColor = () => ({ preset: 'none', filterAmount: 1, brightness: 0, contrast: 0, saturation: 0, temperature: 0, vignette: 0 });
 export const defaultTransform = () => ({ zoom: 1, x: 0, y: 0, rotate: 0, angle: 0, flipH: false, flipV: false, kenBurns: 'none', kbFrom: 0, kbTo: 1 });
 export const defaultChroma = () => ({ enabled: false, color: '#00ff00', similarity: 0.4, smoothness: 0.15, spill: 0.5 });
 
@@ -67,7 +59,7 @@ export function migrate(p) {
   const out = Object.assign(base, p);
   out.name = fixedProjectName(out);
   out.settings = Object.assign(base.settings, p.settings || {});
-  out.color = Object.assign(defaultColor(), p.color || {});
+  out.color = tidyColor(Object.assign(defaultColor(), p.color || {}));
   out.thumb = Object.assign(newProject().thumb, p.thumb || {});
   out.clips = (p.clips || []).map(c => normalizeClip(c));
   out.texts = (p.texts || []).map(t => { const b = newText(0); const r = Object.assign(b, t); r.name = typeof t.name === 'string' ? t.name.slice(0, NAME_MAX) : ''; r.anim = Object.assign(newText(0).anim, t.anim || {}); r.keyframes = t.keyframes || {}; return r; });
@@ -203,6 +195,7 @@ export function blurAt(b, t) {
   return { shape: b.shape, mode: b.mode, radius: b.radius, strength: b.strength, feather: b.feather, invert: b.invert, x: A.x, y: A.y, w: A.w, h: A.h, amount: clamp(amount, 0, 1) };
 }
 
+const tidyColor = (c) => { normFilter(c); return c; };
 export function normalizeClip(c) {
   return Object.assign({
     id: uid('clip'), kind: 'video', mediaId: null, name: 'Clip', srcDuration: 1, width: 0, height: 0, hasAudio: true,
@@ -210,7 +203,7 @@ export function normalizeClip(c) {
     transition: { type: 'cut', duration: 0.6 }, keyframes: {},
   }, c, {
     keyframes: c.keyframes || {},
-    color: Object.assign(defaultColor(), c.color || {}),
+    color: tidyColor(Object.assign(defaultColor(), c.color || {})),
     transform: Object.assign(defaultTransform(), c.transform || {}),
     transition: normTransition(c.transition),
     blur: Object.assign(defaultClipBlur(), c.blur && typeof c.blur === 'object' ? c.blur : {}),
@@ -254,7 +247,7 @@ export function normalizeOverlay(o) {
     id: uid('ovl'), kind: 'video', mediaId: null, name: 'Overlay', srcDuration: 1, width: 16, height: 9, hasAudio: false,
     start: 0, in: 0, out: 1, speed: 1, x: 0.76, y: 0.26, w: 0.36, radius: 0.12, opacity: 1, rotation: 0, scale: 1,
     border: 0, borderColor: '#ffffff', shadow: true, volume: 1, muted: true, fadeIn: 0.25, fadeOut: 0.25,
-  }, o, { chroma: Object.assign(defaultChroma(), o.chroma || {}), keyframes: o.keyframes || {}, fx: normFx(o.fx) });
+  }, o, { chroma: Object.assign(defaultChroma(), o.chroma || {}), keyframes: o.keyframes || {}, fx: normFx(o.fx), color: tidyColor({ preset: 'none', filterAmount: 1, ...(o.color && typeof o.color === 'object' ? { preset: o.color.preset, filterAmount: o.color.filterAmount } : {}) }) });
 }
 export function newOverlay(media, start, settings) {
   const isImg = media.kind === 'image';
@@ -640,13 +633,12 @@ export function musicGain(a, t, intervals, total) {
   return Math.max(0, g);
 }
 
-/** Effective color = global + per-clip + presets */
+/** Effective color = global sliders + clip sliders + the global and clip filters (each at its own intensity) */
 export function effectiveColor(project, clip) {
   const g = project.color || defaultColor(), c = clip?.color || defaultColor();
-  const pg = PRESETS[g.preset] || {}, pc = PRESETS[c.preset] || {};
-  const keys = ['brightness', 'contrast', 'saturation', 'temperature', 'vignette', 'sepia', 'fade'];
+  const fg = filterParams(g.preset, amountOf(g)), fc = filterParams(c.preset, amountOf(c));
   const out = {};
-  for (const k of keys) out[k] = (g[k] || 0) + (c[k] || 0) + (pg[k] || 0) + (pc[k] || 0);
+  for (const k of COLOR_KEYS) out[k] = (g[k] || 0) + (c[k] || 0) + fg[k] + fc[k];
   out.saturation = clamp(out.saturation, -100, 150);
   out.vignette = clamp(out.vignette, 0, 100);
   out.sepia = clamp(out.sepia, 0, 100);
@@ -654,9 +646,13 @@ export function effectiveColor(project, clip) {
   out.brightness = clamp(out.brightness, -100, 100);
   out.contrast = clamp(out.contrast, -100, 100);
   out.temperature = clamp(out.temperature, -100, 100);
+  out.gamma = clamp(fg.gamma * fc.gamma, 0.5, 2);
+  out.curve = clamp(fg.curve + fc.curve, 0, 1);
+  out.ts = fc.ts[3] > 0 ? fc.ts : fg.ts; // the clip's own tint wins over the project's
+  out.th = fc.th[3] > 0 ? fc.th : fg.th;
   return out;
 }
-export const colorIsNeutral = (c) => !c.brightness && !c.contrast && !c.saturation && !c.temperature && !c.vignette && !c.sepia && !c.fade;
+export const colorIsNeutral = (c) => !c.brightness && !c.contrast && !c.saturation && !c.temperature && !c.vignette && !c.sepia && !c.fade && (c.gamma ?? 1) === 1 && !c.curve && !(c.ts && c.ts[3]) && !(c.th && c.th[3]);
 
 /** Thumbnail formats: widescreen (1280x720), vertical for Shorts (1080x1920) and square. */
 export const THUMB_FORMATS = {
@@ -1195,7 +1191,7 @@ export function clipToOverlay(project, id, ripple, start) {
     start: start ?? it.start, in: c.in, out: c.out, speed: c.speed, volume: c.volume, muted: c.muted, opacity: c.opacity, fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0,
     x: 0.5, y: 0.5, w: Math.min(1, H * aspect / W), radius: 0, shadow: false, keyframes: volumeOnly(c),
   });
-  o.fx = normFx(c.fx);
+  o.fx = normFx(c.fx); if (c.color) { o.color = tidyColor({ preset: c.color.preset, filterAmount: c.color.filterAmount }); }
   if (c.change) o.change = deepClone(c.change);
   if (c.clean) o.clean = deepClone(c.clean);
   removeClip(project, id, ripple);

@@ -661,8 +661,8 @@ const actions = {
   resetTransform() { const c = selected('clip'); if (!c) return; c.transform = defaultTransform(); c.fit = 'inherit'; app.commit('Reset frame'); },
   rotL() { const c = selected('clip'); if (!c) return; c.transform.rotate = ((c.transform.rotate || 0) + 270) % 360; app.commit('Rotate'); },
   rotR() { const c = selected('clip'); if (!c) return; c.transform.rotate = ((c.transform.rotate || 0) + 90) % 360; app.commit('Rotate'); },
-  resetClipColor() { const c = selected('clip'); if (!c) return; c.color = defaultColor(); app.commit('Reset color'); },
-  resetGlobalColor() { app.project.color = defaultColor(); app.commit('Reset color'); },
+  resetClipColor() { const c = selected('clip'); if (!c) return; c.color = { ...defaultColor(), preset: c.color.preset, filterAmount: c.color.filterAmount }; app.commit('Reset color'); }, // the sliders only: the filter has its own Remove
+  resetGlobalColor() { const k = app.project.color; app.project.color = { ...defaultColor(), preset: k.preset, filterAmount: k.filterAmount }; app.commit('Reset color'); },
   addText() {
     const p = app.project, total = layout(p).total;
     const start = clamp(player.t, 0, Math.max(0, total - 0.5));
