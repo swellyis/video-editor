@@ -79,8 +79,8 @@ voiceUI = initVoiceUI({ $, app, media, player, toast, commit: (l) => app.commit(
 silenceUI = initSilenceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, redraw: () => timeline.render(), timeline });
 syncUI = initSyncUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
 beatUI = initBeatUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
-trUI = initTransitionUI({ $, app, commit: (l) => app.commit(l) });
-app.openTransition = (id, from) => trUI.open(id, from);
+trUI = initTransitionUI({ $, app, commit: (l) => app.commit(l), showTab });
+app.openTransition = (id, opts) => trUI.open(id, opts);
 
 // ---------------------------------------------------------------- persistence
 // Autosave: revision-counted so the indicator only says "Saved" when the stored copy matches the editor.
@@ -142,7 +142,8 @@ app.select = (sel, opts = {}) => {
   app.selection = sel;
   if (sel) {
     const tab = { clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip', blur: 'look', caption: 'captions' }[sel.type];
-    if (tab) showTab(tab);
+    if (sel.type === 'clip') app.trTarget = null; // the Transitions tab follows the selected clip again
+    if (tab && !(sel.type === 'clip' && qs('.tabs button.active')?.dataset.tab === 'trans')) showTab(tab); // selecting a clip while browsing transitions stays on that tab
     if (opts.seekInto) {
       const t = player.t;
       if (sel.type === 'clip') { const it = layout(app.project).items.find(i => i.clip.id === sel.id); if (it && (t < it.start || t >= it.end)) player.setTime(it.start + 0.001); }
@@ -1227,6 +1228,8 @@ $('snapBtn').onclick = () => { app.snapEnabled = !app.snapEnabled; $('snapBtn').
 function showTab(name) {
   qsa('.tabs button').forEach(x => { const on = x.dataset.tab === name; x.classList.toggle('active', on); x.setAttribute('aria-selected', on ? 'true' : 'false'); x.tabIndex = on ? 0 : -1; });
   qsa('.tab-panel').forEach(x => x.classList.toggle('active', x.id === 'tab-' + name));
+  const act = qs('.tabs button.active'); if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (app.timeline) app.timeline.render(); // the join markers show which join the Transitions tab is editing
 }
 // ARIA tabs: tab <-> panel wiring, roving focus with arrow keys / Home / End
 (() => {

@@ -119,6 +119,7 @@
     <aside class="inspector" aria-label="Editing controls">
       <div class="tabs" role="tablist">
         <button class="active" data-tab="clip" type="button" role="tab">Clip</button>
+        <button data-tab="trans" type="button" role="tab">Transitions</button>
         <button data-tab="text" type="button" role="tab">Text</button>
         <button data-tab="captions" type="button" role="tab">Captions</button>
         <button data-tab="audio" type="button" role="tab">Audio</button>
@@ -131,7 +132,7 @@
       <div class="tab-panel active" id="tab-clip">
         <section class="section">
           <div class="section-head"><h2>Media</h2><label class="btn ghost" for="addInput">＋ Add clips</label><input id="addInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.heic,.heif,.gif,.mov,.mp4,.m4v,.webm" multiple /></div>
-          <p class="hint" id="clipEmptyHint">Select a clip on the timeline to trim it, change speed, volume, transition, framing and color. Images become title cards.</p>
+          <p class="hint" id="clipEmptyHint">Select a clip on the timeline to trim it, change speed, volume, framing and color (transitions have their own tab). Images become title cards.</p>
         </section>
         <div id="clipPanel" hidden>
           <div class="offline-banner" id="offlineBanner" hidden>
@@ -246,11 +247,6 @@
               <label><span class="label">Audio fade out (s)</span><input class="field mono" type="number" min="0" max="10" step="0.1" data-bind="clip.fadeOut" data-commit="change" /></label>
             </div>
           </section>
-          <section class="section" id="trSection">
-            <h2 class="sh">Transition into this clip</h2>
-            <button type="button" class="btn secondary tr-open" id="trOpen" aria-haspopup="dialog"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5l5.5 4.5-5.5 4.5zM14.5 3.5L9 8l5.5 4.5z" fill="currentColor"/></svg><span id="trOpenLabel">Cut</span><span class="tr-open-sub" id="trOpenSub"></span></button>
-            <p class="hint" id="trOpenHint" style="margin:6px 0 0"></p>
-          </section>
           <section class="section">
             <div class="section-head"><h2>Frame, crop &amp; motion</h2><button class="btn ghost small" data-action="resetTransform" type="button">Reset</button></div>
             <label><span class="label">Fit</span><select data-bind="clip.fit"><option value="inherit">Project default</option><option value="contain">Show full frame</option><option value="cover">Fill &amp; crop</option></select></label>
@@ -299,6 +295,21 @@
             <div class="slider-row"><label>Vignette</label><input type="range" min="0" max="100" data-bind="clip.color.vignette" /><output data-out="clip.color.vignette"></output></div>
           </section>
         </div>
+      </div>
+
+      <!-- TRANSITIONS -->
+      <div class="tab-panel" id="tab-trans">
+        <section class="section">
+          <div class="section-head"><h2>Transitions</h2></div>
+          <p class="tr-join" id="trJoin" aria-live="polite"></p>
+          <div id="trTypes" class="tr-types"></div>
+          <div class="tr-controls">
+            <div class="slider-row tr-dur"><label for="trDur">Duration</label><input type="range" id="trDur" min="0.1" max="3" step="0.05" value="0.5" /><output id="trDurOut" for="trDur">0.5 s</output></div>
+            <label class="tr-check" id="trAudioRow"><input type="checkbox" id="trAudio" checked /> <span>Crossfade the sound</span></label>
+            <p class="hint tr-note" id="trNote" role="status" aria-live="polite"></p>
+            <div class="tr-actions"><button type="button" class="btn secondary" id="trAll">Apply to all joins</button><button type="button" class="btn ghost" id="trRemove">Remove</button></div>
+          </div>
+        </section>
       </div>
 
       <!-- TEXT -->
@@ -822,15 +833,6 @@
 </dialog>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<div class="tr-picker" id="trPicker" role="dialog" aria-labelledby="trTitle" hidden>
-  <div class="tr-head"><h3 id="trTitle">Transition</h3><button type="button" class="tr-x" id="trClose" aria-label="Close">×</button></div>
-  <p class="tr-join" id="trJoin"></p>
-  <div id="trTypes" class="tr-types"></div>
-  <div class="slider-row tr-dur"><label for="trDur">Duration</label><input type="range" id="trDur" min="0.1" max="3" step="0.05" value="0.5" /><output id="trDurOut" for="trDur">0.5 s</output></div>
-  <label class="tr-check" id="trAudioRow"><input type="checkbox" id="trAudio" checked /> <span>Crossfade the sound</span></label>
-  <p class="hint tr-note" id="trNote" role="status" aria-live="polite"></p>
-  <div class="tr-actions"><button type="button" class="btn secondary" id="trAll">Apply to all joins</button><button type="button" class="btn ghost" id="trRemove">Remove</button></div>
-</div>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

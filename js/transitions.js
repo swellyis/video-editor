@@ -14,6 +14,7 @@ export const MIN_DUR = 0.1, MAX_DUR = 3, DEFAULT_DUR = 0.5;
 export const TYPES = [
   { id: 'cut', label: 'Cut', kind: 'cut', group: 'Basic' },
   { id: 'crossfade', label: 'Dissolve', kind: 'overlap', group: 'Basic' },
+  { id: 'blur', label: 'Blur dissolve', kind: 'overlap', group: 'Basic' },
   { id: 'fade', label: 'Dip to black', kind: 'dip', color: '#000000', group: 'Basic' },
   { id: 'dipwhite', label: 'Dip to white', kind: 'dip', color: '#ffffff', group: 'Basic' },
   { id: 'wipeleft', label: 'Wipe ←', kind: 'overlap', dir: [-1, 0], group: 'Wipe' },
@@ -24,9 +25,8 @@ export const TYPES = [
   { id: 'slideright', label: 'Slide →', kind: 'overlap', dir: [1, 0], group: 'Slide' },
   { id: 'slideup', label: 'Slide ↑', kind: 'overlap', dir: [0, -1], group: 'Slide' },
   { id: 'slidedown', label: 'Slide ↓', kind: 'overlap', dir: [0, 1], group: 'Slide' },
-  { id: 'zoomin', label: 'Zoom in', kind: 'overlap', group: 'More' },
-  { id: 'zoomout', label: 'Zoom out', kind: 'overlap', group: 'More' },
-  { id: 'blur', label: 'Blur dissolve', kind: 'overlap', group: 'More' },
+  { id: 'zoomin', label: 'Zoom in', kind: 'overlap', group: 'Zoom' },
+  { id: 'zoomout', label: 'Zoom out', kind: 'overlap', group: 'Zoom' },
 ];
 const BY_ID = new Map(TYPES.map(t => [t.id, t]));
 export const typeInfo = (id) => BY_ID.get(id) || BY_ID.get('cut');

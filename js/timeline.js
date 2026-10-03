@@ -273,6 +273,7 @@ export class Timeline {
       this.renderKfs(n, c, it.start, it.len);
       this.renderVolEnv(n, c, 'clip', it.start, it.len, ITEM_H, sel.type === 'clip' && sel.id === c.id && hasSound(c));
     }
+    const onTrans = !!document.querySelector('#tab-trans.active');
     // the small marker on every join of two clips: tap it to choose the transition (the choice is stored on the clip that follows)
     for (const it of lay.items) {
       if (it.index === 0) continue;
@@ -281,7 +282,11 @@ export class Timeline {
         const b = el('button', { class: 'tl-join', type: 'button' });
         b.innerHTML = '<svg viewBox="0 0 16 10" aria-hidden="true"><path d="M1 1l6 4-6 4zM15 1L9 5l6 4z" fill="currentColor"/></svg>';
         b.addEventListener('pointerdown', e => e.stopPropagation());
-        b.addEventListener('click', e => { e.stopPropagation(); this.app.openTransition && this.app.openTransition(b._id, b); });
+        b.addEventListener('click', e => { e.stopPropagation(); this.app.openTransition && this.app.openTransition(b._id); });
+        // desktop: drop a transition card from the Transitions tab onto the marker
+        b.addEventListener('dragover', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('text/x-transition')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; b.classList.add('drop'); } });
+        b.addEventListener('dragleave', () => b.classList.remove('drop'));
+        b.addEventListener('drop', e => { b.classList.remove('drop'); const t = e.dataTransfer && e.dataTransfer.getData('text/x-transition'); if (!t) return; e.preventDefault(); this.app.openTransition && this.app.openTransition(b._id, { type: t }); });
         return b;
       }, this.lanes);
       n._id = c.id; n.dataset.clip = c.id;
@@ -290,7 +295,7 @@ export class Timeline {
       const roomy = prev.len * this.pps >= 36 && it.len * this.pps >= 36 && !(c.gap > 1e-6);
       n.hidden = !roomy;
       const set = c.transition.type !== 'cut';
-      n.classList.toggle('set', set);
+      n.classList.toggle('set', set); n.classList.toggle('target', onTrans && (this.app.trTarget === c.id || (!this.app.trTarget && sel.type === 'clip' && sel.id === c.id)));
       const nm = set ? labelOf(c.transition.type) + ', ' + (Math.round((it.xIn > 0 ? it.xIn : c.transition.duration) * 10) / 10) + ' seconds' : 'none';
       n.setAttribute('aria-label', `Transition between clip ${it.index} and clip ${it.index + 1}: ${nm}. Change`);
       n.title = set ? labelOf(c.transition.type) : 'Add a transition';
