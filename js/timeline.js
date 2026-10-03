@@ -350,11 +350,24 @@ export class Timeline {
       this.renderWave(n.querySelector('.wave'), a, w, null, 30, 1, span);
       this.renderVolEnv(n, a, 'audio', a.start, span, ITEM_H, sel.type === 'audio' && sel.id === a.id);
     }
+    this.renderSilences(top);
     // remove stale
     for (const [k, n] of this.nodes) if (n._seen !== this._gen) { n.remove(); this.nodes.delete(k); }
     this.lanes.classList.toggle('empty', this.geo.n === 0);
     this.renderHeads();
     this.updatePlayhead(this.app.player.t);
+  }
+  /** Remove silences: the stretches found in the selected recording, drawn over the items that play it (no lane of their own). */
+  renderSilences(top) {
+    const marks = (this.app.silence && this.app.silence.marks && this.app.silence.marks()) || [];
+    const geo = { clip: p => p.clips, overlay: p => p.overlays || [], audio: p => p.audio };
+    let k = 0;
+    for (const m of marks) {
+      const item = geo[m.type](this.project).find(x => x.id === m.id); if (!item) continue;
+      const n = this._node('s:' + k++, () => { const d = document.createElement('div'); d.className = 'tl-sil'; return d; }, this.lanes);
+      n.style.left = this.x(m.t0) + 'px'; n.style.width = Math.max(3, (m.t1 - m.t0) * this.pps) + 'px'; n.style.top = top(item) + 'px';
+      n.classList.toggle('cur', !!m.cur); n.title = 'Silence · ' + fmt(m.t1 - m.t0) + ' to remove';
+    }
   }
   /** Captions: only the blocks near the visible part are in the DOM (an hour of speech is thousands). */
   renderCaps() {

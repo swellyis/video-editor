@@ -17,6 +17,7 @@ import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { initCleanUI } from './clean-ui.js';
 import { initVoiceUI } from './voice-ui.js';
+import { initSilenceUI } from './silence-ui.js';
 import { Timeline } from './timeline.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
@@ -54,7 +55,7 @@ const app = {
 // Debug/test handle: only on local development hosts or with ?debug in the URL (not exposed on the public site).
 if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has('debug')) window.__app = app;
 startLongTaskMonitor(); app.perf = perf; // main-thread health (long tasks), used by the polite background jobs and by tests
-let cleanUI = null, voiceUI = null; // Clean voice / Change voice controls (set up below)
+let cleanUI = null, voiceUI = null, silenceUI = null; // Clean voice / Change voice / Remove silences controls (set up below)
 let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
 
 // media this tab still needs, reported to other tabs before they garbage-collect stored media
@@ -71,6 +72,7 @@ const timeline = new Timeline($('timeline'), app);
 app.timeline = timeline;
 cleanUI = initCleanUI({ $, qs, app, media, player, selected, toast, fmtBytes, commit: (l) => app.commit(l), afterClean: (t, id) => voiceUI && voiceUI.autoRun(t, id) });
 voiceUI = initVoiceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, findItem: cleanUI.findItem });
+silenceUI = initSilenceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, redraw: () => timeline.render(), timeline });
 
 // ---------------------------------------------------------------- persistence
 // Autosave: revision-counted so the indicator only says "Saved" when the stored copy matches the editor.
@@ -445,6 +447,7 @@ function fillInspector() {
   $('logoPanel').hidden = !p.logo; $('logoHint').hidden = !!p.logo;
   if (cleanUI) cleanUI.render();
   if (voiceUI) voiceUI.render();
+  if (silenceUI) silenceUI.render();
   // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
   // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
   const st = app.selection && selected(app.selection.type) ? app.selection.type : null;

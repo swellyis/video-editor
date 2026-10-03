@@ -192,6 +192,29 @@
               <button class="btn secondary small" type="button" id="voiceNow" hidden>Apply now</button>
               <label class="check" id="cleanCompareRow" hidden><input type="checkbox" id="cleanCompare" /> Hear the original (compare)</label>
             </div>
+            <div class="clean-box silence-box" id="silBox" hidden>
+              <div class="clean-head"><span class="label" id="silLabel">Remove silences</span><span class="clean-state" id="silState" aria-live="polite"></span></div>
+              <button class="btn secondary small" type="button" id="silFind">Find silences</button>
+              <div id="silTune" hidden>
+                <p class="sil-sum" id="silSum" aria-live="polite"></p>
+                <div class="slider-row"><label for="silThr">Quiet level</label><input type="range" id="silThr" min="-60" max="-20" step="1" /><output id="silThrOut"></output></div>
+                <label class="check"><input type="checkbox" id="silAuto" /> Auto (follows the background noise)</label>
+                <div class="slider-row"><label for="silMin">Shortest pause</label><input type="range" id="silMin" min="0.3" max="5" step="0.1" /><output id="silMinOut"></output></div>
+                <div class="slider-row"><label for="silPad">Keep a gap</label><input type="range" id="silPad" min="0" max="0.5" step="0.05" /><output id="silPadOut"></output></div>
+                <label class="check" id="silLinkedRow" hidden><input type="checkbox" id="silLinked" checked /> Also cut linked copies of this recording</label>
+                <div class="button-row"><button class="btn primary small" type="button" id="silCut">Cut all silences</button><button class="btn secondary small" type="button" id="silReviewBtn">Review</button></div>
+                <div id="silReview" hidden>
+                  <div class="sil-nav"><button class="btn secondary small" type="button" id="silPrev" aria-label="Previous silence">‹ Prev</button><span class="sil-pos" id="silPos" aria-live="polite"></span><button class="btn secondary small" type="button" id="silNext" aria-label="Next silence">Next ›</button></div>
+                  <div class="button-row"><button class="btn secondary small" type="button" id="silKeep">Keep</button><button class="btn primary small" type="button" id="silDelete">Delete</button><button class="btn secondary small" type="button" id="silPlay">Play</button></div>
+                </div>
+                <div class="sil-row"><button class="linkish" type="button" id="silRescan">Rescan</button><button class="linkish" type="button" id="silClear">Clear</button></div>
+              </div>
+              <p class="hint" id="silHint"></p>
+              <div class="progress" id="silProg" aria-live="polite">
+                <div class="progress-track"><div class="progress-bar" id="silBar"></div></div>
+                <div class="progress-copy"><span id="silProgText">Starting…</span><button class="linkish" type="button" id="silCancel">Cancel</button></div>
+              </div>
+            </div>
             <button type="button" class="mute-btn" data-toggle="clip.muted" aria-pressed="false"><svg class="ico spk-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 5.2a3.6 3.6 0 010 5.6M13 3.4a6.2 6.2 0 010 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><svg class="ico spk-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 6l4 4M15 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mute this clip</span><span class="mb-state" aria-hidden="true">Sound on</span></button>
             <div class="detach-row"><button type="button" class="btn secondary detach-btn" data-action="detachAudio" id="detachClipBtn"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 3v10M13.5 5v6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.5 2"/></svg><span>Detach audio</span></button><p class="hint" id="detachClipHint">Copies this video&rsquo;s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.</p><button type="button" class="btn secondary detach-btn extract-btn" data-action="extractAudio"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Extract audio as a file…</span></button><p class="hint">Saves just the sound (trimmed part) as an M4A, Opus or WAV file you can keep or share. The clip itself is not changed.</p></div>
             

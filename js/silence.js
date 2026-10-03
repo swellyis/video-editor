@@ -215,7 +215,7 @@ export function cutSilences(project, sel, ranges, { ripple = false, linked = fal
   return cuts ? { removed, cuts } : null;
 }
 /** Does `other` play the same moment of the recording at the same moment of the timeline as `base`? (within 60 ms) */
-function alignedWith(base, other, ranges) {
+export function alignedWith(base, other, ranges) {
   const r = ranges && ranges[0]; if (!r) return false;
   const s = r.a ?? r[0];
   if (s < other.in - 1e-6 || s > other.out + 1e-6) return false;

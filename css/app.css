@@ -542,3 +542,13 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .segmented.four{grid-template-columns:repeat(4,1fr)}
 .voice-box .slider-row{margin-top:8px}
 .voice-box #voiceReset{margin-top:4px}
+
+/* Remove silences: stretches found in the selected recording, drawn over its item */
+.tl-sil{position:absolute;height:38px;box-sizing:border-box;pointer-events:none;z-index:6;border-radius:4px;border:1px solid #ff6a4d;background:repeating-linear-gradient(45deg,rgba(255,106,77,.62) 0 5px,rgba(255,106,77,.3) 5px 10px)}
+.tl-sil.cur{border:2px solid #ffd54a;box-shadow:0 0 0 1px rgba(0,0,0,.7)}
+.silence-box .sil-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+.silence-box .sil-sum{font-weight:600;font-size:13px;margin-top:8px}
+.silence-box .sil-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+.silence-box .sil-nav .sil-pos{font-size:12.5px;text-align:center;flex:1}
+.silence-box .button-row .btn{flex:1}
+.silence-box .slider-row label{min-width:92px}
