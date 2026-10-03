@@ -3,7 +3,7 @@
 // Method: both envelopes are log-compressed and high-passed (so level, EQ and room noise matter little), the whole overlap is searched with a
 // normalised cross-correlation by FFT at 50 Hz, then the best candidate is checked and refined at 200 Hz in several windows spread over the
 // recording. The windows must agree (consensus); their trend over time gives the clock drift between the two devices.
-import { placeItem, listOf, laneOf, findItem } from './model.js';
+import { planItem, placeItem, listOf, laneOf, findItem } from './model.js';
 
 export const RATE = 200;      // envelope values per second
 const COARSE = 4;             // 200 Hz -> 50 Hz
@@ -178,7 +178,10 @@ function verify(aP, bP, lagSec, coarseValue, coarsePsr) {
 export function applySync(project, mover, start, { mute = null } = {}) {
   const f = findItem(project, mover.id); if (!f || f.kind !== mover.type) return { fail: true, reason: 'The item is gone.' };
   if (start < -0.0005) return { fail: true, reason: 'before-start' };
-  const plan = placeItem(project, f.kind, f.item, Math.max(0, start), laneOf(f.item), { ripple: false });
+  // The normal drop rules may nudge an item to the nearest free spot; a sync must land exactly, so when the exact spot is taken the item gets a new lane.
+  const at = Math.max(0, start), lane0 = laneOf(f.item), want = planItem(project, f.kind, f.item, at, lane0);
+  const lane = Math.abs(want.start - at) > 0.0005 ? { newAt: lane0 + 1 } : lane0;
+  const plan = placeItem(project, f.kind, f.item, at, lane, { ripple: false });
   if (mute) { const m = listOf(project, mute.type).find(x => x.id === mute.id); if (m) m.muted = true; }
   return { start: Math.max(0, start), lane: plan.lane, pushed: !!plan.pushed, stack: !!plan.stack, type: plan.kind };
 }
