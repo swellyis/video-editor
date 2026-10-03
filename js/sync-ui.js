@@ -40,6 +40,8 @@ export function initSyncUI(ctx) {
     if (!cur || !hasSnd(cur.type, cur.item)) { box.hidden = true; return; }
     const cands = candidates(cur);
     if (!cands.length) { box.hidden = true; return; }
+    // after an undo (or any other change) the old result no longer describes what is on the timeline
+    if (last && last.moved) { const sp = spanOf(app.project, last.moved.type, last.moved.id); if (!sp || Math.abs(sp.start - last.moved.start) > 0.002) last = null; }
     if (after && after.nextElementSibling !== box) after.after(box);
     box.hidden = false;
     if (lastId !== cur.item.id) { lastId = cur.item.id; ref = null; move = null; last = null; }
@@ -112,7 +114,7 @@ export function initSyncUI(ctx) {
           else {
             commit('Sync');
             const s = Math.abs(shift), dir = shift < 0 ? 'earlier' : 'later';
-            res = { id, ok: true, state: c + ' % sure', text: `Moved “${mv.item.name || 'item'}” ${fmtS(s)} ${dir}. Confidence ${c} %.` + (muteIt ? ' The video’s own sound is muted.' : '') + (ap.pushed ? ' It went to a new lane because its place was taken.' : '') + (ap.stack ? ' It now sits over the main clips as a layer.' : '') + drift + ' Undo puts it back.' };
+            res = { id, ok: true, moved: { type: mv.type, id: mv.item.id, start: ap.start }, state: c + ' % sure', text: `Moved “${mv.item.name || 'item'}” ${fmtS(s)} ${dir}. Confidence ${c} %.` + (muteIt ? ' The video’s own sound is muted.' : '') + (ap.pushed ? ' It went to a new lane because its place was taken.' : '') + (ap.stack ? ' It now sits over the main clips as a layer.' : '') + drift + ' Undo puts it back.' };
           }
         }
       }
@@ -121,7 +123,7 @@ export function initSyncUI(ctx) {
       else { res = { id, warn: true, state: 'Error', text: (e && e.noAudio ? 'One of them has no sound.' : (e && e.message) || 'Could not read the sound.') }; toast(res.text, 6000); }
     } finally {
       try { wake && wake.release(); } catch { /* ignore */ }
-      job = null; last = res; render();
+      job = null; last = res; box.dataset.runs = String((+box.dataset.runs || 0) + 1); render();
     }
   }
   const fmtS = (s) => (s >= 60 ? Math.floor(s / 60) + ' min ' + (s % 60).toFixed(2) + ' s' : s.toFixed(2) + ' s');

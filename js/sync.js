@@ -183,5 +183,5 @@ export function applySync(project, mover, start, { mute = null } = {}) {
   const lane = Math.abs(want.start - at) > 0.0005 ? { newAt: lane0 + 1 } : lane0;
   const plan = placeItem(project, f.kind, f.item, at, lane, { ripple: false });
   if (mute) { const m = listOf(project, mute.type).find(x => x.id === mute.id); if (m) m.muted = true; }
-  return { start: Math.max(0, start), lane: plan.lane, pushed: !!plan.pushed, stack: !!plan.stack, type: plan.kind };
+  return { start: Math.max(0, start), lane: plan.lane, pushed: !!plan.pushed || typeof lane === 'object', stack: !!plan.stack, type: plan.kind };
 }
