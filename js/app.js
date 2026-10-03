@@ -142,11 +142,12 @@ app.liveUpdate = (opts = {}) => {
 app.restore = (snap) => { app.project = migrate(snap); renderAll(); };
 app.seek = (t) => { player.setTime(t); };
 app.select = (sel, opts = {}) => {
+  const prevSel = app.selection; // browsing effects from clip to clip keeps the Effects tab open; coming from a blur region or text opens the clip's own tab
   app.selection = sel;
   if (sel) {
     const tab = { clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip', blur: 'look', caption: 'captions' }[sel.type];
     if (sel.type === 'clip') app.trTarget = null; // the Transitions tab follows the selected clip again
-    if (tab && !((sel.type === 'clip' && qs('.tabs button.active')?.dataset.tab === 'trans') || ((sel.type === 'clip' || sel.type === 'overlay') && qs('.tabs button.active')?.dataset.tab === 'look'))) showTab(tab); // selecting a clip while browsing transitions stays on that tab
+    if (tab && !((sel.type === 'clip' && qs('.tabs button.active')?.dataset.tab === 'trans') || ((sel.type === 'clip' || sel.type === 'overlay') && qs('.tabs button.active')?.dataset.tab === 'look' && (!prevSel || prevSel.type === 'clip' || prevSel.type === 'overlay')))) showTab(tab); // selecting a clip while browsing transitions stays on that tab
     if (opts.seekInto) {
       const t = player.t;
       if (sel.type === 'clip') { const it = layout(app.project).items.find(i => i.clip.id === sel.id); if (it && (t < it.start || t >= it.end)) player.setTime(it.start + 0.001); }
