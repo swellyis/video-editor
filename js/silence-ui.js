@@ -29,12 +29,13 @@ export function initSilenceUI(ctx) {
     if (item.in < a.from - 0.03 || item.out > a.to + 0.03) return null;
     return a;
   }
-  function rangesAll(a) {
-    const k = [a.db, set.auto, set.thr, set.minPause, set.pad].join('|');
+  /** All quiet stretches of the recording (source seconds). Pause and gap are what you hear, so at 2× speed they are twice as long in the file. */
+  function rangesAll(a, speed = 1) {
+    const k = [set.auto, set.thr, set.minPause, set.pad, speed].join('|');
     if (memo && memo.k === k && memo.db === a.db) return memo.r;
     if (a.auto == null) a.auto = autoThreshold(a.db);
     const thr = set.auto ? a.auto.thr : set.thr;
-    const r = findSilences(a.db, { thr, minPause: set.minPause, pad: set.pad, t0: a.from }).map(x => ({ ...x }));
+    const r = findSilences(a.db, { thr, minPause: set.minPause * speed, pad: set.pad * speed, t0: a.from }).map(x => ({ ...x }));
     memo = { k, db: a.db, r, thr }; return r;
   }
   /** The silences still to deal with, clipped to what the family of the selected item plays (the pieces of this recording on this kind of track). */
@@ -44,7 +45,7 @@ export function initSilenceUI(ctx) {
   }
   function visible(cur) {
     const a = analysisFor(cur.item); if (!a) return null;
-    const all = rangesAll(a).filter(r => !a.dismissed.has(key(r)));
+    const all = rangesAll(a, spanOf(app.project, cur.type, cur.item.id)?.sp || 1).filter(r => !a.dismissed.has(key(r)));
     const out = [], by = new Map();
     for (const it of family(cur.type, cur.item)) {
       const sp = spanOf(app.project, cur.type, it.id); if (!sp) continue;
@@ -98,22 +99,23 @@ export function initSilenceUI(ctx) {
     if (lastId !== item.id) { lastId = item.id; err = null; }
     const here = !!job && job.mediaId === item.mediaId;
     const a = here ? null : analysisFor(item), v = a ? visible(cur) : null;
+    $('silThr').value = set.thr; $('silMin').value = set.minPause; $('silPad').value = set.pad; $('silAuto').checked = set.auto;
     const st = $('silState'); st.className = 'clean-state';
     $('silFind').hidden = !!a || here;
     $('silTune').hidden = !a;
     $('silProg').classList.toggle('show', here);
     let hint = '', warn = false;
-    if (err && !here) { hint = err; warn = true; }
+    if (err && !here) { hint = err; warn = true; st.textContent = ''; }
     else if (here) { st.textContent = 'Scanning'; }
     else if (a) {
       const { n, total } = summary(v);
       st.textContent = n ? n + (n === 1 ? ' pause' : ' pauses') : 'None found';
       $('silSum').textContent = n ? `${n} ${n === 1 ? 'silence' : 'silences'} · ${fmtS(total)} to remove` : 'No silences at these settings';
       const eff = set.auto ? a.auto.thr : set.thr;
-      $('silThr').value = set.thr; $('silThr').disabled = set.auto; $('silAuto').checked = set.auto;
+      $('silThr').disabled = set.auto;
       $('silThrOut').textContent = set.auto ? 'Auto ' + Math.round(eff) + ' dB' : set.thr + ' dB';
-      $('silMin').value = set.minPause; $('silMinOut').textContent = set.minPause.toFixed(1) + ' s';
-      $('silPad').value = set.pad; $('silPadOut').textContent = set.pad.toFixed(2) + ' s';
+      $('silMinOut').textContent = set.minPause.toFixed(1) + ' s';
+      $('silPadOut').textContent = set.pad.toFixed(2) + ' s';
       const lk = linkedOthers(cur, v);
       $('silLinkedRow').hidden = !lk.length;
       $('silCut').disabled = !n; $('silReviewBtn').disabled = !n;

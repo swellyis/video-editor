@@ -75,11 +75,11 @@ export const db = {
    */
   async gc(keepIds = new Set()) {
     const run = async () => {
+      const keys = await this.mediaKeys(); // listed first: a file imported while this runs is not in the list, so it can't be mistaken for an orphan
       const used = new Set([...keepIds, ...localKeep()]);
       for (const id of await askOtherTabs()) used.add(id);
       const projects = await this.listProjects();
       for (const p of projects) for (const id of mediaIdsOf(p)) used.add(id);
-      const keys = await this.mediaKeys();
       let removed = 0;
       for (const k of keys) if (!used.has(k)) { await this.deleteMedia(k); removed++; }
       return removed;
