@@ -20,6 +20,7 @@ import { initVoiceUI } from './voice-ui.js';
 import { initSilenceUI } from './silence-ui.js';
 import { initSyncUI } from './sync-ui.js';
 import { initBeatUI } from './beat-ui.js';
+import { initTransitionUI } from './transition-ui.js';
 import { Timeline } from './timeline.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
@@ -57,6 +58,7 @@ const app = {
 // Debug/test handle: only on local development hosts or with ?debug in the URL (not exposed on the public site).
 if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has('debug')) window.__app = app;
 startLongTaskMonitor(); app.perf = perf; // main-thread health (long tasks), used by the polite background jobs and by tests
+let trUI = { render() { }, open() { }, close() { } };
 let cleanUI = null, voiceUI = null, silenceUI = null, syncUI = null, beatUI = null; // Clean voice / Change voice / Remove silences controls (set up below)
 let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
 
@@ -77,6 +79,8 @@ voiceUI = initVoiceUI({ $, app, media, player, toast, commit: (l) => app.commit(
 silenceUI = initSilenceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, redraw: () => timeline.render(), timeline });
 syncUI = initSyncUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
 beatUI = initBeatUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
+trUI = initTransitionUI({ $, app, commit: (l) => app.commit(l) });
+app.openTransition = (id, from) => trUI.open(id, from);
 
 // ---------------------------------------------------------------- persistence
 // Autosave: revision-counted so the indicator only says "Saved" when the stored copy matches the editor.
@@ -390,6 +394,7 @@ function fillInspector() {
     t.querySelector('.mb-state').textContent = m ? 'Muted' : 'Sound on';
   }
   fillOutputs();
+  trUI.render();
   // clip panel
   const c = selected('clip');
   $('clipPanel').hidden = !c; $('clipEmptyHint').hidden = !!c;

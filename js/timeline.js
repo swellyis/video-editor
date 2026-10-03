@@ -1,4 +1,5 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
+import { isOverlap, labelOf } from './transitions.js';
 import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX, laneOf, laneCount, insertLane, spanCtx, findItem, planItem, placeItem, moveClipTo, holdNextClip } from './model.js';
 import { clamp, fmt, el, icon, toast } from './util.js';
 import { retimeWords } from './captions.js';
@@ -261,7 +262,7 @@ export class Timeline {
       const badges = [];
       if (c.kind === 'video' && c.muted && c.hasAudio) badges.push('muted');
       else if (c.kind === 'video' && !c.hasAudio) badges.push('noaudio');
-      if (c.transition.type !== 'cut' && (it.index > 0 || c.transition.type === 'fade')) badges.push(c.transition.type === 'crossfade' ? 'xfade' : '◐');
+      if (c.transition.type !== 'cut' && (it.index > 0 || !isOverlap(c.transition.type))) badges.push(isOverlap(c.transition.type) ? 'xfade' : '◐');
       if (c.color.preset !== 'none') badges.push('◑');
       const bkey = badges.join(' ');
       const bEl = n.querySelector('.badges');
@@ -271,6 +272,28 @@ export class Timeline {
       this.renderStrip(n.querySelector('.strip'), c, rec, w);
       this.renderKfs(n, c, it.start, it.len);
       this.renderVolEnv(n, c, 'clip', it.start, it.len, ITEM_H, sel.type === 'clip' && sel.id === c.id && hasSound(c));
+    }
+    // the small marker on every join of two clips: tap it to choose the transition (the choice is stored on the clip that follows)
+    for (const it of lay.items) {
+      if (it.index === 0) continue;
+      const c = it.clip, prev = lay.items[it.index - 1];
+      const n = this._node('j:' + c.id, () => {
+        const b = el('button', { class: 'tl-join', type: 'button' });
+        b.innerHTML = '<svg viewBox="0 0 16 10" aria-hidden="true"><path d="M1 1l6 4-6 4zM15 1L9 5l6 4z" fill="currentColor"/></svg>';
+        b.addEventListener('pointerdown', e => e.stopPropagation());
+        b.addEventListener('click', e => { e.stopPropagation(); this.app.openTransition && this.app.openTransition(b._id, b); });
+        return b;
+      }, this.lanes);
+      n._id = c.id;
+      const gx = this.x(it.start + (it.xIn > 0 ? it.xIn / 2 : 0));
+      n.style.left = gx + 'px'; n.style.top = top(c) + 'px';
+      const roomy = prev.len * this.pps >= 36 && it.len * this.pps >= 36 && !(c.gap > 1e-6);
+      n.hidden = !roomy;
+      const set = c.transition.type !== 'cut';
+      n.classList.toggle('set', set);
+      const nm = set ? labelOf(c.transition.type) + ', ' + (Math.round((it.xIn > 0 ? it.xIn : c.transition.duration) * 10) / 10) + ' seconds' : 'none';
+      n.setAttribute('aria-label', `Transition between clip ${it.index} and clip ${it.index + 1}: ${nm}. Change`);
+      n.title = set ? labelOf(c.transition.type) : 'Add a transition';
     }
     // overlays (picture-in-picture)
     for (const o of p.overlays || []) {

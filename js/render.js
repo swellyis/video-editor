@@ -524,8 +524,11 @@ export class Compositor {
           if (L.scale !== 1) { ctx.translate(W / 2, H / 2); ctx.scale(L.scale, L.scale); ctx.translate(-W / 2, -H / 2); }
         }
         const bf = L && L.blur > 0 && this.filterOK ? `blur(${(L.blur * H).toFixed(1)}px) ` : '';
+        // two pictures that blend (dissolve, zoom, blur): draw this one whole, with its own background, then fade it as one piece
+        // (filling its background at partial opacity would darken the other picture underneath)
+        const unit = !!L && L.alpha < 0.999;
         const gl = colorIsNeutral(col) ? null : this._gl();
-        if (!gl && (colorIsNeutral(col) || !this.filterOK)) {
+        if (!unit && !gl && (colorIsNeutral(col) || !this.filterOK)) {
           ctx.globalAlpha = a;
           if (bf) ctx.filter = bf;
           this.drawSource(ctx, src, c, W, H, fit, prog, bg);
@@ -536,6 +539,7 @@ export class Compositor {
           this.drawSource(l, src, c, W, H, fit, prog, bg);
           ctx.globalAlpha = a;
           if (gl) { if (bf) ctx.filter = bf; ctx.drawImage(gl.process(this.layer, W, H, col), 0, 0); }
+          else if (colorIsNeutral(col)) { if (bf) ctx.filter = bf; ctx.drawImage(this.layer, 0, 0); ctx.filter = 'none'; }
           else {
             emulateGrade(l, W, H, col); // warmth / fade / vignette, which CSS filters don't have
             ctx.filter = bf + `brightness(${1 + col.brightness / 200}) contrast(${1 + col.contrast / 100}) saturate(${1 + col.saturation / 100}) sepia(${col.sepia / 100})`;
