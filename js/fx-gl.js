@@ -28,7 +28,7 @@ void main(){
   }else if(mode<2.5){                                                   // 2 soft focus
     vec3 b=soft(b1,q,1.5);c=mix(c,b,0.55*amt)+b*0.22*amt;
   }else if(mode<3.5){                                                   // 3 sharpen
-    vec2 d=1.0/res;
+    vec2 d=vec2(res.y/res.x,1.0)*0.0016;                                // the same fraction of the picture at any size
     vec3 n=(S(q+vec2(d.x,0.0)).rgb+S(q-vec2(d.x,0.0)).rgb+S(q+vec2(0.0,d.y)).rgb+S(q-vec2(0.0,d.y)).rgb)*0.25;
     c=c+(c-n)*amt*3.0;
   }else if(mode<4.5){                                                   // 4 glow / bloom
@@ -59,7 +59,8 @@ void main(){
     float z=1.0+amt*0.14*pu;
     o=S(0.5+(q-0.5)/z);c=o.rgb;
   }else if(mode<10.5){                                                  // 10 film grain
-    float n=hash(q*res+floor(t*24.0)*7.31)-0.5;
+    vec2 cell=floor(q*vec2(540.0*res.x/res.y,540.0));                 // grain cells are the same fraction of the picture at any size
+    float n=hash(cell+floor(t*24.0)*7.31)-0.5;
     float lum=dot(c,vec3(0.299,0.587,0.114));
     c+=n*amt*0.42*(1.0-0.5*abs(lum-0.5));
   }else if(mode<11.5){                                                  // 11 glitch (bursts of sliced, split-colour rows)
