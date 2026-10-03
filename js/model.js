@@ -908,12 +908,21 @@ export function detachAudio(project, sel) {
   return { audio: a };
 }
 
+/** A transition belongs to one join (this clip after that clip). When a clip's neighbour before it changes (delete, reorder), the transition is removed. */
+const joinsOf = (project) => new Map(project.clips.map((c, i) => [c.id, i ? project.clips[i - 1].id : null]));
+function dropBrokenJoins(project, before) {
+  project.clips.forEach((c, i) => {
+    if (before.get(c.id) !== (i ? project.clips[i - 1].id : null) && c.transition.type !== 'cut') c.transition = { type: 'cut', duration: c.transition.duration };
+  });
+}
+
 export function removeClip(project, id, ripple) {
-  const lay = layout(project);
+  const lay = layout(project), joins = joinsOf(project);
   const it = lay.items.find(x => x.clip.id === id);
   if (!it) return;
   const next = lay.items[it.index + 1], prevEnd = it.index > 0 ? lay.items[it.index - 1].end : 0;
   project.clips.splice(it.index, 1);
+  dropBrokenJoins(project, joins);
   if (ripple) { rippleShift(project, it.end - 1e-3, layout(project).total - lay.total); }
   else if (next) next.clip.gap = Math.max(0, round3(next.start - prevEnd)); // not rippling: what follows stays where it is (the hole stays empty)
 }
@@ -928,9 +937,11 @@ export function duplicateClip(project, id, ripple) {
 }
 export function moveClip(project, from, to) {
   if (from === to || from < 0 || from >= project.clips.length) return;
+  const joins = joinsOf(project);
   const [c] = project.clips.splice(from, 1);
   c.gap = 0;
   project.clips.splice(clamp(to, 0, project.clips.length), 0, c);
+  dropBrokenJoins(project, joins);
 }
 
 

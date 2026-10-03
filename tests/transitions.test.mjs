@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TYPES, normalize, maxDuration, effective, look, soundGain, isOverlap, isDip, easeOf } from '../js/transitions.js';
-import { newProject, newClipFromMedia, layout, activeAt, clipGain, migrate, splitAt, duplicateClip, arrangeMain, clipLen } from '../js/model.js';
+import { removeClip, moveClip, newProject, newClipFromMedia, layout, activeAt, clipGain, migrate, splitAt, duplicateClip, arrangeMain, clipLen } from '../js/model.js';
 
 const media = (id, d) => ({ id, name: id, kind: 'video', duration: d, width: 1280, height: 720, hasAudio: true });
 function proj(lens, trs = {}) {
@@ -100,4 +100,15 @@ test('moving: a clip keeps its transition only while it still follows the same c
   arrangeMain(p, ents);
   assert.deepEqual(p.clips.map(x => x.id), ['c2', 'c0', 'c1']); assert.equal(p.clips[1].transition.type, 'cut'); assert.equal(clipLen(p.clips[0]), 4);
   assert.equal(p.clips[0].transition.type, 'wipeup');                                    // first clip: nothing before it, left as data
+});
+
+test('delete and reorder: a transition belongs to one join, so it is removed when the clip before changes', () => {
+  const p = proj([4, 4, 4, 4], { 1: { type: 'zoomout', duration: 0.5 }, 2: { type: 'wipeup', duration: 0.5 }, 3: { type: 'blur', duration: 0.5 } });
+  removeClip(p, 'c1', true);
+  assert.deepEqual(p.clips.map(c => c.transition.type), ['cut', 'cut', 'blur']);          // c2 now follows c0 (was c1): removed; c3 still follows c2: kept
+  const q = proj([4, 4, 4], { 1: { type: 'zoomout', duration: 0.5 }, 2: { type: 'wipeup', duration: 0.5 } });
+  moveClip(q, 2, 0);
+  assert.deepEqual(q.clips.map(c => c.id + ':' + c.transition.type), ['c2:cut', 'c0:cut', 'c1:zoomout']);
+  const r = proj([4, 4, 4], { 1: { type: 'zoomout', duration: 0.5 }, 2: { type: 'wipeup', duration: 0.5 } });
+  moveClip(r, 1, 1); assert.deepEqual(r.clips.map(c => c.transition.type), ['cut', 'zoomout', 'wipeup']);
 });
