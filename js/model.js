@@ -1,5 +1,6 @@
 // Project data model, timeline layout, edit operations, audio envelopes, history.
 import { uid, clamp, deepClone } from './util.js';
+import { normalize as normTransition, isOverlap, isDip, typeInfo, effective as effTransition, soundGain } from './transitions.js';
 import { defaultCaptionStyle, normalizeCaptionStyle, normalizeCaptions, splitCaption } from './captions.js';
 
 export const SCHEMA = 5;
@@ -109,7 +110,7 @@ export function sanitizeProject(p) {
     cleanName(c, 'Clip'); c.muted = c.muted === true; c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
     c.srcDuration = num(c.srcDuration, 0, 1e6, 1); c.in = num(c.in, 0, 1e6, 0); c.out = num(c.out, c.in + 0.01, 1e6, c.in + 1);
     c.fadeIn = num(c.fadeIn, 0, 60, 0); c.fadeOut = num(c.fadeOut, 0, 60, 0); c.gap = num(c.gap, 0, 1e5, 0);
-    c.transition.duration = num(c.transition.duration, 0, 10, 0.6);
+    c.transition = normTransition(c.transition);
     c.transform.zoom = num(c.transform.zoom, 0.05, 20, 1);
     cleanClipBlur(c.blur);
   }
@@ -210,7 +211,7 @@ export function normalizeClip(c) {
     keyframes: c.keyframes || {},
     color: Object.assign(defaultColor(), c.color || {}),
     transform: Object.assign(defaultTransform(), c.transform || {}),
-    transition: Object.assign({ type: 'cut', duration: 0.6 }, c.transition || {}),
+    transition: normTransition(c.transition),
     blur: Object.assign(defaultClipBlur(), c.blur && typeof c.blur === 'object' ? c.blur : {}),
   });
 }
@@ -501,20 +502,21 @@ export function layout(project) {
   const clips = project.clips;
   for (let i = 0; i < clips.length; i++) {
     const c = clips[i], len = clipLen(c), gap = c.gap > 1e-6 ? c.gap : 0;
-    let start = t + gap, xIn = 0, fadeIn = 0;
+    let start = t + gap, xIn = 0, fadeIn = 0, xType = 'cut', dipColor = '#000000', xa = 'cross';
     const tr = c.transition || { type: 'cut' };
-    if (i > 0 && tr.type === 'crossfade' && !gap) {
+    if (i > 0 && isOverlap(tr.type) && !gap) {
       const prev = items[i - 1];
-      xIn = Math.max(0, Math.min(tr.duration, prev.len / 2, len / 2));
-      start = prev.end - xIn;
-    } else if (tr.type === 'fade') {
+      xIn = Math.max(0, effTransition(tr.type, tr.duration, prev.len, len));
+      start = prev.end - xIn; xType = tr.type; xa = tr.audio === 'cut' ? 'cut' : 'cross';
+    } else if (isDip(tr.type)) {
       const dip = i > 0 && !gap;
       const prevLen = dip ? items[i - 1].len : Infinity;
       fadeIn = Math.max(0, Math.min(tr.duration / (dip ? 2 : 1), len / 2, prevLen / 2));
-      if (dip) items[i - 1].fadeOutBlack = fadeIn;
+      dipColor = typeInfo(tr.type).color;
+      if (dip) { items[i - 1].fadeOutBlack = fadeIn; items[i - 1].dipColorOut = dipColor; }
     }
-    const it = { clip: c, index: i, start, end: start + len, len, xIn, xOut: 0, fadeInBlack: fadeIn, fadeOutBlack: 0 };
-    if (i > 0) items[i - 1].xOut = xIn;
+    const it = { clip: c, index: i, start, end: start + len, len, xIn, xOut: 0, xType, xaudio: xa, xaudioOut: 'cross', xTypeOut: 'cut', fadeInBlack: fadeIn, fadeOutBlack: 0, dipColor, dipColorOut: '#000000' };
+    if (i > 0) { items[i - 1].xOut = xIn; items[i - 1].xTypeOut = xType; items[i - 1].xaudioOut = xa; }
     items.push(it); t = it.end;
   }
   const endFade = project.settings?.endFade || 0;
@@ -535,16 +537,19 @@ export function activeAt(lay, t) {
   const out = [];
   for (const it of lay.items) {
     if (t < it.start || t >= it.end) continue;
-    let a = 1;
-    if (it.xIn > 0 && t < it.start + it.xIn) a = (t - it.start) / it.xIn; // crossfade in (drawn on top)
-    let black = 1;
+    let a = 1, tr = null;
+    if (it.xIn > 0 && t < it.start + it.xIn) { const p = (t - it.start) / it.xIn; a = p; tr = { role: 'in', type: it.xType, p }; } // transition in (drawn on top)
+    else if (it.xOut > 0 && t > it.end - it.xOut) tr = { role: 'out', type: it.xTypeOut, p: 1 - (it.end - t) / it.xOut };
+    let black = 1, white = 0, dipOut = false;
     if (it.fadeInBlack > 0 && t < it.start + it.fadeInBlack) black = Math.min(black, (t - it.start) / it.fadeInBlack);
-    if (it.fadeOutBlack > 0 && t > it.end - it.fadeOutBlack) black = Math.min(black, (it.end - t) / it.fadeOutBlack);
-    out.push({ it, alpha: clamp(a, 0, 1), black: clamp(black, 0, 1) });
+    if (it.fadeOutBlack > 0 && t > it.end - it.fadeOutBlack) { const f = (it.end - t) / it.fadeOutBlack; if (f < black) { black = f; dipOut = true; } }
+    // a dip to white is drawn as a white veil over the picture instead of darkening it
+    if (black < 1 && (dipOut ? it.dipColorOut : it.dipColor) === '#ffffff') { white = 1 - black; black = 1; }
+    out.push({ it, alpha: clamp(a, 0, 1), black: clamp(black, 0, 1), white: clamp(white, 0, 1), tr });
   }
   if (!out.length && lay.items.length && t >= lay.total - 1e-3 && t <= lay.total + 1e-3) {
     const it = lay.items[lay.items.length - 1];
-    out.push({ it, alpha: 1, black: it.fadeOutBlack > 0 ? 0 : 1 });
+    out.push({ it, alpha: 1, black: it.fadeOutBlack > 0 ? 0 : 1, white: 0, tr: null });
   }
   return out;
 }
@@ -567,8 +572,8 @@ export function clipGain(it, t) {
   const local = t - it.start, rem = it.end - t;
   let g = c.volume * volumeEnv(c, local);
   g *= Math.min(ramp(local, c.fadeIn), ramp(rem, c.fadeOut));
-  if (it.xIn > 0) g *= ramp(local, it.xIn);
-  if (it.xOut > 0) g *= ramp(rem, it.xOut);
+  if (it.xIn > 0) g *= soundGain(it.xaudio, local, it.xIn);          // equal-power crossfade (or a hard cut) over a transition
+  if (it.xOut > 0) g *= soundGain(it.xaudioOut, rem, it.xOut);
   if (it.fadeInBlack > 0) g *= ramp(local, it.fadeInBlack);
   if (it.fadeOutBlack > 0) g *= ramp(rem, it.fadeOutBlack);
   return g;
@@ -1142,7 +1147,7 @@ export function arrangeMain(project, entries) {
   let prevEnd = 0, prevClip = null;
   for (const e of entries) {
     const c = e.clip, len = clipLen(c);
-    const sameNeighbour = e.prev !== undefined && e.prev === prevClip && c.transition && c.transition.type === 'crossfade';
+    const sameNeighbour = e.prev !== undefined && e.prev === prevClip && c.transition && isOverlap(c.transition.type);
     if (sameNeighbour && e.start < prevEnd - 1e-6) c.gap = 0;
     else {
       c.gap = Math.max(0, round3(e.start - prevEnd));

@@ -1,5 +1,6 @@
 // Frame compositor shared by preview, thumbnail maker and export.
 import { captionAt, captionWords } from './captions.js';
+import { look as trLook } from './transitions.js';
 import { activeAt, effectiveColor, colorIsNeutral, FONTS, sourceTime, animated, hasMotion, overlaysAt, EASES, blurAt, laneOf } from './model.js';
 import { clamp } from './util.js';
 import { BlurFX } from './blur.js';
@@ -497,7 +498,7 @@ export class Compositor {
     // Every layer is drawn in lane order: a higher lane is on top, whatever kind of item it holds (sound lanes draw nothing).
     const steps = [];
     if (act.length) steps.push({ lane: Math.max(...act.map(x => laneOf(x.it.clip))), run: () => {
-      for (const { it, alpha, black } of act) {
+      for (const { it, alpha, black, tr } of act) {
         const src = getSource(it);
         if (!src) { missing++; continue; }
         let c = it.clip;
@@ -512,11 +513,21 @@ export class Compositor {
         const tr0 = c.transform || {}, kb0 = tr0.kbFrom ?? 0, kb1 = tr0.kbTo ?? 1; // Ken Burns range (split clips carry a sub-range)
         const prog = kb0 + (kb1 - kb0) * (it.len > 0 ? clamp((t - it.start) / it.len, 0, 1) : 0);
         const col = effectiveColor(project, c);
-        const a = alpha * black * clamp(kOpacity, 0, 1);
+        // a transition (wipe, slide, zoom, blur, dissolve) moves / clips / blurs / fades this picture while two clips overlap
+        const L = tr ? trLook(tr.type, tr.p)[tr.role === 'in' ? 'inn' : 'out'] : null;
+        const a = (L ? L.alpha : alpha) * black * clamp(kOpacity, 0, 1);
         if (a <= 0.001) continue;
+        ctx.save();
+        if (L) {
+          if (L.clip) { ctx.beginPath(); ctx.rect(L.clip.x0 * W, L.clip.y0 * H, (L.clip.x1 - L.clip.x0) * W, (L.clip.y1 - L.clip.y0) * H); ctx.clip(); }
+          if (L.dx || L.dy) ctx.translate(L.dx * W, L.dy * H);
+          if (L.scale !== 1) { ctx.translate(W / 2, H / 2); ctx.scale(L.scale, L.scale); ctx.translate(-W / 2, -H / 2); }
+        }
+        const bf = L && L.blur > 0 && this.filterOK ? `blur(${(L.blur * H).toFixed(1)}px) ` : '';
         const gl = colorIsNeutral(col) ? null : this._gl();
         if (!gl && (colorIsNeutral(col) || !this.filterOK)) {
           ctx.globalAlpha = a;
+          if (bf) ctx.filter = bf;
           this.drawSource(ctx, src, c, W, H, fit, prog, bg);
         } else {
           if (this.layer.width !== W || this.layer.height !== H) { this.layer.width = W; this.layer.height = H; }
@@ -524,15 +535,19 @@ export class Compositor {
           l.globalAlpha = 1; l.filter = 'none';
           this.drawSource(l, src, c, W, H, fit, prog, bg);
           ctx.globalAlpha = a;
-          if (gl) ctx.drawImage(gl.process(this.layer, W, H, col), 0, 0);
+          if (gl) { if (bf) ctx.filter = bf; ctx.drawImage(gl.process(this.layer, W, H, col), 0, 0); }
           else {
             emulateGrade(l, W, H, col); // warmth / fade / vignette, which CSS filters don't have
-            ctx.filter = `brightness(${1 + col.brightness / 200}) contrast(${1 + col.contrast / 100}) saturate(${1 + col.saturation / 100}) sepia(${col.sepia / 100})`;
+            ctx.filter = bf + `brightness(${1 + col.brightness / 200}) contrast(${1 + col.contrast / 100}) saturate(${1 + col.saturation / 100}) sepia(${col.sepia / 100})`;
             ctx.drawImage(this.layer, 0, 0);
             ctx.filter = 'none';
           }
         }
+        ctx.restore();
       }
+      // dip to white: a white veil over the picture (a dip to black darkens it instead, above)
+      const veil = Math.max(0, ...act.map(x => x.white || 0));
+      if (veil > 0.001) { ctx.save(); ctx.globalAlpha = veil; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
       // Blur > whole-clip blur (Clip tab): the clip's picture, under whatever is on higher lanes
       for (const { it, alpha, black } of act) {
         const cb = it.clip.blur;

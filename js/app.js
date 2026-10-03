@@ -1650,7 +1650,7 @@ async function thumbFrame(t, F) {
       if (s && s.w) ovSrc.set(o.id, s);
     } catch { /* an overlay that can't be decoded is left out */ }
   }
-  const single = { ...lay, items: [{ ...it, xIn: 0, fadeInBlack: 0, fadeOutBlack: 0 }] };
+  const single = { ...lay, items: [{ ...it, xIn: 0, xOut: 0, fadeInBlack: 0, fadeOutBlack: 0 }] };
   thumb.comp.render(c.getContext('2d'), F.width, F.height, p, single, tt, () => src, { getOverlaySource: (o) => ovSrc.get(o.id) || null, noCaptions: true });
   return c;
 }
