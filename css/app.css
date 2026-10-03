@@ -573,7 +573,8 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .tl-join.set{background:var(--accent);border-color:#fff;opacity:1}
 .tl-join:hover,.tl-join:focus-visible{opacity:1}
 .tl-join:focus-visible{outline:2px solid #fff;outline-offset:1px}
-@media (pointer:coarse){.tl-join{width:34px;height:20px;margin-left:-17px;border-radius:10px}.tl-join::after{content:"";position:absolute;left:-5px;right:-5px;top:-1px;height:26px}}
+/* on touch the marker stays in the top 17 px of the clip so the middle of the trim handles (y = 19) is still free to drag; the clip panel button is the full-size target */
+@media (pointer:coarse){.tl-join{width:30px;height:15px;margin-left:-15px;border-radius:8px}.tl-join::after{content:"";position:absolute;left:-5px;right:-5px;top:-1px;height:18px}}
 .tr-open{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;justify-content:flex-start;text-align:left}
 .tr-open .tr-open-sub{margin-left:auto;color:var(--muted);font-size:11px}
 .tr-open[disabled]{opacity:.55}
