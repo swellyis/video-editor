@@ -601,4 +601,9 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .tl-join.target{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--accent);opacity:1}
 .tl-join.drop,body.tr-dragging .tl-join{opacity:1;transform:scale(1.35);background:var(--accent)}
 .tr-controls{position:sticky;bottom:0;z-index:5;margin:8px -16px -16px;padding:2px 16px 14px;background:var(--surface);border-top:1px solid var(--line)}
-@media(max-width:620px){.tr-controls{margin:8px -14px -14px;padding:2px 14px 14px}}
+
+@media(max-width:940px){
+  /* stacked layout: the page scrolls, so nothing can stick; the length / sound / apply controls come first, then the library */
+  #tab-trans .section{display:flex;flex-direction:column}
+  #tab-trans .section-head{order:0}#trJoin{order:1}.tr-controls{order:2;position:static;margin:0 0 12px;padding:0 0 10px;border-top:0;border-bottom:1px solid var(--line)}#trTypes{order:3}
+}

@@ -99,7 +99,7 @@ export function initTransitionUI(ctx) {
     if (!i) { // nothing chosen yet: take the join nearest the playhead and say so, without changing anything
       const j = nearestJoin();
       if (!j) { setMsg(app.project.clips.length < 2 ? 'Add a second clip first: a transition joins two clips.' : 'There is no join to put a transition on. Close the gaps between clips first.'); return; }
-      app.trTarget = j; const it = layout(app.project).items.find(x => x.clip.id === j); app.seek(it.start); app.timeline && app.timeline.reveal && app.timeline.reveal(it.start);
+      app.trTarget = j; lastId = j; const it = layout(app.project).items.find(x => x.clip.id === j); app.seek(it.start); app.timeline && app.timeline.reveal && app.timeline.reveal(it.start);
       app.timeline.render(); setMsg(`Join ${it.index} selected (between clip ${it.index} and clip ${it.index + 1}). Tap a transition to put it there.`); render(); return;
     }
     if (!joined(i)) { setMsg('There is a gap before this clip. Close the gap to use a transition.'); return; }
