@@ -3,14 +3,14 @@ import { initInstall } from './install.js';
 import { initAddMedia } from './add-media-ui.js';
 import { shareOrDownload } from './media-link.js';
 import { BUILD } from './build.js';
-import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar, perf, startLongTaskMonitor, stripExt } from './util.js';
+import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar, perf, startLongTaskMonitor } from './util.js';
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, ensureLanes, holdNextClip, stepVolume, History, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
-  splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, ANIM_PROPS, detachAudio, soundTargets, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
+  splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, ANIM_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
 import { Compositor, ensureFonts } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
@@ -31,7 +31,7 @@ import { FILTERS, GROUPS as FILTER_GROUPS } from './filters.js';
 import { Timeline } from './timeline.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
-import { extractAudio, exportTimelineAudio, ExtractCancelled } from './extract.js';
+import { exportTimelineAudio, ExtractCancelled } from './extract.js';
 import { runExport, capabilities, planFormat, ExportCancelled, createSink, canStreamToOPFS, cleanupExports, bitrateFor } from './exporter.js';
 
 // Page/script version check first, before anything else can fail on a mismatched page (see the service worker section).
@@ -1093,7 +1093,7 @@ async function importFiles(files, where = 'auto') {
       p.clips.splice(insertAt++, 0, c); added++;
       app.selection = { type: 'clip', id: c.id };
       if (added === 1 && !lay0.items.length) { renderAll(); }
-    } catch (e) { (/No video track|Unsupported/i.test(e.message || '') ? console.info : console.warn)('Import failed:', e.message || e); toast('Could not read ' + f.name + ': ' + (e.message || e) + (/No video track|Timed out|Media error|decode/i.test(e.message || '') ? '. This browser can’t show its picture (often iPhone H.265/HEVC on a laptop). Its sound can still be saved: Audio tab → “Extract audio from a video file…”.' : ''), 8000); }
+    } catch (e) { (/No video track|Unsupported/i.test(e.message || '') ? console.info : console.warn)('Import failed:', e.message || e); toast('Could not read ' + f.name + ': ' + (e.message || e) + (/No video track|Timed out|Media error|decode/i.test(e.message || '') ? '. This browser can’t show its picture (often iPhone H.265/HEVC on a laptop). Try a different video, or convert it to H.264 first.' : ''), 8000); }
   }
   if (added && sel && app.rippleEnabled) rippleShift(p, layout({ ...p, clips: p.clips.slice(0, p.clips.indexOf(sel) + 1) }).total - 1e-3, layout(p).total - lay0.total);
   for (const f of aud) {
@@ -1817,18 +1817,11 @@ $('exportBtn').onclick = async () => {
 };
 $('cancelExport').onclick = () => { if (abort) abort.abort(); };
 
-// ---------------------------------------------------------------- extract audio (save sound as a file)
+// ---------------------------------------------------------------- save audio (Export audio only: the whole timeline's sound as a file)
 const bind = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); }; // (a stale cached page may lack the element: skip, never throw)
 let extractJob = null; // { abort, kind } while running
 let extractSrc = null; // what the dialog is about: { title, name, run(opts) -> result, trimText? }
 let lastExtract = null;
-function extractSource() {
-  const s = app.selection, item = s && selected(s.type);
-  if (item && ['clip', 'overlay', 'audio'].includes(s.type)) return { item, type: s.type };
-  const items = layout(app.project).items; // nothing usable selected: the clip under the playhead, else the first
-  const it = items.find(i => player.t >= i.start && player.t < i.end) || items[0];
-  return it ? { item: it.clip, type: 'clip' } : null;
-}
 
 // ---------------------------------------------------------------- captions (tab, SRT, find/replace, auto-transcribe)
 for (const k of FONT_KEYS) $('capFontSelect')?.append(el('option', { value: k, text: FONTS[k].label }));
@@ -2025,29 +2018,9 @@ bind('tdGo', 'click', async () => {
 });
 bind('tdCancel', 'click', () => { if (transJob) transJob.abort(); else closeDialog('transDialog'); });
 bind('transDialog', 'close', () => { app.shortsAfterCaptions = false; if (transJob) transJob.abort(); });
-actions.extractAudio = async function extractAudioAction() {
-  if (extractJob) { openDialog('extractDialog'); return; }
-  const src = extractSource();
-  if (!src) return toast('Add a video first, then select it and tap Extract audio.', 4000);
-  const { item } = src;
-  if (item.kind === 'image') return toast('A photo has no audio to extract.', 4000);
-  if (item.hasAudio === false) return toast('This video has no audio, so there is nothing to extract.', 5000);
-  const rec = await media.get(item.mediaId);
-  if (!rec || !rec.blob) return toast('This clip’s media is missing (red clip). Relink it first, then extract its audio.', 5000);
-  const trimmed = item.in > 0.01 || (item.srcDuration && item.out < item.srcDuration - 0.05);
-  let crec = null; for (const cid of soundTargets(item)) if (!crec && media.has(cid)) crec = await media.get(cid); // Clean voice / Change voice on: extract the processed sound
-  const useRec = crec && crec.blob ? crec : rec;
-  extractSrc = {
-    title: item.name || rec.name || 'audio', blob: useRec.blob, trim: trimmed ? { start: item.in, end: item.out } : null,
-    text: (rec.kind === 'audio' ? 'Audio file' : 'Video') + ' “' + (item.name || rec.name) + '” · ' + fmt(item.srcDuration || rec.duration || 0) + ' · ' + fmtBytes(rec.size || rec.blob.size) + (useRec !== rec ? ' · processed voice' : ''),
-    trimText: trimmed ? 'Only the trimmed part (' + fmt(item.in) + ' – ' + fmt(item.out) + ')' : '',
-    run: (o) => extractAudio(useRec.blob, o),
-  };
-  openExtractDialog();
-};
 function openExtractDialog() {
   const S = extractSrc;
-  if (!$('extractDialog') || !$('exGo')) return toast('This copy of the page is out of date. Reload it (or close and reopen the app) to use Extract audio.', 6000);
+  if (!$('extractDialog') || !$('exGo')) return toast('This copy of the page is out of date. Reload it (or close and reopen the app) to use Export audio only.', 6000);
   $('exSource').textContent = S.text;
   $('exTrimRow').hidden = !S.trimText; $('exTrimText').textContent = S.trimText; $('exTrim').checked = true;
   $('exFormat').disabled = false;
@@ -2056,22 +2029,14 @@ function openExtractDialog() {
 }
 function resetExtractUI() {
   $('exProgress').classList.remove('show'); $('exResult').hidden = true; $('exBar').style.width = '0%'; $('exPercent').textContent = '0%'; $('exStatus').textContent = 'Starting…';
-  $('exGo').disabled = false; $('exGo').textContent = 'Extract audio'; $('exGo').classList.remove('busy'); $('exCancel').textContent = 'Close';
+  $('exGo').disabled = false; $('exGo').textContent = 'Save audio'; $('exGo').classList.remove('busy'); $('exCancel').textContent = 'Close';
 }
-bind('extractFileInput', 'change', (e) => {
-  const f = e.target.files[0]; e.target.value = '';
-  if (!f) return;
-  if (extractJob) return openDialog('extractDialog');
-  if (!kindOf(f) || kindOf(f) === 'image') return toast('Pick a video or audio file.', 4000);
-  extractSrc = { title: stripExt(f.name) || 'audio', blob: f, trim: null, trimText: '', text: 'File “' + f.name + '” · ' + fmtBytes(f.size), run: (o) => extractAudio(f, o) };
-  openExtractDialog();
-});
 bind('exGo', 'click', async () => {
   if (extractJob || !extractSrc) return; // double taps: one job
   const S = extractSrc;
   const ctl = new AbortController();
   extractJob = { abort: () => ctl.abort() }; updateSummary();
-  $('exGo').disabled = true; $('exGo').textContent = 'Extracting…'; $('exGo').classList.add('busy'); $('exFormat').disabled = true; $('exCancel').textContent = 'Cancel';
+  $('exGo').disabled = true; $('exGo').textContent = 'Saving…'; $('exGo').classList.add('busy'); $('exFormat').disabled = true; $('exCancel').textContent = 'Cancel';
   $('exProgress').classList.add('show'); $('exResult').hidden = true; $('exStatus').textContent = 'Reading the audio…';
   const t0 = performance.now();
   const setP = (f, txt) => { $('exBar').style.width = (f * 100).toFixed(1) + '%'; $('exPercent').textContent = Math.floor(f * 100) + '%'; if (txt) $('exStatus').textContent = txt; };
@@ -2080,7 +2045,7 @@ bind('exGo', 'click', async () => {
     const res = await S.run({
       format: $('exFormat').value, trim: !S.trimText || $('exTrim').checked ? S.trim : null, signal: ctl.signal,
       makeSink: (ext) => createSink({ ext }),
-      onProgress: (f, txt) => setP(f, txt || (f < 1 ? 'Extracting… ' + Math.floor(f * 100) + '%' : 'Finishing…')),
+      onProgress: (f, txt) => setP(f, txt || (f < 1 ? 'Saving… ' + Math.floor(f * 100) + '%' : 'Finishing…')),
       onWarn: (m) => toast(m, 6000),
     });
     const name = safeName(S.title, 'audio') + '.' + res.ext;
@@ -2096,15 +2061,15 @@ bind('exGo', 'click', async () => {
     $('exResult').hidden = false; $('exProgress').classList.remove('show');
     toast('Audio saved: ' + name, 4000);
   } catch (e) {
-    if (e instanceof ExtractCancelled || (e && e.name === 'ExtractCancelled')) { $('exStatus').textContent = 'Cancelled. Nothing was saved.'; toast('Extraction cancelled'); }
+    if (e instanceof ExtractCancelled || (e && e.name === 'ExtractCancelled')) { $('exStatus').textContent = 'Cancelled. Nothing was saved.'; toast('Cancelled'); }
     else {
-      (e && e.code ? console.info : console.warn)('Extract audio:', e && e.message || e);
-      const msg = e && e.code ? e.message : 'Could not extract the audio: ' + ((e && e.message) || e);
+      (e && e.code ? console.info : console.warn)('Save audio:', e && e.message || e);
+      const msg = e && e.code ? e.message : 'Could not save the audio: ' + ((e && e.message) || e);
       $('exStatus').textContent = msg; toast(msg, 6000);
     }
   } finally {
     extractJob = null; try { app._wakeX && app._wakeX.release(); } catch { /* ignore */ }
-    $('exGo').disabled = false; $('exGo').textContent = 'Extract audio'; $('exGo').classList.remove('busy'); $('exFormat').disabled = false; $('exCancel').textContent = 'Close';
+    $('exGo').disabled = false; $('exGo').textContent = 'Save audio'; $('exGo').classList.remove('busy'); $('exFormat').disabled = false; $('exCancel').textContent = 'Close';
     updateSummary();
   }
 });

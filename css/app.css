@@ -507,8 +507,6 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 @media (pointer:fine){.volenv.editable .venv-hit{r:10}}
 
 /* extract audio */
-.extract-btn{margin-top:8px}
-.extract-btn + .hint{margin-top:6px}
 #exProgress{margin-top:12px}
 #extractDialog .export-result{margin-top:12px}
 

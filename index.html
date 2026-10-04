@@ -239,7 +239,7 @@
               </div>
             </div>
             <button type="button" class="mute-btn" data-toggle="clip.muted" aria-pressed="false"><svg class="ico spk-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 5.2a3.6 3.6 0 010 5.6M13 3.4a6.2 6.2 0 010 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><svg class="ico spk-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 6l4 4M15 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mute this clip</span><span class="mb-state" aria-hidden="true">Sound on</span></button>
-            <div class="detach-row"><button type="button" class="btn secondary detach-btn" data-action="detachAudio" id="detachClipBtn"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 3v10M13.5 5v6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.5 2"/></svg><span>Detach audio</span></button><p class="hint" id="detachClipHint">Copies this video&rsquo;s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.</p><button type="button" class="btn secondary detach-btn extract-btn" data-action="extractAudio"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Extract audio as a file…</span></button><p class="hint">Saves just the sound (trimmed part) as an M4A, Opus or WAV file you can keep or share. The clip itself is not changed.</p></div>
+            <div class="detach-row"><button type="button" class="btn secondary detach-btn" data-action="detachAudio" id="detachClipBtn"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 3v10M13.5 5v6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.5 2"/></svg><span>Detach audio</span></button><p class="hint" id="detachClipHint">Copies this video&rsquo;s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.</p></div>
             
             <div class="field-row" style="margin-top:10px">
               <label><span class="label">Audio fade in (s)</span><input class="field mono" type="number" min="0" max="10" step="0.1" data-bind="clip.fadeIn" data-commit="change" /></label>
@@ -451,7 +451,6 @@
         <section class="section">
           <div class="section-head"><h2>Music &amp; audio tracks</h2><label class="btn primary small" for="musicInput">＋ Add music</label><input id="musicInput" type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac" multiple /></div>
           <div class="item-list" id="audioList"></div>
-          <div class="detach-row"><label class="btn secondary detach-btn" for="extractFileInput" id="extractFileBtn"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Extract audio from a video file…</span></label><input id="extractFileInput" type="file" accept="video/*,audio/*,.mov,.mp4,.m4v,.mkv,.webm,.3gp,.m4a,.mp3,.wav" /><p class="hint">Pick any video (even one this browser can&rsquo;t play, such as an iPhone H.265 clip on a laptop) and save just its sound as an M4A, Opus or WAV file. Nothing is added to your project.</p></div>
           <p class="hint" id="audioEmptyHint">Tap ＋ Add music above for background music. It starts at the playhead; drag it on the timeline to offset, drag its edges to trim. Ducking lowers music while clips have sound.</p>
         </section>
         <div id="audioPanel" hidden>
@@ -476,7 +475,7 @@
             <label class="check"><input type="checkbox" data-bind="audio.voice" /> This is a voice track (other music ducks under it)</label>
             <div class="slider-row"><label>Duck to</label><input type="range" min="0" max="1" step="0.01" data-bind="audio.duckLevel" /><output data-out="audio.duckLevel" data-fmt="pct"></output></div>
             <section class="section kf-panel" data-kf="audio"></section>
-            <div class="button-row" style="margin-top:12px"><button class="btn secondary" data-action="extractAudio" type="button">Save as audio file…</button><button class="btn secondary" data-action="audioStartHere" type="button">Start at playhead</button><button class="btn ghost danger" data-action="deleteAudio" type="button">Remove track</button></div>
+            <div class="button-row" style="margin-top:12px"><button class="btn secondary" data-action="audioStartHere" type="button">Start at playhead</button><button class="btn ghost danger" data-action="deleteAudio" type="button">Remove track</button></div>
           </section>
         </div>
       </div>
@@ -531,7 +530,7 @@
           <section class="section" id="ovlSoundSection">
             <h2 class="sh">Sound</h2>
             <button type="button" class="mute-btn" data-toggle="ovl.muted" aria-pressed="false"><svg class="ico spk-on" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 5.2a3.6 3.6 0 010 5.6M13 3.4a6.2 6.2 0 010 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><svg class="ico spk-off" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 6l4 4M15 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mute overlay audio</span><span class="mb-state" aria-hidden="true">Sound on</span></button>
-            <div class="detach-row"><button type="button" class="btn secondary detach-btn" data-action="detachAudio" id="detachOvlBtn"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 3v10M13.5 5v6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.5 2"/></svg><span>Detach audio</span></button><p class="hint" id="detachOvlHint">Copies this video&rsquo;s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.</p><button type="button" class="btn secondary detach-btn extract-btn" data-action="extractAudio"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Extract audio as a file…</span></button><p class="hint">Saves just the sound (trimmed part) as an M4A, Opus or WAV file you can keep or share. The clip itself is not changed.</p></div>
+            <div class="detach-row"><button type="button" class="btn secondary detach-btn" data-action="detachAudio" id="detachOvlBtn"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 3v10M13.5 5v6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.5 2"/></svg><span>Detach audio</span></button><p class="hint" id="detachOvlHint">Copies this video&rsquo;s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.</p></div>
             
             <div class="slider-row"><label>Volume</label><input type="range" min="0" max="2" step="0.05" data-bind="ovl.volume" /><output data-out="ovl.volume" data-fmt="pct"></output><button class="kf-dia" type="button" data-action="addVolumeKey" aria-label="Keyframe the volume at the playhead" title="Keyframe the volume at the playhead (listed under Keyframes)">◆</button></div>
           </section>
@@ -663,7 +662,6 @@
         <i class="sep"></i>
         <button class="tool" data-action="addMarker" type="button" title="Add marker (M)">⚑<span>Marker</span></button>
         <i class="sep"></i>
-        <button class="tool" data-action="extractAudio" id="toolExtract" type="button" aria-label="Extract audio" title="Extract audio: save the selected clip's sound as an audio file (M4A, Opus or WAV)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Extract audio</span></button>
         <button class="tool" data-action="match" id="toolMatch" type="button" aria-label="Match" title="Match: make the selected item fit another one on the timeline (length, start / end, loudness)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5v11M14 2.5v11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4.5 8h7M4.5 8l2-2M4.5 8l2 2M11.5 8l-2-2M11.5 8l-2 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Match…</span></button>
         <i class="sep"></i>
         <button class="tool" data-action="volumeDown" id="toolVolumeDown" type="button" aria-label="Volume down" title="Volume down: lower the selected item's Volume by 10 points (Shift or Alt: 1 point). Shortcut: ["><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Vol −</span></button>
@@ -913,7 +911,7 @@
 </dialog>
 
 
-<!-- Extract audio -->
+<!-- Save audio (Export audio only) -->
 <dialog class="sheet" id="transDialog" aria-labelledby="tdTitle">
   <div class="sheet-head"><h2 id="tdTitle">Generate captions</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="tdClose">✕</button></div>
   <p class="hint" id="tdSource"></p>
@@ -984,7 +982,7 @@
   </div>
 </dialog>
 <dialog class="sheet" id="extractDialog" aria-labelledby="exTitle">
-  <div class="sheet-head"><h2 id="exTitle">Extract audio</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="exClose">✕</button></div>
+  <div class="sheet-head"><h2 id="exTitle">Save audio</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="exClose">✕</button></div>
   <p class="hint" id="exSource"></p>
   <div class="field-row" style="margin-top:10px">
     <label><span class="label">File type</span><select id="exFormat"><option value="auto">Auto (M4A when possible)</option><option value="m4a">M4A (AAC)</option><option value="opus">Opus (.ogg)</option><option value="wav">WAV (large, lossless)</option></select></label>
@@ -998,7 +996,7 @@
     <p id="exResultText"></p>
     <div class="button-row"><a class="btn primary" id="exDownload" download>Download again</a><button class="btn secondary" id="exShare" type="button">Share</button></div>
   </div>
-  <div class="button-row" style="margin-top:12px"><button class="btn primary" id="exGo" type="button">Extract audio</button><button class="btn ghost" id="exCancel" type="button">Cancel</button></div>
+  <div class="button-row" style="margin-top:12px"><button class="btn primary" id="exGo" type="button">Save audio</button><button class="btn ghost" id="exCancel" type="button">Cancel</button></div>
 </dialog>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
