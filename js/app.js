@@ -2300,7 +2300,7 @@ async function boot() {
   if (!onboarded) { if (app.project.clips.length) db.kvSet('onboarded', true).catch(() => { }); else $('onboard').hidden = false; }
   // files shared to the installed app (Android share sheet → share_target)
   if (new URLSearchParams(location.search).get('shared') === 'error') {
-    toast('Nothing usable was shared, or it could not be received. Open your files with “Add clips” instead.', 6000);
+    toast('Nothing usable was shared, or it could not be received. Add your files with ＋ Media instead.', 6000);
     history.replaceState(null, '', location.pathname);
   } else if (new URLSearchParams(location.search).has('shared')) {
     await consumeInbox();

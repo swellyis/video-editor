@@ -83,14 +83,14 @@ export async function fetchMedia(input, opts = {}) {
       clearTimeout(t); reachable = !!r; ac.abort();
     } catch { /* unreachable */ }
     if (signal && signal.aborted) throw cancelled();
-    if (reachable) throw new LinkError('cors', 'This site does not allow other apps to download its files (CORS), so it cannot be imported from a link. Download the file in your browser, then add it with Add clips.');
+    if (reachable) throw new LinkError('cors', 'This site does not allow other apps to download its files (CORS), so it cannot be imported from a link. Download the file in your browser, then add it with the Choose button above.');
     throw new LinkError('unreachable', 'Could not reach that address. You may be offline, the link may be wrong, or the site may be down.');
   }
   if (!res.url || !/^https:/i.test(res.url)) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw new LinkError('badurl', 'That link redirected somewhere that is not https, so it was not downloaded.'); }
   if (!res.ok) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw new LinkError('http', `The server answered “${res.status}${res.statusText ? ' ' + res.statusText : ''}”. ${res.status === 404 ? 'The file was not found.' : res.status === 401 || res.status === 403 ? 'The file needs a login or is not shared publicly.' : 'Try again later.'}`); }
   let type; try { type = mediaTypeOf(res.headers.get('content-type'), res.url); } catch (e) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw e; }
   const total = parseInt(res.headers.get('content-length') || '0', 10) || 0; // only readable when the server exposes it
-  const tooBig = () => new LinkError('toolarge', `That file is larger than ${Math.round(maxBytes / 1048576)} MB, which is more than this device can safely hold while downloading. Download it in your browser and add it with Add clips.`);
+  const tooBig = () => new LinkError('toolarge', `That file is larger than ${Math.round(maxBytes / 1048576)} MB, which is more than this device can safely hold while downloading. Download it in your browser and add it with the Choose button above.`);
   if (total > maxBytes) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw tooBig(); }
   const chunks = []; let loaded = 0;
   if (res.body && res.body.getReader) {
