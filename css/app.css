@@ -739,3 +739,7 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .mt-preview p{margin:0 0 4px}.mt-preview p:last-child{margin:0}
 .mt-preview .bad{color:var(--danger,#d33)}
 .segmented.two{grid-template-columns:repeat(2,1fr)}
+/* Match dialog: every control is at least 44 px (phone) */
+#matchDialog .icon-btn{min-width:44px;min-height:44px}
+#matchDialog .btn{min-height:44px;min-width:44px}
+#matchDialog select{min-height:44px}

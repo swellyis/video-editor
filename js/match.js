@@ -57,7 +57,7 @@ export function targetsFor(project, sel) {
     label: typeWord(info) + ' · ' + info.name + ' · ' + say(info.start) + '–' + say(info.end),
   }));
   list.sort((a, b) => b.overlap - a.overlap || Math.abs(a.info.start - me.start) - Math.abs(b.info.start - me.start));
-  if (lay.total > 0) { const w = describe(project, { type: 'whole' }); list.push({ ref: w.ref, info: w, overlap: 0, label: 'The whole video · ' + say(0) + '–' + say(w.end) }); }
+  if (lay.total > 0 && list.length) { const w = describe(project, { type: 'whole' }); list.push({ ref: w.ref, info: w, overlap: 0, label: 'The whole video · ' + say(0) + '–' + say(w.end) }); }
   return list;
 }
 /** The target to suggest: for a picture, the audio it belongs with (what “Match audio” used to choose); for a sound, the picture under its start. */
