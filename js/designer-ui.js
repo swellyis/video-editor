@@ -34,9 +34,21 @@ export function initDesigner(ctx) {
     const F = fmt(); S.fk = F.key;
     const stored = P().designs && P().designs[F.key];
     if (stored) S.design = normDesign(stored);
-    else if (P().text || P().sub) S.design = legacyDesign(P(), F.key);
+    else if (P().text || P().sub) { S.design = legacyDesign(P(), F.key); fitText(S.design, F); }
     else S.design = normDesign({ bg: defaultBg(), adjust: defaultAdjust(), layers: [] });
     S.sel = null; S.hist = [JSON.stringify(S.design)]; S.hi = 0;
+  }
+  /** An older project's headline could be any length (the old maker shrank it to fit): shrink the converted text until its block sits inside the safe area. */
+  function fitText(d, F) {
+    const sf = SAFE[F.key];
+    for (const l of d.layers) {
+      if (l.type !== 'text') continue;
+      for (let i = 0; i < 40; i++) {
+        const b = layerBox(meas, l, F.width, F.height), cy = l.y * F.height;
+        if ((b.h / 2 <= cy - sf.y && b.h / 2 <= sf.y + sf.h - cy && b.m.lines.length <= 6) || l.size * F.width <= 24) break;
+        l.size *= 0.94;
+      }
+    }
   }
   function persist() {
     const d = D(); if (!d) return;
