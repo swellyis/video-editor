@@ -240,7 +240,7 @@ export function initDesigner(ctx) {
       for (const t of TEMPLATES) {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'th-tpl'; b.dataset.tpl = t.id; b.setAttribute('aria-label', 'Layout: ' + t.label);
         const cv = document.createElement('canvas'); const s = document.createElement('span'); s.textContent = t.label; b.append(cv, s);
-        b.onclick = () => { if (!D()) return; S.design = applyTpl(D(), tplFor(t.id)); S.sel = null; syncAll(); commit(); toast(`Layout “${t.label}” applied. Undo brings back your old one.`); setTab('edit'); };
+        b.onclick = () => { if (!D()) return; S.design = applyTpl(D(), tplFor(t.id)); const main = S.design.layers.find(l => l.name === 'Title' || l.type === 'text'); S.sel = main ? main.id : null; syncAll(); commit(); toast(`Layout “${t.label}” applied. Undo brings back your old one.`); setTab('edit'); };
         box.append(b);
       }
     }

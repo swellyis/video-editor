@@ -660,7 +660,7 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .th-h.rot{left:50%;top:-34px;background:#2d8cff;border-color:#fff}
 .th-h.rot::before{content:"";position:absolute;left:50%;top:100%;width:2px;height:12px;margin-left:-1px;background:#2d8cff}
 .th-h[hidden]{display:none}
-.th-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px;padding-bottom:6px}
+.th-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px;padding-bottom:6px;position:relative;z-index:7;background:var(--surface)}
 .th-actions[hidden]{display:none}
 .th-actions .btn{min-height:40px;min-width:40px}
 .th-top{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:end}

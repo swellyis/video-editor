@@ -248,10 +248,12 @@ export function drawLayer(ctx, l, W, H, assets) {
     let y = -box.h / 2 + m.pad + m.lh / 2;
     for (const ln of m.lines) {
       if (l.glow.on) { ctx.shadowColor = l.glow.color; ctx.shadowBlur = l.glow.blur * px; ctx.fillStyle = l.color; ctx.fillText(ln, ax, y); ctx.fillText(ln, ax, y); ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; }
-      if (l.shadow.on) { ctx.shadowColor = l.shadow.color; ctx.shadowBlur = l.shadow.blur * px; ctx.shadowOffsetX = l.shadow.dx * px; ctx.shadowOffsetY = l.shadow.dy * px; }
-      if (l.stroke.on && l.stroke.w > 0) { ctx.strokeStyle = l.stroke.color; ctx.lineWidth = l.stroke.w * px * 2; ctx.strokeText(ln, ax, y); }
-      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
-      ctx.fillStyle = l.color; ctx.fillText(ln, ax, y);
+      const outline = l.stroke.on && l.stroke.w > 0;
+      const shadowOn = () => { ctx.shadowColor = l.shadow.color; ctx.shadowBlur = l.shadow.blur * px; ctx.shadowOffsetX = l.shadow.dx * px; ctx.shadowOffsetY = l.shadow.dy * px; };
+      const shadowOff = () => { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; };
+      if (outline) { if (l.shadow.on) shadowOn(); ctx.strokeStyle = l.stroke.color; ctx.lineWidth = l.stroke.w * px * 2; ctx.strokeText(ln, ax, y); shadowOff(); } // the shadow follows the outlined shape
+      if (!outline && l.shadow.on) shadowOn();
+      ctx.fillStyle = l.color; ctx.fillText(ln, ax, y); shadowOff();
       y += m.lh;
     }
   } else if (l.type === 'shape') {
