@@ -127,6 +127,24 @@
         <button data-tab="look" type="button" role="tab">Looks</button>
       </div>
 
+      <!-- SEVERAL ITEMS SELECTED -->
+      <div class="tab-panel multi-panel prop-panel" id="multiPanel" hidden>
+        <section class="section">
+          <div class="section-head"><h2 id="multiTitle">2 items selected</h2></div>
+          <p class="hint" id="multiSum"></p>
+          <div class="button-row">
+            <button class="btn secondary small" type="button" data-action="copy" title="Copy the selected items (Ctrl+C)">Copy</button>
+            <button class="btn secondary small" type="button" data-action="cut" title="Cut the selected items (Ctrl+X)">Cut</button>
+            <button class="btn secondary small" type="button" data-action="pasteLook" id="multiPasteLook" title="Give the selected items the look (effects, filter, animation, volume) of the copied item (Ctrl+Shift+V)">Paste look</button>
+          </div>
+          <div class="button-row">
+            <button class="btn secondary small" type="button" data-action="muteSel" id="multiMute">Mute sound</button>
+            <button class="btn ghost small" type="button" data-action="deselect" title="Clear the selection (Esc)">Deselect</button>
+          </div>
+          <p class="hint">Split, Duplicate, Delete and Volume on the timeline toolbar act on all of them. Drag any selected item to move the group. Shift or Ctrl-click adds or removes one; drag on empty space to select a box; Ctrl+A selects everything.</p>
+        </section>
+      </div>
+
       <!-- CLIP -->
       <div class="tab-panel active" id="tab-clip">
         <section class="section">
@@ -673,6 +691,7 @@
         <i class="sep"></i>
         <button class="tool toggle" id="rippleBtn" type="button" title="Ripple on: clips stay joined and deleting/trimming shifts what comes after. Ripple off: everything moves freely and clips can leave gaps" aria-pressed="true">⇤<span>Ripple</span></button>
         <button class="tool toggle" id="snapBtn" type="button" title="Snapping" aria-pressed="true">🧲<span>Snap</span></button>
+        <button class="tool toggle" id="selectBtn" type="button" title="Select mode: tap items to add or remove them from the selection, drag on empty space to select a box (also: Shift or Ctrl-click, long-press on a touch screen)" aria-pressed="false">▢<span>Select</span></button>
         <span class="grow"></span>
         <button class="tool" id="zoomOut" type="button" title="Zoom out (-)" aria-label="Zoom out">−</button>
         <input type="range" id="zoomRange" min="0" max="100" value="40" aria-label="Timeline zoom" />

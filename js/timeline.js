@@ -4,6 +4,7 @@ import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed,
 import { clamp, fmt, el, icon, toast } from './util.js';
 import { retimeWords } from './captions.js';
 import { timelineBeats, thin } from './beat.js';
+import * as G from './group.js';
 
 function muteBadge(title, extra = '') {
   const i = icon('spkOff', 'ico badge-ico mute-badge' + (extra ? ' ' + extra : ''));
@@ -49,6 +50,13 @@ export class Timeline {
     this.root.append(this.heads, this.scroll);
     this.ruler.addEventListener('pointerdown', e => this.onScrubStart(e));
     this.lanes.addEventListener('pointerdown', e => { if (e.target === this.lanes) this.onEmptyDown(e); });
+    // right-click: the item menu (Copy / Paste / Duplicate / Delete / Detach...)
+    this.scroll.addEventListener('contextmenu', (e) => {
+      if (this._lastPtr && this._lastPtr !== 'mouse') return;
+      e.preventDefault();
+      const it = this.itemAt(e.target);
+      this.app.openCtx(e.clientX, e.clientY, it && it.type, it && it.id);
+    });
     // the ruler only draws ticks for the visible range; redraw as the timeline scrolls
     this.scroll.addEventListener('scroll', () => { if (this._rulerRaf) return; this._rulerRaf = requestAnimationFrame(() => { this._rulerRaf = 0; this.renderRuler(); this.renderCaps(); }); }, { passive: true });
     this.scroll.addEventListener('wheel', e => {
@@ -181,16 +189,17 @@ export class Timeline {
   }
 
   snapPoints(exclude) {
+    const ex = (id) => (exclude instanceof Set ? exclude.has(id) : id === exclude);
     const p = this.project, lay = layout(p), pts = [0, lay.total, this.app.player.t];
-    for (const it of lay.items) if (it.clip.id !== exclude) { pts.push(it.start, it.end); }
-    for (const t of p.texts) if (t.id !== exclude) pts.push(t.start, t.end);
-    for (const b of p.blurs || []) if (b.id !== exclude) pts.push(b.start, b.end);
-    for (const c of p.captions || []) if (c.id !== exclude) pts.push(c.start, c.end);
-    for (const a of p.audio) if (a.id !== exclude) pts.push(a.start, a.start + audioSpan(a, lay.total));
+    for (const it of lay.items) if (!ex(it.clip.id)) { pts.push(it.start, it.end); }
+    for (const t of p.texts) if (!ex(t.id)) pts.push(t.start, t.end);
+    for (const b of p.blurs || []) if (!ex(b.id)) pts.push(b.start, b.end);
+    for (const c of p.captions || []) if (!ex(c.id)) pts.push(c.start, c.end);
+    for (const a of p.audio) if (!ex(a.id)) pts.push(a.start, a.start + audioSpan(a, lay.total));
     this._beatPts = new Set();   // Snap to beat: the beats of every music item that has "Snap to beats" on (thinned when zoomed out so they never form a wall)
-    for (const a of p.audio) if (a.id !== exclude && a.beat && a.beat.on !== false && !a.loop) for (const t of thin(timelineBeats(a), this.pps, 16)) { pts.push(t); this._beatPts.add(t); }
-    for (const m of p.markers) if (m.id !== exclude) pts.push(m.time);
-    for (const o of p.overlays || []) if (o.id !== exclude) pts.push(o.start, o.start + overlayLen(o));
+    for (const a of p.audio) if (!ex(a.id) && a.beat && a.beat.on !== false && !a.loop) for (const t of thin(timelineBeats(a), this.pps, 16)) { pts.push(t); this._beatPts.add(t); }
+    for (const m of p.markers) if (!ex(m.id)) pts.push(m.time);
+    for (const o of p.overlays || []) if (!ex(o.id)) pts.push(o.start, o.start + overlayLen(o));
     return pts;
   }
   snap(t, exclude, candidates) {
@@ -215,7 +224,6 @@ export class Timeline {
   render() {
     const p = this.project, lay = layout(p);
     this._gen = (this._gen || 0) + 1;
-    const sel = this.app.selection || {};
     const width = Math.max(this.scroll.clientWidth, this.x(Math.max(lay.total, ...p.audio.map(a => a.start + audioSpan(a, lay.total)), ...p.texts.map(t => t.end), ...(p.captions || []).slice(-1).map(c => c.end), ...(p.blurs || []).map(b => b.end), ...(p.overlays || []).map(o => o.start + overlayLen(o)))) + 240);
     this.content.style.width = width + 'px';
     this._width = width;
@@ -231,7 +239,7 @@ export class Timeline {
       n.style.left = this.x(m.time) + 'px';
       n.title = (m.name || 'Marker') + ' · ' + fmt(m.time);
       n.dataset.label = m.name || '';
-      n.classList.toggle('sel', sel.type === 'marker' && sel.id === m.id);
+      n.classList.toggle('sel', this.app.isSel('marker', m.id));
     }
     // one stack of lanes: clips, overlays, text, blur regions, captions and sound all sit in it
     const top = this.laneGeo();
@@ -252,7 +260,7 @@ export class Timeline {
       const w = Math.max(6, it.len * this.pps);
       n.style.left = this.x(it.start) + 'px'; n.style.width = w + 'px'; n.classList.toggle('narrow', w < 64);
       n.style.top = top(c) + 'px';
-      n.classList.toggle('sel', sel.type === 'clip' && sel.id === c.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
+      n.classList.toggle('sel', this.app.isSel('clip', c.id)); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.classList.toggle('image', c.kind === 'image');
       const rec = this.app.media.peek(c.mediaId);
       n.classList.toggle('offline', !rec);
@@ -271,7 +279,7 @@ export class Timeline {
       xf.style.width = (it.xIn * this.pps) + 'px'; xf.style.display = it.xIn > 0 ? 'block' : 'none';
       this.renderStrip(n.querySelector('.strip'), c, rec, w);
       this.renderKfs(n, c, it.start, it.len);
-      this.renderVolEnv(n, c, 'clip', it.start, it.len, ITEM_H, sel.type === 'clip' && sel.id === c.id && hasSound(c));
+      this.renderVolEnv(n, c, 'clip', it.start, it.len, ITEM_H, this.single('clip', c.id) && hasSound(c));
     }
     const onTrans = !!document.querySelector('#tab-trans.active');
     // the small marker on every join of two clips: tap it to choose the transition (the choice is stored on the clip that follows)
@@ -295,7 +303,7 @@ export class Timeline {
       const roomy = prev.len * this.pps >= 36 && it.len * this.pps >= 36 && !(c.gap > 1e-6);
       n.hidden = !roomy;
       const set = c.transition.type !== 'cut';
-      n.classList.toggle('set', set); n.classList.toggle('target', onTrans && (this.app.trTarget === c.id || (!this.app.trTarget && sel.type === 'clip' && sel.id === c.id)));
+      n.classList.toggle('set', set); n.classList.toggle('target', onTrans && (this.app.trTarget === c.id || (!this.app.trTarget && this.app.isSel('clip', c.id))));
       const nm = set ? labelOf(c.transition.type) + ', ' + (Math.round((it.xIn > 0 ? it.xIn : c.transition.duration) * 10) / 10) + ' seconds' : 'none';
       n.setAttribute('aria-label', `Transition between clip ${it.index} and clip ${it.index + 1}: ${nm}. Change`);
       n.title = set ? labelOf(c.transition.type) : 'Add a transition';
@@ -313,13 +321,13 @@ export class Timeline {
       n.style.top = top(o) + 'px';
       const lab = n.querySelector('span'), keyed = !!(o.chroma && o.chroma.enabled), om = o.kind === 'video' && o.hasAudio && o.muted, lk = keyed + '|' + o.name + '|' + om;
       if (lab._key !== lk) { lab._key = lk; lab.replaceChildren(icon(keyed ? 'key' : 'pip', 'ico item-ico'), ' ' + o.name, ...(om ? [' ', muteBadge('Muted')] : [])); }
-      n.classList.toggle('sel', sel.type === 'overlay' && sel.id === o.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
+      n.classList.toggle('sel', this.app.isSel('overlay', o.id)); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.setAttribute('aria-label', `Overlay ${o.name}${om ? ' (muted)' : ''}, ${fmt(o.start)} to ${fmt(o.start + overlayLen(o))}`);
       const orec = this.app.media.peek(o.mediaId);
       n.classList.toggle('offline', !orec);
       this.renderStrip(n.querySelector('.strip'), o, orec, Math.max(8, overlayLen(o) * this.pps));
       this.renderKfs(n, o, o.start, overlayLen(o));
-      this.renderVolEnv(n, o, 'overlay', o.start, overlayLen(o), ITEM_H, sel.type === 'overlay' && sel.id === o.id && hasSound(o));
+      this.renderVolEnv(n, o, 'overlay', o.start, overlayLen(o), ITEM_H, this.single('overlay', o.id) && hasSound(o));
     }
     // text
     for (const t of p.texts) {
@@ -333,7 +341,7 @@ export class Timeline {
       n.style.left = this.x(t.start) + 'px'; n.style.width = Math.max(8, (t.end - t.start) * this.pps) + 'px'; n.classList.toggle('narrow', (t.end - t.start) * this.pps < 64);
       n.style.top = top(t) + 'px';
       n.querySelector('span').textContent = textLabel(t);
-      n.classList.toggle('sel', sel.type === 'text' && sel.id === t.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
+      n.classList.toggle('sel', this.app.isSel('text', t.id)); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.setAttribute('aria-label', `Text “${textLabel(t).slice(0, 60)}”, ${fmt(t.start)} to ${fmt(t.end)}`);
       n.classList.toggle('animated', !!(t.anim && (t.anim.in !== 'none' || t.anim.out !== 'none' || (t.anim.loop && t.anim.loop !== 'none'))));
       this.renderKfs(n, t, t.start, t.end - t.start);
@@ -352,7 +360,7 @@ export class Timeline {
       n.style.top = top(b) + 'px';
       const lab = n.querySelector('span'), bk = blurLabel(b);
       if (lab._key !== bk) { lab._key = bk; lab.replaceChildren(icon('blur', 'ico item-ico'), ' ' + bk); }
-      n.classList.toggle('sel', sel.type === 'blur' && sel.id === b.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
+      n.classList.toggle('sel', this.app.isSel('blur', b.id)); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.setAttribute('aria-label', `${blurLabel(b)} (${b.invert ? 'blur outside' : b.mode === 'pixelate' ? 'pixelate' : 'blur'} region), ${fmt(b.start)} to ${fmt(b.end)}`);
       n.classList.toggle('animated', hasKeyframes(b));
       this.renderKfs(n, b, b.start, b.end - b.start);
@@ -377,11 +385,11 @@ export class Timeline {
       n.classList.toggle('loop', !!a.loop);
       const seams = n.querySelector('.seams'), sk = a.loop ? loopSeams(a, lay.total).map(t => ((t - a.start) * this.pps).toFixed(1)).join(',') : '';
       if (seams._key !== sk) { seams._key = sk; seams.replaceChildren(...(sk ? sk.split(',').slice(0, 400).map(x => { const i = document.createElement('i'); i.style.left = x + 'px'; return i; }) : [])); }
-      n.classList.toggle('sel', sel.type === 'audio' && sel.id === a.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
+      n.classList.toggle('sel', this.app.isSel('audio', a.id)); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.setAttribute('aria-label', `${a.voice ? 'Voice' : 'Music'} ${a.name}${a.loop ? ' (loop)' : ''}${a.muted ? ' (muted)' : ''}, ${fmt(a.start)} to ${fmt(a.start + span)}`);
       n.classList.toggle('offline', !this.app.media.peek(a.mediaId));
       this.renderWave(n.querySelector('.wave'), a, w, null, 30, 1, span);
-      this.renderVolEnv(n, a, 'audio', a.start, span, ITEM_H, sel.type === 'audio' && sel.id === a.id);
+      this.renderVolEnv(n, a, 'audio', a.start, span, ITEM_H, this.single('audio', a.id));
     }
     this.renderSilences(top);
     this.renderBeats(top);
@@ -423,7 +431,7 @@ export class Timeline {
     const p = this.project, caps = p.captions || [];
     if (!this.capNodes) this.capNodes = new Map();
     if (!caps.length) { for (const n of this.capNodes.values()) n.remove(); this.capNodes.clear(); return; }
-    const top = this.laneGeo(), sel = this.app.selection || {};
+    const top = this.laneGeo();
     const vw = Math.max(1, this.scroll.clientWidth), x0 = this.scroll.scrollLeft - vw, x1 = this.scroll.scrollLeft + 2 * vw;
     const t0 = (x0 - 12) / this.pps, t1 = (x1 - 12) / this.pps;
     const gen = (this._capGen = (this._capGen || 0) + 1);
@@ -440,7 +448,7 @@ export class Timeline {
       n.style.left = this.x(c.start) + 'px'; n.style.width = Math.max(4, (c.end - c.start) * this.pps - 1) + 'px'; n.classList.toggle('narrow', (c.end - c.start) * this.pps < 64);
       n.style.top = top(c) + 'px';
       const lab = n.firstChild; if (lab._key !== c.text) { lab._key = c.text; lab.textContent = c.text; }
-      const on = sel.type === 'caption' && sel.id === c.id;
+      const on = this.app.isSel('caption', c.id);
       n.classList.toggle('sel', on); n.setAttribute('aria-pressed', on ? 'true' : 'false');
       n.setAttribute('aria-label', `Caption “${c.text.slice(0, 60)}”, ${fmt(c.start)} to ${fmt(c.end)}`);
     }
@@ -630,9 +638,66 @@ export class Timeline {
     this.ruler.addEventListener('pointermove', move); this.ruler.addEventListener('pointerup', up); this.ruler.addEventListener('pointercancel', up);
     move(e);
   }
+  /** Is this the one (single) selected item? (A multi-selection shows no volume handles.) */
+  single(type, id) { const s = this.app.selection; return !!s && s.type === type && s.id === id; }
+  nodeOf(type, id) { return type === 'caption' ? (this.capNodes && this.capNodes.get(id)) : this.nodes.get({ clip: 'c:', overlay: 'o:', text: 't:', blur: 'b:', audio: 'a:' }[type] + id); }
+  /** The timeline item under a DOM node: { type, id } or null. */
+  itemAt(target) {
+    const p = this.project;
+    for (const type of G.GROUP_TYPES) for (const it of (type === 'clip' ? p.clips : type === 'overlay' ? p.overlays : type === 'text' ? p.texts : type === 'blur' ? p.blurs : type === 'audio' ? p.audio : p.captions) || []) {
+      const n = this.nodeOf(type, it.id); if (n && n.contains(target)) return { type, id: it.id };
+    }
+    return null;
+  }
+  /** Fires `fn` when the pointer stays down (and still) for 450 ms. Returns { fired() }. */
+  longPress(e, fn) {
+    const sx = e.clientX, sy = e.clientY, pid = e.pointerId; let fired = false;
+    const stop = () => { clearTimeout(tm); window.removeEventListener('pointermove', mv, true); window.removeEventListener('pointerup', stop, true); window.removeEventListener('pointercancel', stop, true); };
+    const mv = (ev) => { if (ev.pointerId === pid && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) stop(); };
+    const tm = setTimeout(() => { fired = true; stop(); if (this.drag && this.drag.abort) this.drag.abort(); fn(); try { navigator.vibrate && navigator.vibrate(15); } catch { /* no haptics */ } }, 450);
+    window.addEventListener('pointermove', mv, true); window.addEventListener('pointerup', stop, true); window.addEventListener('pointercancel', stop, true);
+    return { fired: () => fired };
+  }
   onEmptyDown(e) {
-    const sx = e.clientX, sy = e.clientY, target = e.currentTarget, pid = e.pointerId;
-    if (e.pointerType === 'mouse') { this.app.select(null); this.app.seek(this.timeAtClient(e.clientX)); return; }
+    const sx = e.clientX, sy = e.clientY, target = e.currentTarget, pid = e.pointerId, app = this.app;
+    this._lastPtr = e.pointerType;
+    if (e.button === 2) return;
+    const mouse = e.pointerType === 'mouse', mod = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (mouse || app.selectMode) {
+      // mouse: a click selects nothing + moves the playhead; dragging draws a selection box (Select mode does the same with a finger)
+      if (!mouse) e.preventDefault();
+      let box = null, moved = false;
+      const base = mod ? app.selList() : [];
+      const hits = (ev) => {
+        const l = Math.min(sx, ev.clientX), r = Math.max(sx, ev.clientX), tp = Math.min(sy, ev.clientY), b = Math.max(sy, ev.clientY), rects = [];
+        for (const s of G.everything(this.project)) { const n = this.nodeOf(s.type, s.id); if (!n) continue; const q = n.getBoundingClientRect(); rects.push({ key: s, l: q.left, r: q.right, t: q.top, b: q.bottom }); }
+        return { box: { l, r, t: tp, b }, list: G.rectsHit({ l, r, t: tp, b }, rects) };
+      };
+      try { target.setPointerCapture(pid); } catch { /* pointer already gone */ }
+      const move = (ev) => {
+        if (ev.pointerId !== pid) return;
+        if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
+        moved = true;
+        if (!box) { box = el('div', { class: 'tl-marquee', 'aria-hidden': 'true' }); document.body.appendChild(box); }
+        const h = hits(ev);
+        Object.assign(box.style, { left: h.box.l + 'px', top: h.box.t + 'px', width: (h.box.r - h.box.l) + 'px', height: (h.box.b - h.box.t) + 'px' });
+        const on = new Set([...base, ...h.list].map(s => s.id));
+        for (const s of G.everything(this.project)) { const n = this.nodeOf(s.type, s.id); if (n) n.classList.toggle('marq', on.has(s.id)); }
+      };
+      const end = (ev) => {
+        if (ev.pointerId !== pid) return;
+        target.removeEventListener('pointermove', move); target.removeEventListener('pointerup', end); target.removeEventListener('pointercancel', end);
+        if (box) box.remove();
+        for (const n of this.lanes.querySelectorAll('.marq')) n.classList.remove('marq');
+        if (ev.type === 'pointercancel') return;
+        if (!moved) { if (!mod) { app.select(null); app.seek(this.timeAtClient(ev.clientX)); } return; }
+        const list = [...base]; for (const s of hits(ev).list) if (!list.some(x => G.same(x, s))) list.push(s);
+        app.setMulti(list);
+        if (list.length > 1) toast(list.length + ' items selected. Drag one to move them all; Del deletes; Ctrl+C copies.', 2600);
+      };
+      target.addEventListener('pointermove', move); target.addEventListener('pointerup', end); target.addEventListener('pointercancel', end);
+      return;
+    }
     // touch/pen: a tap (not a scroll) seeks; the listeners go away on up or when the browser takes over for scrolling
     const done = () => { target.removeEventListener('pointerup', up); target.removeEventListener('pointercancel', done); };
     const up = (ev) => {
@@ -658,22 +723,79 @@ export class Timeline {
   stopAuto() { clearInterval(this._autoTimer); this._autoTimer = null; this._autoV = 0; }
 
   onItemDown(e, type, id) {
-    const node = e.currentTarget;
+    const node = e.currentTarget, app = this.app;
     const isTouch = e.pointerType !== 'mouse';
-    const alreadySel = this.app.selection && this.app.selection.type === type && this.app.selection.id === id;
+    this._lastPtr = e.pointerType;
+    const single = this.single(type, id), inGroup = app.multi.length > 1 && app.isSel(type, id);
     const handle = e.target.classList.contains('h-l') ? 'l' : e.target.classList.contains('h-r') ? 'r' : 'body';
     e.stopPropagation();
-    if (isTouch && !alreadySel) {
+    if (e.button === 2) return; // right-click: the context menu selects it
+    const groupable = type !== 'marker';
+    if (groupable && !isTouch && (e.shiftKey || e.ctrlKey || e.metaKey)) { e.preventDefault(); app.toggleSelect({ type, id }); return; } // Shift / Ctrl-click: add or remove
+    if (groupable && app.selectMode) { // Select mode: every tap adds or removes
+      if (!isTouch) { e.preventDefault(); app.toggleSelect({ type, id }); return; }
+      const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
+      const done = () => { node.removeEventListener('pointerup', up); node.removeEventListener('pointercancel', done); };
+      const up = (ev) => { if (ev.pointerId !== pid) return; done(); if (Math.abs(ev.clientX - sx) < 8 && Math.abs(ev.clientY - sy) < 8) app.toggleSelect({ type, id }); };
+      node.addEventListener('pointerup', up); node.addEventListener('pointercancel', done);
+      return;
+    }
+    const lp = isTouch && groupable ? this.longPress(e, () => app.toggleSelect({ type, id })) : null; // touch: long-press adds / removes
+    if (isTouch && !single && !inGroup) {
       // Touch: first tap selects (lets the timeline scroll natively); drag once selected.
       const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
       const done = () => { node.removeEventListener('pointerup', up); node.removeEventListener('pointercancel', done); };
-      const up = (ev) => { if (ev.pointerId !== pid) return; done(); if (Math.abs(ev.clientX - sx) < 8 && Math.abs(ev.clientY - sy) < 8) this.app.select({ type, id }, { seekInto: true }); };
+      const up = (ev) => { if (ev.pointerId !== pid) return; done(); if (lp && lp.fired()) return; if (Math.abs(ev.clientX - sx) < 8 && Math.abs(ev.clientY - sy) < 8) this.app.select({ type, id }, { seekInto: true }); };
       node.addEventListener('pointerup', up); node.addEventListener('pointercancel', done);
       return;
     }
     e.preventDefault();
-    if (!alreadySel) this.app.select({ type, id });
+    if (inGroup && handle === 'body') { this.startGroupDrag(e, node, type, id); return; }
+    if (!single) app.select({ type, id });
     this.startDrag(e, node, type, id, handle);
+  }
+
+  /** Drag one of several selected items: all of them move by the same amount (same lanes; overlaps get a new lane); one undo step. */
+  startGroupDrag(e, node, type, id) {
+    const app = this.app, p = this.project, list = G.clean(p, app.multi), pid = e.pointerId, ripple = app.rippleEnabled;
+    const x0 = this.contentX(e), y0 = e.clientY, ctx = spanCtx(p), fi = findItem(p, id);
+    const [a0, b0] = fi ? ctx.span(fi.kind, fi.item) : [0, 0];
+    const minStart = G.earliest(p, list, ripple), exclude = new Set(list.map(s => s.id));
+    const shown = list.filter(s => !(ripple && s.type === 'clip')).map(s => this.nodeOf(s.type, s.id)).filter(Boolean);
+    let moved = false, dt = 0;
+    const d = this.drag = { type, id, handle: 'body', group: true };
+    try { node.setPointerCapture(pid); } catch { /* pointer already gone */ }
+    const tip = (txt, tm) => { this.tip.textContent = txt; this.tip.style.display = 'block'; this.tip.style.left = this.x(tm) + 'px'; };
+    d.onMove = (ev) => {
+      this._noSnap = ev.altKey;
+      let raw = (this.contentX(ev) - x0) / this.pps;
+      if (!moved && Math.hypot(raw * this.pps, ev.clientY - y0) < 4) return;
+      if (!moved) { moved = true; for (const n of shown) n.classList.add('dragging'); }
+      this.autoScroll(ev);
+      raw = Math.max(raw, -minStart);
+      const sn = this.snap(a0 + raw, exclude, [0, b0 - a0]);
+      if (sn.snapped) { dt = Math.max(-minStart, sn.t - a0); this.showSnap(a0 + dt); } else { dt = raw; this.snapLine.style.display = 'none'; }
+      for (const n of shown) n.style.transform = `translateX(${dt * this.pps}px)`;
+      tip(list.length + ' items · ' + (dt >= 0 ? '+' : '−') + Math.abs(dt).toFixed(2) + 's', a0 + dt);
+    };
+    const settle = () => {
+      this._noSnap = false; this.stopAuto(); this.tip.style.display = 'none'; this.snapLine.style.display = 'none'; this.drag = null;
+      node.removeEventListener('pointermove', move); node.removeEventListener('pointerup', end); node.removeEventListener('pointercancel', cancel);
+      for (const n of shown) { n.classList.remove('dragging'); n.style.transform = ''; }
+    };
+    const move = (ev) => { if (ev.pointerId === pid) d.onMove(ev); };
+    const end = (ev) => {
+      if (ev.pointerId !== pid) return;
+      const was = moved, delta = dt; settle();
+      if (!was) { if (e.pointerType === 'mouse') app.select({ type, id }); return; } // a plain click on one of the group picks just that item
+      const r = G.moveMany(p, list, delta, ripple);
+      if (!r.moved) { toast(r.held ? 'Ripple is on, so the main clips stay joined and cannot be moved on their own. Turn Ripple off to move several clips, or move the other items.' : 'Nothing to move.', 3800); return; }
+      if (r.held) toast('Ripple is on: the ' + r.held + ' main clip' + (r.held === 1 ? ' stays' : 's stay') + ' joined; the other items moved.', 3200);
+      app.commit('Move ' + list.length + ' items');
+    };
+    const cancel = () => settle();
+    node.addEventListener('pointermove', move); node.addEventListener('pointerup', end); node.addEventListener('pointercancel', cancel);
+    d.abort = () => cancel();
   }
 
   startDrag(e, node, type, id, handle) {
@@ -936,7 +1058,7 @@ export class Timeline {
     });
   }
   _refocus(type, id) {
-    const n = type === 'caption' ? (this.capNodes && this.capNodes.get(id)) : this.nodes.get({ clip: 'c:', overlay: 'o:', text: 't:', blur: 'b:', audio: 'a:' }[type] + id);
+    const n = this.nodeOf(type, id);
     if (n && document.activeElement !== n) n.focus({ preventScroll: true });
   }
 }

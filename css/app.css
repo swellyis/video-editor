@@ -868,3 +868,23 @@ body.ws .publish>.caps:empty{display:none}
 .snap-zone.hot{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent)}
 .snap-zone.hot span{opacity:1;background:var(--accent)}
 @media (max-height:900px){body.ws .onboard{padding-top:8px;padding-bottom:8px}body.ws .onboard ol,body.ws .onboard .hint{display:none}}
+
+/* ---- multi-select, marquee, context menu, freeze frame (round 1) ---- */
+.tl-marquee{position:fixed;z-index:60;pointer-events:none;border:1px solid var(--accent);background:color-mix(in srgb,var(--accent) 18%,transparent);border-radius:2px}
+.tl-item.marq,.tl-clip.marq{outline:2px dashed var(--accent);outline-offset:1px}
+body.select-mode .tl-lanes{cursor:crosshair}
+body.select-mode .tl-item,body.select-mode .tl-clip{cursor:copy}
+.multi-panel .button-row{margin-top:8px;flex-wrap:wrap}
+.multi-panel .btn.is-off{opacity:.55}
+body.has-multi:not(.ws) #multiPanel{display:block}
+body.has-multi:not(.ws) .inspector>.tab-panel:not(#multiPanel){display:none}
+body.ws #multiPanel{padding:16px}
+.freeze-block{margin-top:12px}
+.freeze-block .btn{margin-top:4px}
+.freeze-block .hint{margin:6px 0 0}
+.ctx-menu{position:fixed;z-index:200;min-width:210px;max-width:92vw;padding:5px;background:#1f1f1d;border:1px solid #4a4a45;border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.55);display:flex;flex-direction:column}
+.ctx-item{display:flex;justify-content:space-between;align-items:center;gap:18px;width:100%;min-height:34px;padding:6px 10px;background:none;border:0;border-radius:6px;color:var(--text,#f2f0ea);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.ctx-item:hover,.ctx-item:focus-visible{background:color-mix(in srgb,var(--accent) 28%,#2b2b28);outline:none}
+.ctx-item.is-off{opacity:.45}
+.ctx-item kbd{font:inherit;font-size:11px;opacity:.65}
+.ctx-sep{display:block;height:1px;margin:4px 6px;background:#3a3a36}

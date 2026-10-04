@@ -29,6 +29,7 @@ import { initShorts } from './shorts-ui.js';
 import { initMatch } from './match-ui.js';
 import { FILTERS, GROUPS as FILTER_GROUPS } from './filters.js';
 import { Timeline } from './timeline.js';
+import * as G from './group.js';
 import { insertFreeze, freezeTarget, freezeLen, FREEZE_DEFAULT } from './freeze.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
@@ -56,14 +57,21 @@ async function healBuildMismatch() {
 if (await healBuildMismatch()) await new Promise(() => { }); // the page is reloading: don't start this mismatched copy
 
 
+let _sel = null;
 const app = {
   project: newProject(),
-  selection: null,
+  multi: [],           // several selected items [{type,id}] (then `selection` is null); see setMulti()
+  selectMode: false,   // touch / mouse: tapping items adds them to the selection
+  clipboard: null,
   snapEnabled: true,
   rippleEnabled: true,
   media,
   history: new History(),
 };
+// `selection` = the one selected item. A multi-selection keeps `selection` null and lists the items in `multi`; any plain assignment of
+// `selection` (every single-item code path does that) therefore also ends a multi-selection.
+Object.defineProperty(app, 'selection', { get() { return _sel; }, set(v) { _sel = v; if (!app._holdMulti) app.multi = []; }, enumerable: true, configurable: true });
+
 // Debug/test handle: only on local development hosts or with ?debug in the URL (not exposed on the public site).
 if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has('debug')) window.__app = app;
 startLongTaskMonitor(); app.perf = perf; // main-thread health (long tasks), used by the polite background jobs and by tests
@@ -174,6 +182,24 @@ app.select = (sel, opts = {}) => {
   timeline.render(); fillInspector(); renderLists();
   if (wsLayout) { wsLayout.syncProps(); wsLayout.refreshBin(); }
 };
+/** Select several items (one or none falls back to the normal single selection). */
+app.setMulti = (list, opts = {}) => {
+  list = G.clean(app.project, list);
+  if (list.length <= 1) { app.select(list[0] || null, opts); return; }
+  app._holdMulti = true; app.selection = null; app._holdMulti = false;
+  app.multi = list;
+  timeline.render(); fillInspector(); renderLists();
+  if (wsLayout) { wsLayout.syncProps(); wsLayout.refreshBin(); }
+};
+/** Shift / Ctrl-click: add the item to (or take it out of) the selection. */
+app.toggleSelect = (sel) => {
+  if (!sel || sel.type === 'marker') return;
+  app.setMulti(G.toggle(app.selList(), sel));
+};
+app.isSel = (type, id) => (app.multi.length ? app.multi.some(s => s.type === type && s.id === id) : !!_sel && _sel.type === type && _sel.id === id);
+/** The selected items: the multi-selection, else the single selected item (not markers). */
+app.selList = () => (app.multi.length ? G.clean(app.project, app.multi) : (_sel && _sel.type !== 'marker' && selected() ? [{ type: _sel.type, id: _sel.id }] : []));
+app.selectAll = () => { const l = G.everything(app.project); if (!l.length) return toast('Nothing on the timeline to select yet.'); app.setMulti(l); toast(l.length + ' item' + (l.length === 1 ? '' : 's') + ' selected. Esc clears the selection.', 2200); };
 app.onZoom = (pps) => { $('zoomRange').value = String(ppsToRange(pps)); };
 
 function selected(type) {
@@ -211,6 +237,7 @@ const typeOfRoot = (path) => ({ clip: 'clip', text: 'text', ovl: 'overlay', blur
 // ---------------------------------------------------------------- rendering
 function renderAll() {
   if (app.selection && !selected()) app.selection = null;
+  if (app.multi.length) { const l = G.clean(app.project, app.multi); if (l.length > 1) app.multi = l; else { app.multi = []; _sel = l[0] || null; } }
   player.invalidate();
   sizeStage();
   timeline.render();
@@ -394,6 +421,20 @@ const TOOL_HINT = {
     marker: 'A marker can\'t be keyframed. Select a clip, text, overlay, music or voice track on the timeline, then use ◆ Add in its Keyframes section (or press Shift+K).',
   },
 };
+/** The "N items selected" panel (one place for the group-only controls: copy, cut, paste look, mute, deselect). */
+function fillMulti(on) {
+  document.body.classList.toggle('has-multi', on);
+  const pn = $('multiPanel'); if (!pn) return;
+  pn.hidden = !on;
+  if (!on) return;
+  const l = app.multi;
+  $('multiTitle').textContent = l.length + ' items selected';
+  $('multiSum').textContent = groupSummary(l);
+  const snd = G.resolve(app.project, l).filter(x => G.hasSoundItem(x.type, x.item)), allMuted = snd.length && snd.every(x => x.item.muted);
+  const mb = $('multiMute'); mb.textContent = allMuted ? 'Unmute sound' : 'Mute sound'; mb.setAttribute('aria-disabled', snd.length ? 'false' : 'true'); mb.classList.toggle('is-off', !snd.length);
+  mb.title = snd.length ? (allMuted ? 'Unmute the ' + plural(snd.length, 'selected item') + ' with sound' : 'Mute the ' + plural(snd.length, 'selected item') + ' with sound') : 'None of the selected items has sound';
+  const pl = $('multiPasteLook'); pl.setAttribute('aria-disabled', app.clipboard ? 'false' : 'true'); pl.classList.toggle('is-off', !app.clipboard);
+}
 function fillInspector() {
   const p = app.project;
   for (const inp of qsa('[data-bind]')) {
@@ -475,19 +516,20 @@ function fillInspector() {
   if (beatUI) beatUI.render();
   // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
   // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
-  const st = app.selection && selected(app.selection.type) ? app.selection.type : null;
+  const multi = app.multi.length > 1, st = multi ? 'multi' : app.selection && selected(app.selection.type) ? app.selection.type : null;
+  fillMulti(multi);
   const setState = (sel, ok, tipOk, tipNo) => qsa(sel).forEach(b => { b.disabled = false; b.setAttribute('aria-disabled', ok ? 'false' : 'true'); b.classList.toggle('is-off', !ok); b.title = ok ? tipOk : tipNo; });
-  setState('.tl-toolbar [data-action=duplicate]', !!st, 'Duplicate selected (Ctrl+D)', TOOL_HINT.duplicate.none);
-  setState('.tl-toolbar [data-action=delete]', !!st, 'Delete selected (Del)', TOOL_HINT.delete.none);
+  setState('.tl-toolbar [data-action=duplicate]', !!st, multi ? 'Duplicate all selected items (Ctrl+D)' : 'Duplicate selected (Ctrl+D)', TOOL_HINT.duplicate.none);
+  setState('.tl-toolbar [data-action=delete]', !!st, multi ? 'Delete all selected items (Del)' : 'Delete selected (Del)', TOOL_HINT.delete.none);
   {
-    const maOk = st === 'clip' || st === 'overlay' || st === 'audio';
+    const maOk = st === 'clip' || st === 'overlay' || st === 'audio';  // (not for a group: it fits one item to another)
     setState('.tl-toolbar [data-action=match]', !!maOk, 'Match: make the selected item fit another one on the timeline (length, start / end, loudness)',
-      'Match: select a clip, picture, overlay or audio track on the timeline first, then tap it to make that item fit another one.');
+      multi ? 'Match works on one item at a time. Select a single clip, picture, overlay or audio track.' : 'Match: select a clip, picture, overlay or audio track on the timeline first, then tap it to make that item fit another one.');
   }
   {
     // Detach audio (same action as always, now only here): a video clip / video overlay that has sound and isn't muted
     const dItem = st === 'clip' || st === 'overlay' ? selected(st) : null, dVideo = !!dItem && dItem.kind === 'video';
-    const dWhy = !dVideo ? 'Detach audio: select a video clip or a video overlay with sound on the timeline first.'
+    const dWhy = multi ? 'Detach audio works on one video at a time. Select a single video clip or overlay.' : !dVideo ? 'Detach audio: select a video clip or a video overlay with sound on the timeline first.'
       : dItem.hasAudio === false ? 'This video has no audio, so there is nothing to detach.'
         : st === 'clip' && dItem.muted ? 'Muted, so there is no sound to detach. Unmute it first, or its audio may already be detached (Audio tab).' : '';
     setState('.tl-toolbar [data-action=detachAudio]', !dWhy, 'Detach audio: copy the selected video\'s sound onto its own audio track and mute the video', dWhy);
@@ -588,6 +630,10 @@ function setDetachBusy(btns, on) {
 }
 /** Why the selection has no Volume to change (null when it has one): { item, bind, name } or { why }. */
 function volumeTarget() {
+  if (app.multi.length) {
+    const items = G.resolve(app.project, app.multi).filter(x => G.hasSoundItem(x.type, x.item));
+    return items.length ? { group: items, name: plural(items.length, 'item'), where: 'the Mute button of the selection panel' } : { why: 'None of the selected items has sound, so there is no volume to change. Include a video clip, overlay, music or voice track.' };
+  }
   const s = app.selection, item = s && selected(s.type);
   if (!s || !item) return { why: 'Nothing selected. Tap a clip, overlay, music or voice track on the timeline first, then tap Volume up or down.' };
   if (s.type === 'clip' || s.type === 'overlay') {
@@ -602,6 +648,14 @@ function volumeTarget() {
 function stepSelectedVolume(dir, ev) {
   const t = volumeTarget();
   if (t.why) return toast(t.why, 4500);
+  if (t.group) {
+    const live = t.group.filter(x => !x.item.muted);
+    if (!live.length) return toast('All selected items are muted, so changing their volume would not be heard. Unmute them first (Mute in the selection panel).', 5000);
+    const fine = !!(ev && (ev.shiftKey || ev.altKey)); let last = null, hit = 0;
+    for (const x of live) { const r = stepVolume(x.item.volume, dir, { fine, max: 2 }); if (!r.atLimit) { x.item.volume = r.level; hit++; last = r.level; } }
+    if (!hit) return toast(dir > 0 ? 'Volume is already at the maximum.' : 'Volume is already 0%.', 2200);
+    app.commit('Volume', 'vol:multi'); return toast('Volume ' + (live.length > 1 ? 'changed on ' + live.length + ' items' : Math.round(last * 100) + '%'), 1500);
+  }
   const { item } = t;
   if (item.muted) return toast('“' + t.name + '” is muted, so changing its volume would not be heard. Unmute it first (Mute button in ' + t.where + ').', 5000);
   const slider = document.querySelector('[data-bind="' + t.bind + '"]'), max = slider && +slider.max > 0 ? +slider.max : 2;
@@ -613,8 +667,41 @@ function stepSelectedVolume(dir, ev) {
   app.commit('Volume', 'vol:' + app.selection.type + ':' + app.selection.id);
   toast('Volume ' + pct + '%' + (r.level === 0 ? ' (silent)' : r.level >= max - 1e-9 ? ' (max)' : ''), 1500);
 }
+// ---- group (multi-selection) edits: each is ONE commit, so one Undo reverses the whole group ----
+const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+function groupSummary(list) {
+  const n = {}; for (const s of list) n[s.type] = (n[s.type] || 0) + 1;
+  return Object.entries(n).map(([k, v]) => plural(v, G.NOUN[k])).join(' · ');
+}
+app.groupSummary = groupSummary;
+/** Quietly make `list` the selection (the commit that follows redraws everything). */
+function setSelQuiet(list) {
+  if (list.length > 1) { app._holdMulti = true; app.selection = null; app._holdMulti = false; app.multi = list; }
+  else app.selection = list[0] || null;
+}
+const groupActions = {
+  delete(list) {
+    const n = G.deleteMany(app.project, list, app.rippleEnabled);
+    app.selection = null; app.commit('Delete ' + plural(n, 'item')); toast(plural(n, 'item') + ' deleted. Undo (Ctrl+Z) brings them all back.');
+  },
+  duplicate(list) {
+    const out = G.duplicateMany(app.project, list, app.rippleEnabled);
+    setSelQuiet(out); app.commit('Duplicate ' + plural(out.length, 'item')); toast(plural(out.length, 'item') + ' duplicated.');
+  },
+  split(list) {
+    const r = G.splitMany(app.project, list, player.t);
+    if (!r.split) return toast('Move the playhead inside at least one of the selected items to split them.');
+    setSelQuiet(r.done); app.commit('Split ' + plural(r.split, 'item')); toast(plural(r.split, 'item') + ' split at ' + fmtPrecise(player.t, app.project.settings.fps) + (r.skipped ? ' (' + r.skipped + ' not under the playhead)' : '') + '.');
+  },
+  mute(list) {
+    const r = G.muteMany(app.project, list);
+    if (r.muted == null) return toast('None of the selected items has sound to mute.');
+    app.commit(r.muted ? 'Mute' : 'Unmute'); toast(plural(r.n, 'item') + (r.muted ? ' muted.' : ' unmuted.'));
+  },
+};
 const actions = {
   split() {
+    if (app.multi.length) return groupActions.split(app.multi);
     // Splits the selected item on any track (clip, text, overlay, music/voice); with nothing (or a marker) selected,
     // splits the main video track at the playhead.
     const s = app.selection && app.selection.type !== 'marker' ? app.selection : null;
@@ -625,6 +712,7 @@ const actions = {
     app.commit('Split'); toast(what + ' split at ' + fmtPrecise(player.t, app.project.settings.fps));
   },
   duplicate() {
+    if (app.multi.length) return groupActions.duplicate(app.multi);
     const s = app.selection, item = s && selected(s.type);
     if (!s || !item) return toast(TOOL_HINT.duplicate.none);
     if (s.type === 'clip') { const b = duplicateClip(app.project, s.id, app.rippleEnabled); if (!b) return toast('Could not duplicate this clip.'); app.selection = { type: 'clip', id: b.id }; }
@@ -643,6 +731,7 @@ const actions = {
     app.commit('Duplicate'); toast(what + ' duplicated.');
   },
   delete() {
+    if (app.multi.length) return groupActions.delete(app.multi);
     const s = app.selection, item = s && selected(s.type);
     if (!s || !item) return toast(TOOL_HINT.delete.none);
     const p = app.project;
@@ -656,6 +745,35 @@ const actions = {
     else return toast(TOOL_HINT.delete.none);
     const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', caption: 'Caption', marker: 'Marker' }[s.type];
     app.selection = null; app.commit('Delete'); toast(what + ' deleted. Undo (Ctrl+Z) brings it back.');
+  },
+  selectAll() { app.selectAll(); },
+  deselect() { app.select(null); },
+  muteSel() { const l = app.selList(); if (!l.length) return toast('Select clips, overlays or audio tracks first.'); groupActions.mute(l); },
+  copy() {
+    const l = app.selList(); if (!l.length) return toast('Select something on the timeline first, then copy it (Ctrl+C).');
+    app.clipboard = G.copyItems(app.project, l); fillInspector();
+    toast('Copied ' + plural(l.length, 'item') + '. Move the playhead and paste with Ctrl+V.', 2600);
+  },
+  cut() {
+    const l = app.selList(); if (!l.length) return toast('Select something on the timeline first, then cut it (Ctrl+X).');
+    app.clipboard = G.copyItems(app.project, l);
+    const n = G.deleteMany(app.project, l, app.rippleEnabled); app.selection = null;
+    app.commit('Cut ' + plural(n, 'item')); toast('Cut ' + plural(n, 'item') + '. Paste with Ctrl+V; Undo (Ctrl+Z) puts them back.', 2800);
+  },
+  paste() {
+    if (!app.clipboard) return toast('Nothing copied yet. Select items and press Ctrl+C (or Ctrl+X) first.');
+    const out = G.pasteItems(app.project, app.clipboard, player.t, app.rippleEnabled);
+    if (!out.length) return;
+    setSelQuiet(out); app.commit('Paste ' + plural(out.length, 'item'));
+    if (timeline.autoFit) timeline.fit();
+    toast('Pasted ' + plural(out.length, 'item') + ' at ' + fmt(player.t) + '. An overlap goes to a new lane.', 2600);
+  },
+  pasteLook() {
+    if (!app.clipboard) return toast('Nothing copied yet. Copy an item with its look (effects, filter, animation, volume), select the target items, then press Ctrl+Shift+V.');
+    const l = app.selList(); if (!l.length) return toast('Select the items to give that look to first.');
+    const n = G.pasteAttributes(app.project, app.clipboard, l);
+    if (!n) return toast('The copied item has no matching look for the selected items (clips and overlays share a look; text, audio and blur regions match their own kind).', 4200);
+    app.commit('Paste attributes'); toast('Look pasted onto ' + plural(n, 'item') + '.', 2200);
   },
   async freezeFrame() {
     const p = app.project, t = player.t, tg = freezeTarget(p, t);
@@ -1201,6 +1319,13 @@ document.addEventListener('keydown', (e) => {
   if (qs('dialog[open]')) return;
   if (ctx === 'control' && CONTROL_KEYS.has(e.key)) return; // e.g. arrows move the focused slider, Space presses the focused button
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); actions.duplicate(); return; }
+  if (mod && !e.altKey) {
+    const kk = e.key.toLowerCase();
+    if (kk === 'a') { e.preventDefault(); actions.selectAll(); return; }
+    if (kk === 'c') { e.preventDefault(); actions.copy(); return; }
+    if (kk === 'x') { e.preventDefault(); actions.cut(); return; }
+    if (kk === 'v') { e.preventDefault(); e.shiftKey ? actions.pasteLook() : actions.paste(); return; }
+  }
   if (!mod && (e.code === 'BracketLeft' || e.code === 'BracketRight')) { handled0(); actions[e.code === 'BracketLeft' ? 'volumeDown' : 'volumeUp'](null, e); return; }
   if (mod || e.altKey) return;
   const k = e.key;
@@ -1227,7 +1352,7 @@ document.addEventListener('keydown', (e) => {
     case '-': case '_': timeline.zoomBy(1 / 1.4); break;
     case '0': timeline.autoFit = true; timeline.fit(); app.onZoom(timeline.pps); break;
     case '?': openDialog('helpDialog'); break;
-    case 'Escape': if (voice.state === 'countdown') voice.cancelCountdown(); else app.select(null); break;
+    case 'Escape': if (voice.state === 'countdown') voice.cancelCountdown(); else if (document.getElementById('ctxMenu')) closeCtx(); else app.select(null); break;
   }
 });
 function undo() { if (voice.busy) return; const s = app.history.undo(); if (!s) return; app.project = migrate(s); renderAll(); scheduleSave(); toast('Undo'); }
@@ -1244,6 +1369,42 @@ $('zoomOut').onclick = () => timeline.zoomBy(1 / 1.4);
 $('zoomFit').onclick = () => { timeline.autoFit = true; timeline.fit(); app.onZoom(timeline.pps); };
 $('rippleBtn').onclick = () => { app.rippleEnabled = !app.rippleEnabled; $('rippleBtn').setAttribute('aria-pressed', app.rippleEnabled); db.kvSet('ripple', app.rippleEnabled); toast('Ripple ' + (app.rippleEnabled ? 'on' : 'off')); };
 $('snapBtn').onclick = () => { app.snapEnabled = !app.snapEnabled; $('snapBtn').setAttribute('aria-pressed', app.snapEnabled); db.kvSet('snap', app.snapEnabled); toast('Snapping ' + (app.snapEnabled ? 'on' : 'off')); };
+$('selectBtn').onclick = () => {
+  app.selectMode = !app.selectMode; $('selectBtn').setAttribute('aria-pressed', app.selectMode); document.body.classList.toggle('select-mode', app.selectMode);
+  toast(app.selectMode ? 'Select mode on: tap items to add or remove them, drag on empty space to select a box. Tap Select again to finish.' : 'Select mode off', app.selectMode ? 4200 : 1500);
+};
+// ---- right-click (or long-press) menu on the timeline: the item actions in one place ----
+function closeCtx() { const m = document.getElementById('ctxMenu'); if (m) m.remove(); document.removeEventListener('pointerdown', ctxAway, true); }
+function ctxAway(e) { const m = document.getElementById('ctxMenu'); if (m && !m.contains(e.target)) closeCtx(); }
+app.openCtx = (x, y, type, id) => {
+  closeCtx();
+  if (type && id && !app.isSel(type, id)) app.select({ type, id });
+  const list = app.selList(), one = list.length === 1 ? selected(list[0].type) : null, n = list.length;
+  const hasVid = !!one && (list[0].type === 'clip' || list[0].type === 'overlay') && one.kind === 'video' && one.hasAudio !== false && !one.muted;
+  const rows = [
+    ['Cut', 'cut', 'Ctrl+X', n > 0], ['Copy', 'copy', 'Ctrl+C', n > 0], ['Paste', 'paste', 'Ctrl+V', !!app.clipboard], ['Paste look', 'pasteLook', 'Ctrl+Shift+V', !!app.clipboard && n > 0], null,
+    ['Duplicate', 'duplicate', 'Ctrl+D', n > 0], ['Split at playhead', 'split', 'S', true], ['Delete', 'delete', 'Del', n > 0], null,
+    ['Detach audio', 'detachAudio', '', hasVid], ['Mute / unmute sound', 'muteSel', '', n > 0], null,
+    ['Select all', 'selectAll', 'Ctrl+A', true],
+  ];
+  const m = el('div', { id: 'ctxMenu', class: 'ctx-menu', role: 'menu', 'aria-label': n > 1 ? n + ' items' : 'Timeline item' });
+  for (const r of rows) {
+    if (!r) { m.appendChild(el('i', { class: 'ctx-sep', role: 'separator' })); continue; }
+    const b = el('button', { type: 'button', role: 'menuitem', class: 'ctx-item' + (r[3] ? '' : ' is-off'), 'aria-disabled': r[3] ? 'false' : 'true' }, el('span', { text: r[0] }), el('kbd', { text: r[2] }));
+    b.onclick = () => { closeCtx(); if (r[3]) actions[r[1]](b); else toast(r[1] === 'detachAudio' ? 'Select one video clip or overlay that has sound.' : 'Nothing to do here yet.'); };
+    m.appendChild(b);
+  }
+  document.body.appendChild(m);
+  const w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(4, Math.min(x, innerWidth - w - 4)) + 'px'; m.style.top = Math.max(4, Math.min(y, innerHeight - h - 4)) + 'px';
+  const first = m.querySelector('.ctx-item:not(.is-off)'); if (first) first.focus({ preventScroll: true });
+  m.addEventListener('keydown', (e) => {
+    const items = [...m.querySelectorAll('.ctx-item')], i = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeCtx(); }
+  });
+  setTimeout(() => document.addEventListener('pointerdown', ctxAway, true), 0);
+};
 
 // tabs
 let wsLayout = null; // workspace layout (js/layout-ui.js): library dock on the left, properties on the right, only on wide windows

@@ -103,7 +103,7 @@ export function initLayout(ctx) {
     inspector.insertBefore(propBody, inspector.children[1]); created.push(propBody);
     const clipPanel = $('tab-clip'); move(clipPanel, propBody); setAttr(clipPanel, 'role', null); setAttr(clipPanel, 'aria-labelledby', null);
     const wrap = (id, inner) => { const w = add(el('div', { class: 'tab-panel prop-panel', id }), propBody); move($(inner), w); return w; };
-    wrap('prop-text', 'textPanel'); wrap('prop-audio', 'audioPanel'); wrap('prop-pip', 'overlayPanel'); wrap('prop-captions', 'capPanel'); wrap('prop-blur', 'blurPanel');
+    wrap('prop-text', 'textPanel'); wrap('prop-audio', 'audioPanel'); wrap('prop-pip', 'overlayPanel'); wrap('prop-captions', 'capPanel'); wrap('prop-blur', 'blurPanel'); move($('multiPanel'), propBody);
     add(el('div', { class: 'tab-panel prop-panel prop-empty', id: 'prop-empty' },
       el('h3', { text: 'Nothing selected' }),
       el('p', { class: 'hint', text: 'Select a clip, title, caption, music track, overlay or blur region on the timeline (or in the preview) and its settings appear here. Browse and add things from the library on the left.' })), propBody);
@@ -152,10 +152,10 @@ export function initLayout(ctx) {
   }
   function syncProps() {
     if (!on) return;
-    const t = (app.selection && app.selection.type) || '';
-    const row = PROPS[t] || ['prop-empty', 'Properties'];
-    for (const id of ['tab-clip', 'prop-text', 'prop-audio', 'prop-pip', 'prop-captions', 'prop-blur', 'prop-empty']) { const p = $(id); if (p) p.classList.toggle('active', id === row[0]); }
-    propTitle.textContent = PROPS[t] ? row[1] + ' properties' : 'Properties';
+    const multi = app.multi && app.multi.length > 1, t = multi ? 'multi' : (app.selection && app.selection.type) || '';
+    const row = multi ? ['multiPanel', 'Selection'] : PROPS[t] || ['prop-empty', 'Properties'];
+    for (const id of ['tab-clip', 'prop-text', 'prop-audio', 'prop-pip', 'prop-captions', 'prop-blur', 'prop-empty', 'multiPanel']) { const p = $(id); if (p) p.classList.toggle('active', id === row[0]); }
+    propTitle.textContent = multi ? 'Selection' : PROPS[t] ? row[1] + ' properties' : 'Properties';
   }
   function showTab(name, fromSelect) {
     if (!(fromSelect && name === 'clip')) setLeft(name); // selecting a clip never throws you out of the library you are browsing
