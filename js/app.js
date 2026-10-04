@@ -797,7 +797,7 @@ function renderKfPanels() {
       d.open = open;
       d.append(el('summary', { title: 'Keyframes make a value change over time. Shift+K adds one at the playhead.' }, el('h2', { text: 'Keyframes' }), el('span', { class: 'hint mono', text: times.length ? times.length + ' ◆' : 'none' }),
         el('button', { class: 'btn primary small', type: 'button', 'data-action': 'addKeyframe', title: 'Add a keyframe at the playhead (Shift+K)', text: '◆ Add' })));
-      d.querySelector('summary').addEventListener('click', () => { KF_STATE.set(k.item.id, d.open ? 'closed' : 'open'); });
+      d.querySelector('summary').addEventListener('click', (e) => { if (e.target.closest('button')) return; KF_STATE.set(k.item.id, d.open ? 'closed' : 'open'); });
       const btns = el('div', { class: 'button-row' },
         el('button', { class: 'btn secondary small', type: 'button', 'data-action': 'kfPrev', 'aria-label': 'Previous keyframe', text: '◀ ◆' }),
         el('button', { class: 'btn secondary small', type: 'button', 'data-action': 'kfNext', 'aria-label': 'Next keyframe', text: '◆ ▶' }),
