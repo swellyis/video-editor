@@ -163,3 +163,8 @@ test('makeShortProject: 9:16 fill-crop with offset, Bold Shorts captions shifted
   assert.equal(layout(s).total, 40);
   assert.equal(cropOffset(5), 1); assert.equal(cropOffset('x'), 0);
 });
+
+test('stretches with hardly any speech are never suggested', () => {
+  const caps = transcript([['Brothers and sisters.', 8], ['Welcome.', 8], ['Thank you.', 8], ['Please sit.', 8]]);
+  assert.deepEqual(findCandidates(caps, { minWords: 30 }), []);
+});

@@ -67,14 +67,14 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
           c.start = r.start; c.end = r.end; vals.start.textContent = t1(c.start); vals.end.textContent = t1(c.end); refresh();
           if (S.playing === c.id) stopPreview();
         };
-        return el('span', { class: 'grp' }, label,
-          el('button', { class: 'btn secondary small', type: 'button', text: '−', 'aria-label': label + ' earlier by half a second', onclick: step(-STEP) }), val,
-          el('button', { class: 'btn secondary small', type: 'button', text: '＋', 'aria-label': label + ' later by half a second', onclick: step(STEP) }));
+        return el('span', { class: 'grp sh-' + which }, label,
+          el('button', { class: 'btn secondary small sh-dec', type: 'button', text: '−', 'aria-label': label + ' earlier by half a second', onclick: step(-STEP) }), val,
+          el('button', { class: 'btn secondary small sh-inc', type: 'button', text: '＋', 'aria-label': label + ' later by half a second', onclick: step(STEP) }));
       };
       const card = el('div', { class: 'sh-card', 'data-id': c.id },
         el('div', { class: 'sh-top' }, cb, el('label', { class: 'sh-title', for: cb.id }, '#' + (i + 1) + ' · ' + Math.round(c.end - c.start) + ' s', when), el('span', { class: 'sh-score', title: 'Heuristic score out of 100', text: c.score })),
         el('p', { class: 'sh-text', text: '“' + c.text + '”' }), why,
-        el('div', { class: 'sh-nudge' }, el('button', { class: 'btn secondary small', type: 'button', text: '▶ Preview', onclick: () => preview(c, card) }), mk('start', 'Start'), mk('end', 'End')));
+        el('div', { class: 'sh-nudge' }, el('button', { class: 'btn secondary small sh-prev', type: 'button', text: '▶ Preview', onclick: () => preview(c, card) }), mk('start', 'Start'), mk('end', 'End')));
       list.append(card);
     });
     refreshMake();

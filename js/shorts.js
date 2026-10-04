@@ -6,7 +6,7 @@ import { captionWords, rechunk, applyPreset, defaultCaptionStyle, normalizeCapti
 import { layout, newProject, migrate, audioSpeed, normalizeClip } from './model.js';
 import { uid } from './util.js';
 
-export const DEFAULTS = { minLen: 20, maxLen: 60, idealMin: 30, idealMax: 50, count: 8, lead: 0.25, tail: 0.45, minGap: 0.05 };
+export const DEFAULTS = { minLen: 20, maxLen: 60, idealMin: 30, idealMax: 50, minWords: 30, minRate: 0.8, count: 8, lead: 0.25, tail: 0.45, minGap: 0.05 };
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -173,6 +173,8 @@ export function findCandidates(captions, opts = {}) {
       const len = S[j].end - S[i].start;
       if (len > o.maxLen) break;
       if (len < o.minLen) continue;
+      const nw = S[j].i1 - S[i].i0 + 1; // too little speech (a few stray words over a long stretch) is never a Short
+      if (nw < o.minWords || nw / len < o.minRate) continue;
       const r = scoreRun(S, F, i, j, { ...o, env: o.env, level });
       all.push({ i, j, r });
     }
