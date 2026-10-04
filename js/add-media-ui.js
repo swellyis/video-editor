@@ -1,7 +1,7 @@
 // Add media dialog: choose files, import from a link (with progress), and files / links shared in from other apps.
-// Logic lives in connect.js (unit-testable); this file only wires the DOM. Nothing here sends project data anywhere.
+// Logic lives in media-link.js (unit-testable); this file only wires the DOM. Nothing here sends project data anywhere.
 import { $, fmtBytes } from './util.js';
-import { parseHttpsUrl, extractUrl, fetchMedia, LinkError, LIMITS } from './connect.js';
+import { parseHttpsUrl, extractUrl, fetchMedia, LinkError, LIMITS } from './media-link.js';
 
 export function initAddMedia({ importFiles, openDialog, closeDialog }) {
   // ------------------------------------------------------------ import from link
