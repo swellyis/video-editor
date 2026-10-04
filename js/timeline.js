@@ -335,7 +335,7 @@ export class Timeline {
       n.querySelector('span').textContent = textLabel(t);
       n.classList.toggle('sel', sel.type === 'text' && sel.id === t.id); n.setAttribute('aria-pressed', n.classList.contains('sel') ? 'true' : 'false');
       n.setAttribute('aria-label', `Text “${textLabel(t).slice(0, 60)}”, ${fmt(t.start)} to ${fmt(t.end)}`);
-      n.classList.toggle('animated', !!(t.anim && (t.anim.in !== 'none' || t.anim.out !== 'none')));
+      n.classList.toggle('animated', !!(t.anim && (t.anim.in !== 'none' || t.anim.out !== 'none' || (t.anim.loop && t.anim.loop !== 'none'))));
       this.renderKfs(n, t, t.start, t.end - t.start);
     }
     this.renderCaps();
