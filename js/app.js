@@ -12,7 +12,7 @@ import {
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, ANIM_PROPS, detachAudio, soundTargets, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
-import { Compositor, ensureFonts, TEXT_ANIMS_IN, TEXT_ANIMS_OUT } from './render.js';
+import { Compositor, ensureFonts } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { initCleanUI } from './clean-ui.js';
@@ -21,6 +21,7 @@ import { initSilenceUI } from './silence-ui.js';
 import { initSyncUI } from './sync-ui.js';
 import { initBeatUI } from './beat-ui.js';
 import { initTransitionUI } from './transition-ui.js';
+import { initTextAnimUI } from './textanim-ui.js';
 import { initEffectsUI } from './effects-ui.js';
 import { initFiltersUI } from './filters-ui.js';
 import { initDesigner } from './designer-ui.js';
@@ -65,6 +66,7 @@ const app = {
 if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has('debug')) window.__app = app;
 startLongTaskMonitor(); app.perf = perf; // main-thread health (long tasks), used by the polite background jobs and by tests
 let trUI = { render() { }, open() { }, close() { } };
+let taUI = { render() { }, kind: () => 'in' };
 let fxUI = { render() { } };
 let flUI = { render() { } };
 let cleanUI = null, voiceUI = null, silenceUI = null, syncUI = null, beatUI = null; // Clean voice / Change voice / Remove silences controls (set up below)
@@ -91,6 +93,8 @@ trUI = initTransitionUI({ $, app, commit: (l) => app.commit(l), showTab });
 fxUI = initEffectsUI({ $, app, commit: (l) => app.commit(l) });
 flUI = initFiltersUI({ $, app, commit: (l) => app.commit(l) });
 app.openTransition = (id, opts) => trUI.open(id, opts);
+taUI = initTextAnimUI({ $, app, commit: (l) => app.commit(l), selected, showTab, player, toast });
+app.textAnim = taUI;
 
 // ---------------------------------------------------------------- persistence
 // Autosave: revision-counted so the indicator only says "Saved" when the stored copy matches the editor.
@@ -459,7 +463,7 @@ function fillInspector() {
     $('ovlOfflineBanner').hidden = media.has(o.mediaId);
   }
   renderKfPanels();
-  $('textPanel').hidden = !t; $('textEmptyHint').hidden = p.texts.length > 0;
+  $('textPanel').hidden = !t; $('textEmptyHint').hidden = p.texts.length > 0; if (t) taUI.render();
   const a = selected('audio');
   $('audioPanel').hidden = !a; $('audioEmptyHint').hidden = p.audio.length > 0;
   if (a && document.activeElement !== $('audioLenInput')) $('audioLenInput').value = audioSpan(a, layout(p).total).toFixed(2);
@@ -838,17 +842,6 @@ function refreshAnimated() {
     fillOutputs(); renderKfPanels();
   });
 }
-// text animation selects & presets
-for (const [k, v] of Object.entries(TEXT_ANIMS_IN)) $('animInSelect').append(el('option', { value: k, text: v }));
-for (const [k, v] of Object.entries(TEXT_ANIMS_OUT)) $('animOutSelect').append(el('option', { value: k, text: v }));
-$('animPresets').addEventListener('click', (e) => {
-  const b = e.target.closest('button'); const t = selected('text'); if (!b || !t) return;
-  t.anim = Object.assign({}, t.anim, { in: b.dataset.in, out: b.dataset.out });
-  if (b.dataset.in === 'typewriter' || b.dataset.in === 'wordByWord') t.anim.inDur = Math.min(Math.max(t.anim.inDur, 1.2), (t.end - t.start) * 0.6);
-  if (b.dataset.in !== 'none') t.fadeIn = 0;
-  app.commit('Text animation'); player.setTime(t.start + 0.001); player.play();
-});
-
 // ---------------------------------------------------------------- picture-in-picture
 async function importOverlay(f) {
   if (!f) return;

@@ -743,3 +743,24 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 #matchDialog .icon-btn{min-width:44px;min-height:44px}
 #matchDialog .btn{min-height:44px;min-width:44px}
 #matchDialog select{min-height:44px}
+/* Text animation library (Text tab) */
+.ta-kinds{margin:8px 0}.ta-kinds button{min-height:44px;font-size:13px}
+.ta-sum{margin:0 0 4px;font-size:12px}
+.ta-grid{grid-template-columns:repeat(3,1fr)}
+.ta-card canvas{background:#1f2a44}
+.ta-wrap{margin-bottom:8px}
+.ta-speed input{min-height:44px}
+.ta-note{margin:2px 0 8px;min-height:2.6em}
+.ta-hi{justify-content:space-between}.ta-hi input{width:56px;min-height:44px}
+.ta-th{margin-top:14px}
+.ta-tpl{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}
+.ta-tp{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-height:48px;padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--ink);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.ta-tp small{color:var(--muted);font-size:11px;line-height:1.25}
+.ta-tp:hover{border-color:var(--accent)}.ta-tp:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ta-tplnote{margin:6px 0 0}
+#taLib .tr-actions{margin-top:6px}
+.ta-details{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:0 10px 10px;background:var(--surface)}
+.ta-details>summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600;font-size:13px;list-style:none}
+.ta-details>summary::-webkit-details-marker{display:none}
+.ta-details>summary::after{content:"▾";margin-left:auto;color:var(--muted)}
+.ta-details[open]>summary::after{content:"▴"}

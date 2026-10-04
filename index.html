@@ -316,6 +316,10 @@
         <section class="section">
           <div class="section-head"><h2>Text layers</h2><button class="btn primary small" data-action="addText" type="button">＋ Text at playhead</button></div>
           <div class="item-list" id="textList"></div>
+          <details class="ta-details" id="taDetails"><summary>Ready-made sermon text</summary>
+            <div class="ta-tpl" id="taTemplates"></div>
+            <p class="hint ta-tplnote">Each one adds editable, animated text layers at the playhead.</p>
+          </details>
           <p class="hint" id="textEmptyHint">Tap ＋ Text at playhead above (or press T) to add titles, lower thirds, or a key verse. Each layer has its own timing, position and style. Drag text on the preview to move it.</p>
         </section>
         <div id="textPanel" hidden>
@@ -338,15 +342,17 @@
             <div class="slider-row"><label>Rotation</label><input type="range" min="-180" max="180" step="0.5" data-bind="text.rotation" /><output data-out="text.rotation" data-fmt="deg"></output></div>
             <div class="slider-row"><label>Opacity</label><input type="range" min="0" max="1" step="0.01" data-bind="text.opacity" /><output data-out="text.opacity" data-fmt="pct"></output></div>
           </section>
-          <section class="section">
+          <section class="section ta-lib" id="taLib">
             <h2 class="sh">Animation</h2>
-            <div class="field-row">
-              <label><span class="label">In</span><select data-bind="text.anim.in" id="animInSelect"></select></label>
-              <label><span class="label">Out</span><select data-bind="text.anim.out" id="animOutSelect"></select></label>
-            </div>
-            <div class="slider-row"><label>In time</label><input type="range" min="0.1" max="4" step="0.05" data-bind="text.anim.inDur" /><output data-out="text.anim.inDur" data-fmt="s"></output></div>
-            <div class="slider-row"><label>Out time</label><input type="range" min="0.1" max="3" step="0.05" data-bind="text.anim.outDur" /><output data-out="text.anim.outDur" data-fmt="s"></output></div>
-            <div class="chips" id="animPresets"><button type="button" data-in="typewriter" data-out="fade">Typewriter</button><button type="button" data-in="slideUp" data-out="slideDown">Slide up</button><button type="button" data-in="pop" data-out="pop">Pop</button><button type="button" data-in="wordByWord" data-out="fade">Word by word</button><button type="button" data-in="none" data-out="none">None</button></div>
+            <p class="hint ta-sum" id="taSummary" aria-live="polite"></p>
+            <div class="segmented ta-kinds" id="taKinds" role="group" aria-label="When the animation plays"><button type="button" data-kind="in" class="selected" aria-pressed="true">In</button><button type="button" data-kind="out" aria-pressed="false">Out</button><button type="button" data-kind="loop" aria-pressed="false">Loop</button></div>
+            <div id="taGrid" class="ta-grid-wrap"></div>
+            <div class="slider-row ta-speed" data-kind="in"><label for="taInDur">In duration</label><input type="range" id="taInDur" min="0.1" max="4" step="0.05" data-bind="text.anim.inDur" /><output data-out="text.anim.inDur" data-fmt="s"></output></div>
+            <div class="slider-row ta-speed" data-kind="out" hidden><label for="taOutDur">Out duration</label><input type="range" id="taOutDur" min="0.1" max="3" step="0.05" data-bind="text.anim.outDur" /><output data-out="text.anim.outDur" data-fmt="s"></output></div>
+            <div class="slider-row ta-speed" data-kind="loop" hidden><label for="taLoopSpeed">Loop speed</label><input type="range" id="taLoopSpeed" min="0.25" max="3" step="0.05" data-bind="text.anim.loopSpeed" /><output data-out="text.anim.loopSpeed" data-fmt="x"></output></div>
+            <label class="tr-check ta-hi" id="taHiRow" hidden><span>Highlight colour</span><input class="field color" type="color" data-bind="text.anim.hi" aria-label="Karaoke highlight colour" /></label>
+            <p class="hint ta-note" id="taNote" role="status" aria-live="polite"></p>
+            <div class="tr-actions"><button type="button" class="btn secondary" id="taAll">Apply to all text</button><button type="button" class="btn ghost" id="taRemove">Remove</button></div>
           </section>
           <section class="section kf-panel" data-kf="text"></section>
           <section class="section">
