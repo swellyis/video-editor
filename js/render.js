@@ -6,6 +6,7 @@ import { clamp } from './util.js';
 import { BlurFX } from './blur.js';
 import { FxGL } from './fx-gl.js';
 import { activeFx } from './effects.js';
+import { newIn, newOut, loopFx, karaokeCount } from './textanim.js';
 
 const VERT = `attribute vec2 p;varying vec2 uv;void main(){uv=vec2((p.x+1.0)*0.5,1.0-(p.y+1.0)*0.5);gl_Position=vec4(p,0.0,1.0);}`;
 const FRAG = `precision mediump float;varying vec2 uv;uniform sampler2D tex;
@@ -207,22 +208,29 @@ export function drawText(ctx, W, H, tl, alpha = 1, local = 1e6) {
   const an = tl.anim || {};
   const inP = an.in && an.in !== 'none' ? clamp(local / Math.max(0.05, an.inDur || 0.6), 0, 1) : 1;
   const outP = an.out && an.out !== 'none' ? clamp((dur - local) / Math.max(0.05, an.outDur || 0.4), 0, 1) : 1;
-  let a = alpha * clamp(A.opacity, 0, 1), sc = A.scale, dy = 0, reveal = 1, wordP = null;
+  let a = alpha * clamp(A.opacity, 0, 1), sc = A.scale, dy = 0, dx = 0, rot = A.rotation || 0, reveal = 1, wordP = null, blur = 0, wipeIn = 1, wipeOut = 0, glitch = 0;
   switch (an.in) {
     case 'fade': a *= inP; break;
     case 'typewriter': reveal = inP; break;
     case 'wordByWord': wordP = inP; break;
     case 'slideUp': dy += (1 - EASES.easeOut(inP)) * size * 1.4; a *= EASES.easeOut(inP); break;
     case 'pop': sc *= inP >= 1 ? 1 : 0.4 + 0.6 * backOut(inP); a *= Math.min(1, inP * 3); break;
+    default: { const f = newIn(an.in, inP, size, W, local); if (f) { dx += f.dx || 0; dy += f.dy || 0; sc *= f.sc ?? 1; a *= f.a ?? 1; blur = Math.max(blur, f.blur || 0); wipeIn = f.wipe ?? 1; glitch = Math.max(glitch, f.glitch || 0); } }
   }
   switch (an.out) {
     case 'fade': a *= outP; break;
     case 'typewriter': reveal = Math.min(reveal, outP); break;
     case 'slideDown': dy += (1 - outP) * (1 - outP) * size * 1.4; a *= outP; break;
     case 'pop': sc *= 0.6 + 0.4 * outP; a *= outP; break;
+    default: { const f = newOut(an.out, outP, size, W, local); if (f) { dx += f.dx || 0; dy += f.dy || 0; sc *= f.sc ?? 1; a *= f.a ?? 1; blur = Math.max(blur, f.blur || 0); wipeOut = f.wipeOut || 0; glitch = Math.max(glitch, f.glitch || 0); if (f.words != null) wordP = wordP == null ? f.words : Math.min(wordP, f.words); } }
+  }
+  if (an.loop && an.loop !== 'none') {
+    const f = loopFx(an.loop, (local + (an.phase || 0)) * (an.loopSpeed || 1));
+    if (f) { sc *= f.sc ?? 1; dy += (f.dyEm || 0) * size; rot += f.rot || 0; a *= f.a ?? 1; }
   }
   ctx.save();
   ctx.globalAlpha = clamp(a, 0, 1);
+  if (blur > 0.4 && canvasFilterSupported()) ctx.filter = `blur(${blur.toFixed(2)}px)`;
   ctx.font = fontCss(tl.font, size);
   ctx.textBaseline = 'middle';
   const maxW = (tl.maxWidth || 0.86) * W;
@@ -230,11 +238,15 @@ export function drawText(ctx, W, H, tl, alpha = 1, local = 1e6) {
   const lh = size * 1.16;
   const widths = lines.map(l => ctx.measureText(l).width);
   const bw = Math.max(1, ...widths), bh = lines.length * lh;
-  const cx = A.x * W, cy = A.y * H + dy;
+  const cx = A.x * W + dx, cy = A.y * H + dy;
   const padX = size * 0.45, padY = size * 0.28;
   ctx.translate(cx, cy);
-  if (A.rotation) ctx.rotate(A.rotation * Math.PI / 180);
+  if (rot) ctx.rotate(rot * Math.PI / 180);
   if (sc !== 1) ctx.scale(sc, sc);
+  const hwBox = tl.style === 'band' ? W * 2 : bw / 2 + padX + size * 0.4;
+  if (wipeIn < 1 || wipeOut > 0) { // wipe reveal / wipe away: a clip window growing from (or shrinking towards) the left edge
+    ctx.beginPath(); ctx.rect(-hwBox + 2 * hwBox * wipeOut, -bh / 2 - size * 2, 2 * hwBox * (wipeIn - wipeOut), bh + size * 4); ctx.clip();
+  }
   if (tl.style === 'band') {
     ctx.fillStyle = hexA(tl.bg, tl.bgOpacity ?? 0.62);
     const ext = W * 2;
@@ -248,25 +260,27 @@ export function drawText(ctx, W, H, tl, alpha = 1, local = 1e6) {
   const total = lines.reduce((n, l) => n + l.length, 0);
   let shown = reveal >= 1 ? Infinity : Math.floor(reveal * total + 1e-6);
   const nWords = lines.reduce((n, l) => n + (l ? l.split(' ').length : 0), 0);
-  let wi = 0;
-  const paint = (str, x, y, alphaMul) => {
+  const kara = an.loop === 'karaoke' && wordP == null && reveal >= 1 ? karaokeCount(an, local, dur, nWords) : -1;
+  let wi = 0, tint = null;
+  const paint = (str, x, y, alphaMul, hiLite) => {
     if (!str) return;
-    if (alphaMul !== 1) ctx.globalAlpha = clamp(a * alphaMul, 0, 1);
-    if (tl.style === 'clean') {
+    const am = alphaMul * (tint ? tint.am : 1);
+    if (am !== 1) ctx.globalAlpha = clamp(a * am, 0, 1);
+    if (tl.style === 'clean' && !tint) {
       ctx.save();
       ctx.shadowColor = 'rgba(0,0,0,.75)'; ctx.shadowBlur = size * 0.28; ctx.shadowOffsetY = size * 0.04;
       ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = Math.max(2, size * 0.08);
       ctx.strokeText(str, x, y);
       ctx.restore();
-    } else if (tl.style === 'outline') {
+    } else if (tl.style === 'outline' && !tint) {
       ctx.lineJoin = 'round'; ctx.strokeStyle = tl.bg || '#000'; ctx.lineWidth = Math.max(3, size * 0.18);
       ctx.strokeText(str, x, y);
     }
-    ctx.fillStyle = tl.color || '#fff';
-    ctx.fillText(str, x, y);
-    if (alphaMul !== 1) ctx.globalAlpha = clamp(a, 0, 1);
+    ctx.fillStyle = tint ? tint.color : hiLite ? (an.hi || '#ffd24a') : (tl.color || '#fff');
+    ctx.fillText(str, x + (tint ? tint.dx : 0), y);
+    if (am !== 1) ctx.globalAlpha = clamp(a, 0, 1);
   };
-  lines.forEach((line, i) => {
+  const pass = () => lines.forEach((line, i) => {
     const y = (i - (lines.length - 1) / 2) * lh;
     const w = widths[i];
     const x = tl.align === 'left' ? -bw / 2 : tl.align === 'right' ? bw / 2 - w : -w / 2;
@@ -281,12 +295,21 @@ export function drawText(ctx, W, H, tl, alpha = 1, local = 1e6) {
         if (wa > 0) paint(wd, px, y, wa);
         px += ctx.measureText(wd + ' ').width; wi++;
       }
+    } else if (kara >= 0) {
+      let px = x;
+      for (const wd of line.split(' ')) { paint(wd, px, y, 1, wi < kara); px += ctx.measureText(wd + ' ').width; wi++; }
     } else {
       let str = line;
       if (shown !== Infinity) { str = line.slice(0, Math.max(0, shown)); shown -= line.length; }
       paint(str, x, y, 1);
     }
   });
+  if (glitch > 0.02) { // colour-split ghosts either side of the text (deterministic: same frame, same look)
+    const g = glitch * size * 0.09;
+    for (const [color, d] of [['#00e5ff', -g], ['#ff2d6f', g]]) { tint = { color, dx: d, am: 0.6 }; wi = 0; shown = reveal >= 1 ? Infinity : Math.floor(reveal * total + 1e-6); pass(); }
+    tint = null; wi = 0; shown = reveal >= 1 ? Infinity : Math.floor(reveal * total + 1e-6);
+  }
+  pass();
   ctx.restore();
   const hw = (tl.style === 'band' ? W : bw + padX * 2) * sc / 2, hh = (bh + padY * 2) * sc / 2;
   return { id: tl.id, type: 'text', x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh };

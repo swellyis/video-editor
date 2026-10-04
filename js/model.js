@@ -68,7 +68,7 @@ export function migrate(p) {
   out.color = tidyColor(Object.assign(defaultColor(), p.color || {}));
   out.thumb = Object.assign(newProject().thumb, p.thumb || {});
   out.clips = (p.clips || []).map(c => normalizeClip(c));
-  out.texts = (p.texts || []).map(t => { const b = newText(0); const r = Object.assign(b, t); r.name = typeof t.name === 'string' ? t.name.slice(0, NAME_MAX) : ''; r.anim = Object.assign(newText(0).anim, t.anim || {}); r.keyframes = t.keyframes || {}; return r; });
+  out.texts = (p.texts || []).map(t => { const b = newText(0); const r = Object.assign(b, t); r.name = typeof t.name === 'string' ? t.name.slice(0, NAME_MAX) : ''; r.anim = cleanTextAnim(t.anim); r.keyframes = t.keyframes || {}; return r; });
   out.audio = (p.audio || []).map(a => Object.assign(newAudio({ id: a.mediaId, duration: a.srcDuration || 1, name: a.name }, 0), a));
   out.overlays = (p.overlays || []).map(o => normalizeOverlay(o));
   out.blurs = (Array.isArray(p.blurs) ? p.blurs : []).filter(b => b && typeof b === 'object').slice(0, 200).map(b => normalizeBlur(b));
@@ -239,8 +239,21 @@ export function newText(start, dur = 4, text = 'Your text here') {
     id: uid('txt'), name: '', text, start, end: start + dur, x: 0.5, y: 0.82, size: 0.075,
     color: '#ffffff', bg: '#000000', bgOpacity: 0.62, style: 'clean', font: 'sans', align: 'center',
     fadeIn: 0.3, fadeOut: 0.3, maxWidth: 0.86,
-    scale: 1, rotation: 0, opacity: 1, anim: { in: 'none', out: 'none', inDur: 0.6, outDur: 0.4 }, keyframes: {},
+    scale: 1, rotation: 0, opacity: 1, anim: { in: 'none', out: 'none', inDur: 0.6, outDur: 0.4, loop: 'none', loopSpeed: 1, hi: '#ffd24a', phase: 0 }, keyframes: {},
   };
+}
+/** Text animation ids (the library is in textanim.js). Old projects only ever use the first few of each list; unknown ids become 'none'. */
+export const TEXT_IN_IDS = ['none', 'fade', 'typewriter', 'slideUp', 'pop', 'wordByWord', 'rise', 'slideLeft', 'slideRight', 'bounce', 'grow', 'blurIn', 'wipe', 'glitch'];
+export const TEXT_OUT_IDS = ['none', 'fade', 'slideDown', 'pop', 'typewriter', 'slideUp', 'slideLeft', 'slideRight', 'shrink', 'blurOut', 'wipe', 'glitch', 'wordByWord'];
+export const TEXT_LOOP_IDS = ['none', 'pulse', 'float', 'wobble', 'blink', 'karaoke'];
+/** A text layer's animation settings with every field present and valid (old saves lack loop / loopSpeed / hi / phase). */
+export function cleanTextAnim(a) {
+  const d = newText(0).anim, r = Object.assign(d, a || {});
+  const n = (v, lo, hi, dv) => { v = Number(v); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dv; };
+  if (!TEXT_IN_IDS.includes(r.in)) r.in = 'none'; if (!TEXT_OUT_IDS.includes(r.out)) r.out = 'none'; if (!TEXT_LOOP_IDS.includes(r.loop)) r.loop = 'none';
+  r.inDur = n(r.inDur, 0.05, 10, 0.6); r.outDur = n(r.outDur, 0.05, 10, 0.4); r.loopSpeed = n(r.loopSpeed, 0.25, 4, 1); r.phase = n(r.phase, 0, 1e6, 0);
+  if (!/^#[0-9a-f]{6}$/i.test(r.hi)) r.hi = '#ffd24a';
+  return r;
 }
 export function newAudio(media, start = 0) {
   return {
@@ -762,7 +775,7 @@ export function splitItem(project, sel, t) {
     a.keyframes = rebaseKeyframes(kf, 0, u); b.keyframes = rebaseKeyframes(kf, u);
     a.end = t; b.start = t;
     a.fadeOut = 0; b.fadeIn = 0;
-    a.anim = { ...(a.anim || {}), out: 'none' }; b.anim = { ...(b.anim || {}), in: 'none' };
+    a.anim = { ...(a.anim || {}), out: 'none' }; b.anim = { ...(b.anim || {}), in: 'none', phase: (a.anim && a.anim.phase || 0) + u };
     project.texts.push(b);
     return { type: 'text', item: b };
   }
