@@ -20,6 +20,8 @@ const STICKER_SVG = {
 
 export function initDesigner(ctx) {
   const { $, app, media, getFrame, fmt, autoFmt, scheduleSave, toast, playhead, duration, fmtTime } = ctx;
+  // A stale cached page (old index.html + new scripts) has no designer markup: inert stub instead of throwing; it heals on reload.
+  if (!ctx.$('thumbCanvas') || !ctx.$('thumbStage')) { const no = async () => { throw new Error('This page is out of date. Reload the editor.'); }; return { open: no, render: no, close() { }, reset() { }, paint() { }, undo() { }, redo() { }, setTab() { }, select() { }, sync() { }, design: () => null }; }
   const canvas = $('thumbCanvas'), g = canvas.getContext('2d'), stage = $('thumbStage'), selEl = $('thumbSel');
   const meas = document.createElement('canvas').getContext('2d');
   const S = { fk: '16:9', design: null, sel: null, tab: 'templates', hist: [], hi: -1, frame: null, frameKey: '', imgs: new Map(), logoImg: null, drag: null, open: false, inited: false };
