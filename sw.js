@@ -10,6 +10,7 @@ const SHELL = [
  
   './vendor/mediabunny.min.mjs', './vendor/gifuct.min.mjs', './vendor/libheif/libheif.js', './vendor/libheif/libheif.wasm',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-192.png', './icons/maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png',
+  './fonts/anton-latin-400-normal.woff2', './fonts/bebas-neue-latin-400-normal.woff2', './fonts/oswald-latin-700-normal.woff2', './fonts/montserrat-latin-800-normal.woff2', './fonts/playfair-display-latin-800-normal.woff2', './fonts/lobster-latin-400-normal.woff2',
   './fonts/ibm-plex-sans-latin-400-normal.woff2', './fonts/ibm-plex-sans-latin-500-normal.woff2', './fonts/ibm-plex-sans-latin-600-normal.woff2', './fonts/ibm-plex-sans-latin-700-normal.woff2',
   './fonts/ibm-plex-sans-latin-700-italic.woff2', './fonts/ibm-plex-sans-condensed-latin-700-normal.woff2',
   './fonts/ibm-plex-serif-latin-400-normal.woff2', './fonts/ibm-plex-serif-latin-400-italic.woff2', './fonts/ibm-plex-serif-latin-700-normal.woff2', './fonts/ibm-plex-serif-latin-700-italic.woff2',

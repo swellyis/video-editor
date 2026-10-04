@@ -15,6 +15,12 @@ export const FONTS = {
   serif: { label: 'Plex Serif Bold', css: '700 {s}px "IBM Plex Serif", Georgia, serif' },
   serifItalic: { label: 'Plex Serif Italic', css: 'italic 400 {s}px "IBM Plex Serif", Georgia, serif' },
   mono: { label: 'Plex Mono', css: '600 {s}px "IBM Plex Mono", ui-monospace, monospace' },
+  anton: { label: 'Anton (impact)', css: '400 {s}px "Anton", Impact, "Arial Narrow", sans-serif' },
+  bebas: { label: 'Bebas Neue', css: '400 {s}px "Bebas Neue", Impact, sans-serif' },
+  oswald: { label: 'Oswald Bold', css: '700 {s}px "Oswald", "IBM Plex Sans Condensed", sans-serif' },
+  montserrat: { label: 'Montserrat ExtraBold', css: '800 {s}px "Montserrat", "IBM Plex Sans", sans-serif' },
+  playfair: { label: 'Playfair ExtraBold', css: '800 {s}px "Playfair Display", Georgia, serif' },
+  lobster: { label: 'Lobster (script)', css: '400 {s}px "Lobster", "Brush Script MT", cursive' },
   system: { label: 'System', css: '700 {s}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' },
 };
 export const RATIOS = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5 };
