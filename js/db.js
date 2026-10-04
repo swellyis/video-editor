@@ -114,5 +114,10 @@ export function mediaIdsOf(p) {
   (p.audio || []).forEach(a => a.mediaId && ids.add(a.mediaId));
   (p.overlays || []).forEach(o => o.mediaId && ids.add(o.mediaId));
   if (p.logo && p.logo.mediaId) ids.add(p.logo.mediaId);
+  for (const dz of Object.values((p.thumb && p.thumb.designs) || {})) { // thumbnail designer pictures (layers + background) travel with the project
+    if (!dz || typeof dz !== 'object') continue;
+    if (dz.bg && dz.bg.mediaId) ids.add(dz.bg.mediaId);
+    for (const l of Array.isArray(dz.layers) ? dz.layers : []) if (l && l.mediaId) ids.add(l.mediaId);
+  }
   return ids;
 }

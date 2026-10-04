@@ -56,7 +56,7 @@ export function newProject(name) {
     laneModel: 2, clips: [], overlays: [], texts: [], blurs: [], audio: [], markers: [],
     captions: [], captionStyle: defaultCaptionStyle(),
     logo: null,
-    thumb: { time: null, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow', format: 'auto', fit: 'cover', type: 'jpg', pip: true, logo: true },
+    thumb: { time: null, text: '', sub: '', color: '#ffffff', accent: '#df3f34', font: 'sans', position: 'left', style: 'shadow', format: 'auto', fit: 'cover', type: 'jpg', pip: true, logo: true, designs: {} },
   };
 }
 
@@ -105,6 +105,12 @@ export function sanitizeProject(p) {
   T.format = oneOf(T.format, ['auto', ...Object.keys(THUMB_FORMATS)], 'auto'); T.fit = oneOf(T.fit, ['cover', 'contain'], 'cover');
   T.type = oneOf(T.type, ['jpg', 'png'], 'jpg'); T.position = oneOf(T.position, ['left', 'center', 'right', 'top', 'bottom'], 'left');
   T.pip = T.pip !== false; T.logo = T.logo !== false;
+  // Designer layers: only the shape is checked here (3 formats, plain objects, bounded size); js/designer.js normDesign() cleans each field when a design is opened.
+  const dz = {};
+  if (T.designs && typeof T.designs === 'object' && !Array.isArray(T.designs)) {
+    for (const k of ['16:9', '9:16', '1:1']) { const d = T.designs[k]; if (d && typeof d === 'object' && !Array.isArray(d) && JSON.stringify(d).length < 400000) dz[k] = d; }
+  }
+  T.designs = dz;
   for (const c of p.clips) {
     cleanName(c, 'Clip'); c.muted = c.muted === true; c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
     c.srcDuration = num(c.srcDuration, 0, 1e6, 1); c.in = num(c.in, 0, 1e6, 0); c.out = num(c.out, c.in + 0.01, 1e6, c.in + 1);
