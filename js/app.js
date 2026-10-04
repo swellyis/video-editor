@@ -467,7 +467,7 @@ function fillInspector() {
     $('clipTitle').textContent = (c.kind === 'image' ? 'Image ' : 'Clip ') + (it.index + 1) + ' of ' + lay.items.length;
     $('clipLenLabel').textContent = fmt(it.len) + ' on timeline';
     const isImg = c.kind === 'image';
-    $('trimBlock').hidden = isImg; $('imageDurBlock').hidden = !isImg; $('speedSection').hidden = isImg; $('freezeBlock').hidden = isImg;
+    $('trimBlock').hidden = isImg; $('imageDurBlock').hidden = !isImg; $('speedSection').hidden = isImg; if ($('freezeBlock')) $('freezeBlock').hidden = isImg;
     if (isImg) { $('imageDur').value = c.out - c.in; $('imageDurOut').textContent = (c.out - c.in).toFixed(1) + 's'; }
     else {
       const d = c.srcDuration > 0 ? c.srcDuration : Math.max(c.out, 0.01); // media with an unknown duration
@@ -604,7 +604,7 @@ $('clipIn').addEventListener('change', () => { if (trimFrom('inputs')) trimCommi
 $('clipOut').addEventListener('change', () => { if (trimFrom('inputs')) trimCommit(); });
 $('imageDur').addEventListener('input', () => { const c = selected('clip'); if (!c) return; const b = layout(app.project); app._pendingTrimRipple = app._pendingTrimRipple || { end: b.items.find(i => i.clip.id === c.id).end, total: b.total, id: c.id, lay0: b }; c.out = c.in + parseFloat($('imageDur').value); app.liveUpdate(); });
 $('imageDur').addEventListener('change', trimCommit);
-$('freezeDur').addEventListener('input', () => { $('freezeDurOut').textContent = (+$('freezeDur').value).toFixed(1).replace(/\.0$/, '') + 's'; });
+if ($('freezeDur')) $('freezeDur').addEventListener('input', () => { $('freezeDurOut').textContent = (+$('freezeDur').value).toFixed(1).replace(/\.0$/, '') + 's'; });
 $('audioLenInput').addEventListener('change', () => {
   const a = selected('audio'); if (!a) return; const l = parseFloat($('audioLenInput').value); if (!(l > 0)) return;
   if (a.loop) a.loopLen = Math.max(0.2, l); // looped: how long it repeats on the timeline
@@ -780,7 +780,7 @@ const actions = {
     if (tg.fail) return toast(tg.fail);
     const c = tg.it.clip, url = media.url(c.mediaId);
     if (!url) return toast('This clip\'s file is not stored on this device, so a frame cannot be taken. Relink it first.');
-    const btn = $('freezeBtn'); if (btn.dataset.busy) return; btn.dataset.busy = '1'; btn.textContent = 'Taking the frame…';
+    const btn = $('freezeBtn'); if (!btn || btn.dataset.busy) return; btn.dataset.busy = '1'; btn.textContent = 'Taking the frame…';
     try {
       player.pause();
       const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto';
@@ -1369,7 +1369,7 @@ $('zoomOut').onclick = () => timeline.zoomBy(1 / 1.4);
 $('zoomFit').onclick = () => { timeline.autoFit = true; timeline.fit(); app.onZoom(timeline.pps); };
 $('rippleBtn').onclick = () => { app.rippleEnabled = !app.rippleEnabled; $('rippleBtn').setAttribute('aria-pressed', app.rippleEnabled); db.kvSet('ripple', app.rippleEnabled); toast('Ripple ' + (app.rippleEnabled ? 'on' : 'off')); };
 $('snapBtn').onclick = () => { app.snapEnabled = !app.snapEnabled; $('snapBtn').setAttribute('aria-pressed', app.snapEnabled); db.kvSet('snap', app.snapEnabled); toast('Snapping ' + (app.snapEnabled ? 'on' : 'off')); };
-$('selectBtn').onclick = () => {
+if ($('selectBtn')) $('selectBtn').onclick = () => { // (null-safe: a stale cached page may lack the button)
   app.selectMode = !app.selectMode; $('selectBtn').setAttribute('aria-pressed', app.selectMode); document.body.classList.toggle('select-mode', app.selectMode);
   toast(app.selectMode ? 'Select mode on: tap items to add or remove them, drag on empty space to select a box. Tap Select again to finish.' : 'Select mode off', app.selectMode ? 4200 : 1500);
 };
