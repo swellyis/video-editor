@@ -703,3 +703,25 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
   .th-actions{margin-top:4px;padding-bottom:4px;gap:4px}
   .th-actions .btn{padding:0 8px}
 }
+
+/* Auto Shorts dialog */
+.sh-preview{display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:start;margin:12px 0;position:sticky;top:-18px;z-index:2;background:var(--surface);padding:6px 0}
+.sh-frame{position:relative;width:96px;aspect-ratio:9/16;background:#000;border-radius:8px;overflow:hidden}
+.sh-frame video{width:100%;height:100%;object-fit:cover;display:block}
+.sh-cap{position:absolute;left:3px;right:3px;bottom:16%;text-align:center;color:#fff;font:800 10px/1.15 "IBM Plex Sans",sans-serif;text-transform:uppercase;text-shadow:0 0 3px #000,0 0 3px #000;pointer-events:none}
+.sh-side .hint{margin:0 0 6px}
+.sh-list{display:grid;gap:10px}
+.sh-card{border:1px solid var(--line);border-radius:10px;background:var(--surface-2);padding:10px;display:grid;gap:6px}
+.sh-card.on{border-color:var(--accent)}
+.sh-card.playing{box-shadow:inset 4px 0 var(--accent)}
+.sh-top{display:flex;align-items:center;gap:10px;min-height:44px}
+.sh-top input[type=checkbox]{width:24px;height:24px;flex:none}
+.sh-title{flex:1;min-width:0;font:600 13px "IBM Plex Sans",sans-serif}
+.sh-title small{display:block;font:11px "IBM Plex Mono",monospace;color:var(--muted)}
+.sh-score{font:700 12px "IBM Plex Mono",monospace;padding:2px 8px;border-radius:9px;background:var(--surface);border:1px solid var(--line);white-space:nowrap}
+.sh-text{margin:0;font-size:13px;line-height:1.35}
+.sh-why{margin:0;font-size:11px;color:var(--muted);line-height:1.35}
+.sh-nudge{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sh-nudge .grp{display:inline-flex;align-items:center;gap:4px;font:11px "IBM Plex Mono",monospace;color:var(--muted)}
+.sh-nudge .btn{min-width:44px;min-height:44px}
+.sh-nudge .val{min-width:58px;text-align:center;color:var(--ink)}

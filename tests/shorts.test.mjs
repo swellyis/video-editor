@@ -14,7 +14,6 @@ function transcript(spec, t0 = 0, wps = 0.35) {
   return caps;
 }
 const filler = (n, tag = 'x') => Array.from({ length: n }, (_, i) => [`and then we went on to the next little thing number ${i} ${tag} in the story today.`, 0.3]);
-const proj = (caps) => { const p = newProject('Sermon'); p.captions = caps; return p; };
 
 test('scripture references: books, numbered books, chapter/verse words, ranges', () => {
   assert.deepEqual(findScripture('Turn to John 3:16 today'), ['John 3:16']);

@@ -375,7 +375,7 @@
         <section class="section">
           <div class="section-head"><h2>Captions</h2><button class="btn primary small" data-action="transcribe" id="transBtn" type="button">✨ Generate…</button></div>
           <p class="hint" id="capEmptyHint">Turn your speech into captions on this device (nothing is uploaded), import an .srt, or add them by hand. They appear as blocks on the timeline (move them to any lane) and are burned into the export.</p>
-          <div class="button-row"><button class="btn secondary small" data-action="addCaption" type="button">＋ Caption at playhead</button><span class="hint grow" id="capCount"></span></div>
+          <div class="button-row"><button class="btn secondary small" data-action="addCaption" type="button">＋ Caption at playhead</button><button class="btn secondary small" data-action="shorts" id="shortsBtn" type="button" title="Find the best 30–60 second moments and make vertical Shorts from them">✂ Shorts…</button><span class="hint grow" id="capCount"></span></div>
         </section>
         <div id="capPanel" hidden>
           <section class="section">
@@ -927,6 +927,36 @@
     <div class="progress-copy"><span id="tdStatus">Starting…</span><span id="tdPercent">0%</span></div>
   </div>
   <div class="button-row" style="margin-top:12px"><button class="btn primary" id="tdGo" type="button">Start</button><button class="btn ghost" id="tdCancel" type="button">Cancel</button><button class="btn ghost small" id="tdFree" type="button" hidden>Free up space</button></div>
+</dialog>
+<dialog class="sheet" id="shortsDialog" aria-labelledby="shTitle">
+  <div class="sheet-head"><h2 id="shTitle">Auto Shorts</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="shClose">✕</button></div>
+  <p class="hint" id="shIntro">Finds strong 20–60 second moments in this video from its captions, pauses and voice, and makes each one you tick into its own vertical 9:16 project with captions. It is a guess from the words, not an understanding of the sermon: check every moment before you use it. Everything stays on this device.</p>
+  <div id="shNeed" hidden>
+    <p class="hint warn" id="shNeedText">Auto Shorts reads the captions, and this project has none yet.</p>
+    <div class="button-row"><button class="btn primary" id="shGenerate" type="button">✨ Generate captions…</button></div>
+  </div>
+  <div class="progress" id="shScan" aria-live="polite" hidden>
+    <div class="progress-track"><div class="progress-bar" id="shBar"></div></div>
+    <div class="progress-copy"><span id="shStatus">Starting…</span><span id="shPercent">0%</span></div>
+    <div class="button-row" style="margin-top:8px"><button class="btn ghost small" id="shSkip" type="button">Skip voice analysis</button></div>
+  </div>
+  <div id="shResults" hidden>
+    <div class="sh-preview">
+      <div class="sh-frame" id="shFrame"><video id="shVideo" playsinline preload="metadata"></video><div class="sh-cap" id="shPrevCap" aria-hidden="true"></div></div>
+      <div class="sh-side">
+        <p class="hint" id="shCount"></p>
+        <div class="slider-row"><label for="shOffset">Crop position</label><input type="range" id="shOffset" min="-1" max="1" step="0.05" value="0" /><output id="shOffsetOut">Centre</output></div>
+        <p class="hint">Fills the 9:16 frame from the middle of the picture. Slide left or right to keep the speaker in view (no face tracking). Applies to every Short.</p>
+      </div>
+    </div>
+    <div class="sh-list" id="shList"></div>
+    <p class="hint" id="shNote"></p>
+    <div class="button-row" style="margin-top:10px"><button class="btn primary" id="shMake" type="button">Make Shorts</button><button class="btn ghost" id="shCancel" type="button">Close</button></div>
+  </div>
+  <div class="export-result" id="shDone" hidden>
+    <p id="shDoneText"></p>
+    <div class="button-row"><button class="btn primary" id="shOpen" type="button">Open first Short</button><button class="btn secondary" id="shProjects" type="button">Show in Projects</button></div>
+  </div>
 </dialog>
 <dialog class="sheet" id="extractDialog" aria-labelledby="exTitle">
   <div class="sheet-head"><h2 id="exTitle">Extract audio</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="exClose">✕</button></div>
