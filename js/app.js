@@ -7,7 +7,7 @@ import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, downl
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
-  newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
+  newProject, migrate, layout, clipAt, clipLen, sourceTime, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, ensureLanes, holdNextClip, stepVolume, History, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, ANIM_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
@@ -34,6 +34,8 @@ import { insertFreeze, freezeTarget, freezeLen, FREEZE_DEFAULT } from './freeze.
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
 import { initLayout } from './layout-ui.js';
+import { initSpeedUI } from './speed-ui.js';
+import { meanSpeed, startShift } from './ramp.js';
 import { exportTimelineAudio, ExtractCancelled } from './extract.js';
 import { runExport, capabilities, planFormat, ExportCancelled, createSink, canStreamToOPFS, cleanupExports, bitrateFor } from './exporter.js';
 
@@ -78,6 +80,7 @@ startLongTaskMonitor(); app.perf = perf; // main-thread health (long tasks), use
 let trUI = { render() { }, open() { }, close() { } };
 let taUI = { render() { }, kind: () => 'in' };
 let fxUI = { render() { } };
+let speedUI = { render() { } };
 let flUI = { render() { } };
 let cleanUI = null, voiceUI = null, silenceUI = null, syncUI = null, beatUI = null; // Clean voice / Change voice / Remove silences controls (set up below)
 let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
@@ -98,6 +101,7 @@ cleanUI = initCleanUI({ $, qs, app, media, player, selected, toast, fmtBytes, co
 voiceUI = initVoiceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, findItem: cleanUI.findItem });
 silenceUI = initSilenceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, redraw: () => timeline.render(), timeline });
 syncUI = initSyncUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
+speedUI = initSpeedUI({ $, app, player, toast, selected: (t) => selected(t), sourceTime });
 beatUI = initBeatUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
 trUI = initTransitionUI({ $, app, commit: (l) => app.commit(l), showTab });
 fxUI = initEffectsUI({ $, app, commit: (l) => app.commit(l) });
@@ -514,6 +518,7 @@ function fillInspector() {
   if (silenceUI) silenceUI.render();
   if (syncUI) syncUI.render();
   if (beatUI) beatUI.render();
+  speedUI.render();
   // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
   // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
   const multi = app.multi.length > 1, st = multi ? 'multi' : app.selection && selected(app.selection.type) ? app.selection.type : null;
@@ -531,6 +536,7 @@ function fillInspector() {
     const dItem = st === 'clip' || st === 'overlay' ? selected(st) : null, dVideo = !!dItem && dItem.kind === 'video';
     const dWhy = multi ? 'Detach audio works on one video at a time. Select a single video clip or overlay.' : !dVideo ? 'Detach audio: select a video clip or a video overlay with sound on the timeline first.'
       : dItem.hasAudio === false ? 'This video has no audio, so there is nothing to detach.'
+        : st === 'clip' && (dItem.ramp || dItem.reverse) ? 'Detach audio is not available on a clip with a speed curve or Reverse (the detached sound would play at a constant speed). Switch the clip back to a constant speed, or use Mute and keep its sound.'
         : st === 'clip' && dItem.muted ? 'Muted, so there is no sound to detach. Unmute it first, or its audio may already be detached (Audio tab).' : '';
     setState('.tl-toolbar [data-action=detachAudio]', !dWhy, 'Detach audio: copy the selected video\'s sound onto its own audio track and mute the video', dWhy);
   }
@@ -578,16 +584,16 @@ function trimFrom(source) {
   let s, e;
   if (source === 'inputs') { s = parseFloat($('clipIn').value); e = parseFloat($('clipOut').value); }
   else { s = parseFloat($('startRange').value); e = parseFloat($('endRange').value); }
-  const min = MIN_CLIP * c.speed;
+  const min = MIN_CLIP * (c.ramp ? meanSpeed(c) : c.speed);
   s = clamp(Number.isFinite(s) ? s : 0, 0, c.srcDuration - min);
   e = clamp(Number.isFinite(e) ? e : c.srcDuration, min, c.srcDuration);
   if (e - s < min) { if (source === 'end') s = Math.max(0, e - min); else e = Math.min(c.srcDuration, s + min); }
   const before = layout(app.project), it0 = before.items.find(i => i.clip.id === c.id);
-  app._pendingTrimRipple = app._pendingTrimRipple || { end: it0.end, total: before.total, kf: deepClone(c.keyframes || {}), in0: c.in, id: c.id, lay0: before };
-  c.in = s; c.out = e;
+  app._pendingTrimRipple = app._pendingTrimRipple || { end: it0.end, total: before.total, kf: deepClone(c.keyframes || {}), in0: c.in, out0: c.out, id: c.id, lay0: before };
+  const oldC = { ...c }; c.in = s; c.out = e;
   // keyframes stay on the same frames of the source when the start is trimmed
   const P = app._pendingTrimRipple;
-  if (hasKeyframes({ keyframes: P.kf })) c.keyframes = rebaseKeyframes(P.kf, (s - P.in0) / (c.speed || 1));
+  if (hasKeyframes({ keyframes: P.kf })) c.keyframes = rebaseKeyframes(P.kf, c.ramp || c.reverse ? startShift({ ...oldC, in: P.in0, out: P.out0 ?? oldC.out }, c) : (s - P.in0) / (c.speed || 1));
   const it = layout(app.project).items.find(i => i.clip.id === c.id);
   return { it, source };
 }
@@ -1850,7 +1856,7 @@ async function thumbFrame(t, F) {
     const url = media.url(it.clip.mediaId);
     if (!url) return c;
     if (!thumb.v) { thumb.v = document.createElement('video'); thumb.v.muted = true; thumb.v.playsInline = true; thumb.v.preload = 'auto'; }
-    src = await thumbVideoAt(thumb.v, url, it.clip.in + (t - it.start) * it.clip.speed);
+    src = await thumbVideoAt(thumb.v, url, sourceTime(it, t));
     if (!src) return c;
   }
   // picture-in-picture overlays at this moment (each video overlay gets its own hidden <video>)

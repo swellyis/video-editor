@@ -1,6 +1,8 @@
 // Real-time preview engine: plays the whole sequence across clips with a shared clock.
 import { layout, sourceTime, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioSpan, audioSpeed, audioSourceTime, overlayLen, overlaySourceTime, overlayGain, hasKeyframes, soundTargets } from './model.js';
 import { clamp } from './util.js';
+import { speedAt } from './ramp.js';
+import { renderClipAudio, PREVIEW_AUDIO_MAX } from './audio.js';
 
 const POOL_MAX = 8;
 
@@ -16,6 +18,7 @@ export class Player {
     this.ac = null; this.lay = { items: [], total: 0 }; this.speech = [];
     this.lastBoxes = []; this._raf = 0; this._renderQueued = false; this.external = false;
     this.lastUse = new Map();
+    this.revBuf = new Map(); this.revNodes = new Map(); // reversed clips: their sound is rendered once (same mixer as the export) and played from memory
   }
   get total() { return this.lay.total; }
   invalidate() {
@@ -116,6 +119,44 @@ export class Player {
     this.aux.delete(id);
   }
   /** Play the cleaned sound of a video clip / overlay in step with its picture (same source time, speed, gain). */
+  /** Key of a reversed clip's rendered sound (changes when anything that shapes its sound changes). */
+  revKey(c) { return [c.mediaId, c.in.toFixed(3), c.out.toFixed(3), c.speed, c.ramp ? JSON.stringify(c.ramp) : 0, c.hasAudio, (c.clean && c.clean.level) || '', c.change ? 1 : 0].join('|'); }
+  revState(c) { const e = this.revBuf.get(this.revKey(c)); return e ? { state: e.state, progress: e.progress } : { state: 'idle', progress: 0 }; }
+  /** Render the reversed clip's sound (progress callback 0..1). Safe to call again: one render per key. */
+  prepareReverse(c, onProgress) {
+    const key = this.revKey(c);
+    let e = this.revBuf.get(key);
+    if (e) { if (onProgress && e.state === 'loading') e.cbs.push(onProgress); if (onProgress && e.state !== 'loading') onProgress(1); return e.promise || Promise.resolve(); }
+    e = { state: 'loading', progress: 0, buf: null, cbs: onProgress ? [onProgress] : [] };
+    this.revBuf.set(key, e);
+    if (this.revBuf.size > 6) { const k = this.revBuf.keys().next().value; this.revBuf.delete(k); }
+    const len = layout({ ...this.getProject(), clips: [{ ...c, gap: 0 }] }).total;
+    if (!c.hasAudio || c.kind !== 'video') { e.state = 'none'; return Promise.resolve(); }
+    if (len > PREVIEW_AUDIO_MAX) { e.state = 'toolong'; return Promise.resolve(); }
+    e.promise = renderClipAudio(this.getProject(), c, this.media, { onProgress: (f) => { e.progress = f; for (const cb of e.cbs) cb(f); } })
+      .then((buf) => { e.buf = buf; e.state = buf ? 'ready' : 'none'; })
+      .catch((err) => { console.warn('Reverse sound', err); e.state = 'failed'; })
+      .finally(() => { e.progress = 1; for (const cb of e.cbs) cb(1); e.cbs = []; });
+    return e.promise;
+  }
+  _stopRev(id) { const n = this.revNodes.get(id); if (!n) return; try { n.src.stop(); n.src.disconnect(); n.g.disconnect(); } catch { /* already stopped */ } this.revNodes.delete(id); }
+  _driveRev(it, on, t, used) {
+    const c = it.clip;
+    if (!on || !this.ac) return;
+    const key = this.revKey(c), e = this.revBuf.get(key);
+    if (!e) { this.prepareReverse(c); return; }
+    if (e.state !== 'ready') return;
+    used.add(c.id);
+    const off = Math.max(0, t - it.start);
+    let n = this.revNodes.get(c.id);
+    if (n && (n.key !== key || Math.abs((this.ac.currentTime - n.startedAt) - off) > 0.25)) { this._stopRev(c.id); n = null; } // edited, or the playhead jumped
+    if (!n) {
+      const src = this.ac.createBufferSource(); src.buffer = e.buf; const g = this.ac.createGain();
+      src.connect(g).connect(this.ac.destination); src.start(0, Math.min(off, e.buf.duration - 0.001));
+      n = { src, g, key, startedAt: this.ac.currentTime - off }; this.revNodes.set(c.id, n);
+    }
+    n.g.gain.value = clipGain(it, t);
+  }
   _driveAux(item, cid, active, fwd, desired, pr, g0, g1) {
     const e = this._getAux(item, cid); if (!e) return false;
     const el = e.el;
@@ -152,7 +193,7 @@ export class Player {
   /** Position every media element for time t. Returns true if all active sources are ready. */
   sync(t, playing) {
     const p = this.getProject();
-    const needed = new Set(), auxNeeded = new Set();
+    const needed = new Set(), auxNeeded = new Set(), revUsed = new Set();
     let ready = true;
     const fwd = playing && this.rate > 0;
     const now = performance.now();
@@ -166,9 +207,10 @@ export class Player {
       if (!v) continue;
       needed.add(c.id); this.lastUse.set(c.id, now);
       const el = v.el;
-      const desired = active ? sourceTime(it, t) : c.in;
-      if (active && fwd) {
-        const pr = clamp(c.speed * this.rate, 0.0625, 16);
+      const rev = !!c.reverse, desired = active ? sourceTime(it, t) : (rev ? Math.max(c.in, c.out - 0.001) : c.in);
+      const cspd = c.ramp ? speedAt(c.ramp, desired) : c.speed; // a speed curve changes the playback rate as the clip plays
+      if (active && fwd && !rev) {
+        const pr = clamp(cspd * this.rate, 0.0625, 16);
         if (Math.abs(el.playbackRate - pr) > 1e-3) el.playbackRate = pr;
         if (el.paused) {
           if (Math.abs(el.currentTime - desired) > 0.04) el.currentTime = desired;
@@ -178,12 +220,13 @@ export class Player {
       } else {
         if (!el.paused) el.pause();
         if (Math.abs(el.currentTime - desired) > 0.015 && !el.seeking) el.currentTime = desired;
-        if (active && (el.readyState < 2 || el.seeking)) ready = false;
+        if (active && !(rev && fwd) && (el.readyState < 2 || el.seeking)) ready = false; // reversed clips are played by seeking: the clock does not wait for each seek (the last frame stays up meanwhile)
       }
+      if (rev && c.kind === 'video' && c.hasAudio && !c.muted && c.volume > 0 && !(c.ramp && c.ramp.audio === 'mute')) this._driveRev(it, active && fwd && this.rate === 1, t, revUsed);
       {
-        const g0 = active && fwd && this.rate === 1 ? clipGain(it, t) : 0, g1 = active && fwd && this.rate === 1 && hasKeyframes(c, 'volume') ? clipGain(it, Math.min(it.end, t + LOOK_AHEAD)) : null;
-        const cid = c.kind === 'video' ? this._cleanFor(c) : null;
-        if (cid) { this._setGain(v, 0); if (this._driveAux(c, cid, active, fwd, desired, clamp(c.speed * this.rate, 0.0625, 16), g0, g1)) auxNeeded.add(c.id); }
+        const live = active && fwd && !rev && this.rate === 1 && !(c.ramp && c.ramp.audio === 'mute'), g0 = live ? clipGain(it, t) : 0, g1 = live && hasKeyframes(c, 'volume') ? clipGain(it, Math.min(it.end, t + LOOK_AHEAD)) : null;
+        const cid = c.kind === 'video' && !rev ? this._cleanFor(c) : null;
+        if (cid) { this._setGain(v, 0); if (this._driveAux(c, cid, active, fwd, desired, clamp(cspd * this.rate, 0.0625, 16), g0, g1)) auxNeeded.add(c.id); }
         else this._setGain(v, g0, g1);
       }
     }
@@ -243,6 +286,7 @@ export class Player {
       const iv = this.duck.get(a.id) || this.speech;
       this._setGain(e, active && fwd && this.rate === 1 ? musicGain(a, t, iv, this.total) : 0, active && fwd && this.rate === 1 && hasKeyframes(a, 'volume') ? musicGain(a, Math.min(a.start + len, t + LOOK_AHEAD), iv, this.total) : null);
     }
+    for (const id of [...this.revNodes.keys()]) if (!revUsed.has(id)) this._stopRev(id);
     return ready;
   }
 

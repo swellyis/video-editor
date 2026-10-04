@@ -2,9 +2,10 @@
 // clip audio (speed, fades, transitions) + overlay audio + music/voice tracks (looping, ducking).
 // Sources are decoded on demand with WebCodecs (via Mediabunny) — never whole files — and time-stretched with a
 // streaming WSOLA when a clip's speed isn't 1×.
-import { soundTargets, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioLen, audioSpan, audioSpeed, overlayLen, overlayGain } from './model.js';
+import { layout, soundTargets, clipGain, musicGain, speechIntervals, duckIntervalsFor, audioLen, audioSpan, audioSpeed, overlayLen, overlayGain } from './model.js';
 import { loadMediabunny } from './media.js';
 import { yieldToMain } from './util.js';
+import { mapFor, meanSpeed } from './ramp.js';
 
 export const CHUNK_SEC = 10;
 const FALLBACK_DECODE_LIMIT = 80 * 1024 * 1024; // whole-file decodeAudioData fallback only for files up to 80 MB
@@ -81,6 +82,26 @@ export class SourceReader {
   close() { try { this.it && this.it.return().catch(() => { }); } catch { } try { this.input && this.input.dispose && this.input.dispose(); } catch { } this.chunks = []; this.whole = null; }
 }
 
+/**
+ * Reads a source BACKWARDS: virtual sample v is real sample `end - 1 - v`. Reversed clips play this through the normal forward
+ * paths (plain read at 1x, or the stretcher for other speeds), so reverse needs no pre-rendered file and no big buffer.
+ */
+export class ReverseReader {
+  constructor(inner, end) { this.inner = inner; this.end = end; this.sr = inner.sr; this.ch = inner.ch; }
+  async read(s0, n) {
+    n = Math.max(0, Math.round(n)); s0 = Math.round(s0);
+    const out = Array.from({ length: this.ch }, () => new Float32Array(n));
+    if (!n) return out;
+    const a = this.end - s0 - n; // real samples [a, a + n) mirrored
+    const lead = Math.max(0, -a), take = n - lead;
+    if (take <= 0) return out;
+    const got = await this.inner.read(Math.max(0, a), take);
+    for (let c = 0; c < this.ch; c++) { const src = got[c], dst = out[c]; for (let i = 0; i < take; i++) dst[i] = src[take - 1 - i]; }
+    return out;
+  }
+  close() { this.inner.close(); }
+}
+
 /** WSOLA time-stretch (pitch preserving) of whole arrays. speed>1 = faster/shorter. */
 export function timeStretch(channels, sr, speed) {
   const inLen = channels[0].length;
@@ -94,7 +115,8 @@ export function timeStretch(channels, sr, speed) {
  * Same algorithm as the old whole-buffer version, but it pulls input and releases output incrementally.
  */
 class Stretcher {
-  constructor(reader, base, sr, speed, whole) {
+  constructor(reader, base, sr, speed, whole, warp) {
+    this.warp = warp || null; // optional output-sample -> input-sample map for a speed curve (monotonic)
     this.r = reader; this.base = base; this.sr = sr; this.speed = speed; this.whole = whole || null;
     this.N = Math.round(sr * 0.046) & ~1; this.Hs = this.N >> 1; this.Ha = this.Hs * speed; this.tol = Math.round(sr * 0.010);
     this.win = new Float32Array(this.N); for (let i = 0; i < this.N; i++) this.win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (this.N - 1));
@@ -105,6 +127,7 @@ class Stretcher {
     this.fin = 0; // output samples < fin are final
     this.pieces = []; // finalized output pieces { s, n, d: [Float32Array per channel] }, kept briefly for re-reads
   }
+  _nominal(k) { return this.warp ? Math.round(this.warp(k * this.Hs)) : Math.round(k * this.Ha); }
   _inGet(ci, i) { const j = i - this.in0; const d = this.inCh[ci]; return j >= 0 && j < d.length ? d[j] : undefined; }
   async _ensureIn(upto, from) {
     if (this.whole) { this.inCh = this.whole; this.in0 = 0; return; }
@@ -118,7 +141,7 @@ class Stretcher {
   }
   _frame() {
     const { N, Hs, tol, win } = this;
-    const k = this.k, s = k * Hs, nominal = Math.round(k * this.Ha);
+    const k = this.k, s = k * Hs, nominal = this._nominal(k);
     let best = nominal;
     if (k > 0) {
       const nat = this.prevA + Hs; let bestC = -Infinity;
@@ -160,7 +183,7 @@ class Stretcher {
   async pull(o0, n) {
     const o1 = o0 + n;
     while (this.fin < o1) {
-      const s = this.k * this.Hs, nominal = Math.round(this.k * this.Ha);
+      const s = this.k * this.Hs, nominal = this._nominal(this.k);
       const lo = Math.max(0, Math.min(nominal - this.tol, this.prevA + this.Hs) - 16);
       await this._ensureIn(Math.max(nominal + this.tol, this.prevA + this.Hs) + this.N + 8, lo);
       const f = this._frame(); void s;
@@ -218,7 +241,19 @@ export function audioSegments(project, lay) {
   for (const it of lay.items) {
     const c = it.clip;
     if (c.kind !== 'video' || !c.hasAudio || c.muted || c.volume <= 0) continue;
-    segs.push({ kind: 'clip', mediaId: c.mediaId, cleanIds: soundTargets(c), name: c.name, t0: it.start, t1: it.end, srcIn: c.in, speed: c.speed || 1, gain: (t) => clipGain(it, t), marks: envMarks(c, it.start) });
+    if (c.ramp && c.ramp.audio === 'mute') continue; // speed ramp with the sound switched off
+    const seg = { kind: 'clip', mediaId: c.mediaId, cleanIds: soundTargets(c), name: c.name, t0: it.start, t1: it.end, srcIn: c.in, speed: c.speed || 1, gain: (t) => clipGain(it, t), marks: envMarks(c, it.start) };
+    if (c.ramp || c.reverse) { // speed curve and / or reversed: the mixer reads through a ReverseReader and / or a warped stretcher
+      const m = c.ramp ? mapFor(c) : null;
+      if (c.reverse) seg.revOut = c.out;
+      seg.srcIn = c.reverse ? 0 : c.in;
+      if (c.ramp) {
+        seg.speed = meanSpeed(c);
+        const L = m.len; // (the clip's own length; the layout length can differ by a hair)
+        seg.warp = c.reverse ? (sec) => c.out - m.fwd(Math.max(0, L - sec)) : (sec) => m.fwd(Math.min(L, sec)) - c.in;
+      }
+    }
+    segs.push(seg);
   }
   for (const o of project.overlays || []) {
     if (o.kind !== 'video' || !o.hasAudio || o.muted || o.volume <= 0 || o.start >= total) continue;
@@ -282,10 +317,14 @@ export async function* mixChunks(project, lay, media, { sampleRate = 48000, chun
           }
         }
       }
+      if (st && s.revOut != null) st = { reader: new ReverseReader(st.reader, Math.round(s.revOut * st.reader.sr)) };
       open.set(key, st);
     }
     const st = open.get(key); if (!st) return null;
-    if (Math.abs(s.speed - 1) > 1e-3 && !stretchers.has(s)) stretchers.set(s, new Stretcher(st.reader, Math.round(s.srcIn * st.reader.sr), st.reader.sr, s.speed));
+    if ((Math.abs(s.speed - 1) > 1e-3 || s.warp) && !stretchers.has(s)) {
+      const sr0 = st.reader.sr;
+      stretchers.set(s, new Stretcher(st.reader, Math.round(s.srcIn * sr0), sr0, s.speed, null, s.warp ? (x) => s.warp(x / sr0) * sr0 : null));
+    }
     return { reader: st.reader, stretch: stretchers.get(s) };
   };
   const step = Math.round(chunkSec * sampleRate);
@@ -337,6 +376,27 @@ export async function mixAudio(project, lay, media, { sampleRate = 48000, onStat
     for (let c = 0; c < 2; c++) out.copyToChannel(b.getChannelData(c), c, off);
     off += b.length;
     onStatus && onStatus('Mixing audio…');
+  }
+  return out;
+}
+
+/** Longest clip (timeline seconds) whose sound is rendered into memory for the preview (48 kHz stereo = 22 MB per minute). */
+export const PREVIEW_AUDIO_MAX = 180;
+/**
+ * The sound of ONE clip as it plays on the timeline (speed, speed curve, reverse), at unity gain, for the preview of reversed clips.
+ * Uses the same mixer as the export, so what you hear is what is exported. Returns an AudioBuffer, or null when it has no sound.
+ */
+export async function renderClipAudio(project, clip, media, { onProgress, sampleRate = 48000 } = {}) {
+  const c = JSON.parse(JSON.stringify(clip));
+  Object.assign(c, { gap: 0, volume: 1, muted: false, fadeIn: 0, fadeOut: 0, keyframes: {}, transition: { type: 'cut', duration: 0.6 }, clean: undefined, change: undefined });
+  const mini = { ...JSON.parse(JSON.stringify(project)), clips: [c], overlays: [], audio: [], texts: [], blurs: [], captions: [], markers: [] };
+  const lay = layout(mini);
+  if (!hasAudio(mini, lay)) return null;
+  const out = new AudioBuffer({ numberOfChannels: 2, length: Math.max(1, Math.ceil(lay.total * sampleRate)), sampleRate });
+  let off = 0;
+  for await (const b of mixChunks(mini, lay, media, { sampleRate, onStatus: (f) => onProgress && onProgress(Math.min(1, f)) })) {
+    for (let ch = 0; ch < 2; ch++) out.copyToChannel(b.getChannelData(ch), ch, off);
+    off += b.length;
   }
   return out;
 }

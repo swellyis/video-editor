@@ -233,7 +233,19 @@ async function exportFast(project, media, { onProgress, signal, format, openSink
       const opts = { poolSize: 3 };
       if (scale < 0.99) { opts.width = Math.round(dw * scale / 2) * 2; opts.height = Math.round(dh * scale / 2) * 2; }
       const sink = new mb.CanvasSink(track, opts);
-      const gen = sink.canvasesAtTimestamps(list.map(s => s + off));
+      // A reversed clip asks for descending timestamps. Decoding is forward-only, so it works in small blocks: decode a block of frames
+      // in order (copying each out of the sink's recycled canvases), then hand them out backwards. Memory = one block, any clip length.
+      const copyOf = (cv) => { const o = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(cv.width, cv.height) : Object.assign(document.createElement('canvas'), { width: cv.width, height: cv.height }); o.getContext('2d').drawImage(cv, 0, 0); return o; };
+      const REV_BLOCK = 8;
+      const revGen = async function* () {
+        for (let i = 0; i < list.length; i += REV_BLOCK) {
+          const blk = list.slice(i, i + REV_BLOCK), order = blk.map((s, j) => ({ s, j })).sort((x, y) => x.s - y.s), got = new Array(blk.length).fill(null);
+          let n = 0;
+          for await (const r of sink.canvasesAtTimestamps(order.map(x => x.s + off))) { if (r && r.canvas) got[order[n].j] = copyOf(r.canvas); n++; }
+          for (const g of got) yield g ? { canvas: g } : null;
+        }
+      };
+      const gen = c.reverse ? revGen() : sink.canvasesAtTimestamps(list.map(s => s + off));
       let last = null;
       return {
         mode: 'webcodecs',

@@ -7,6 +7,7 @@ import { defaultCaptionStyle, normalizeCaptionStyle, normalizeCaptions, splitCap
 export const SCHEMA = 5;
 export const MIN_CLIP = 0.1; // seconds on timeline
 
+import * as RAMP from './ramp.js';
 import { PRESETS, KEYS as COLOR_KEYS, filterParams, amountOf, normFilter } from './filters.js';
 export { PRESETS };
 export const FONTS = {
@@ -115,6 +116,7 @@ export function sanitizeProject(p) {
     cleanName(c, 'Clip'); c.muted = c.muted === true; c.speed = num(c.speed, 0.25, 4, 1); c.volume = num(c.volume, 0, 2, 1); c.opacity = num(c.opacity, 0, 1, 1);
     c.srcDuration = num(c.srcDuration, 0, 1e6, 1); c.in = num(c.in, 0, 1e6, 0); c.out = num(c.out, c.in + 0.01, 1e6, c.in + 1);
     c.fadeIn = num(c.fadeIn, 0, 60, 0); c.fadeOut = num(c.fadeOut, 0, 60, 0); c.gap = num(c.gap, 0, 1e5, 0);
+    { const r = c.kind === 'image' ? null : RAMP.normalize(c.ramp); if (r) c.ramp = r; else delete c.ramp; if (c.reverse === true && c.kind !== 'image') c.reverse = true; else delete c.reverse; } // speed curve + reverse (video clips only)
     c.transition = normTransition(c.transition);
     c.transform.zoom = num(c.transform.zoom, 0.05, 20, 1);
     cleanClipBlur(c.blur);
@@ -492,7 +494,7 @@ export function setEaseAt(item, local, ease, props = ANIM_PROPS) {
   for (const p of props) for (const k of kf[p] || []) if (Math.abs(k.t - local) < 1 / 120) { k.ease = ease; delete k.e0; delete k.e1; }
 }
 
-export const clipLen = (c) => Math.max(MIN_CLIP, (c.out - c.in) / (c.kind === 'image' ? 1 : (c.speed || 1)));
+export const clipLen = (c) => Math.max(MIN_CLIP, c.kind === 'image' ? c.out - c.in : c.ramp ? RAMP.lengthOf(c) : (c.out - c.in) / (c.speed || 1));
 export const audioSpeed = (a) => a.speed > 0 ? a.speed : 1;
 /** Length on the timeline of one pass of an audio track (its trimmed source section divided by its speed). */
 export const audioLen = (a) => Math.max(0.05, (a.out - a.in) / audioSpeed(a));
@@ -550,6 +552,7 @@ export function totalDuration(project) {
 export function sourceTime(it, t) {
   const c = it.clip;
   if (c.kind === 'image') return 0;
+  if (c.ramp || c.reverse) return clamp(RAMP.sourceAtOffset(c, t - it.start), c.in, Math.max(c.in, c.out - 0.001));
   return clamp(c.in + (t - it.start) * c.speed, c.in, Math.max(c.in, c.out - 0.001));
 }
 /** Active clips at time t with their visual alpha (bottom first). */
@@ -737,8 +740,9 @@ export function splitAt(project, t) {
   if (c.kind === 'image') {
     b.in = c.in + local; b.out = c.out; c.out = c.in + local; // image in-point = animation (GIF) time offset
   } else {
-    const s = c.in + local * c.speed;
-    c.out = s; b.in = s;
+    const s = c.ramp || c.reverse ? RAMP.sourceAtOffset(c, local) : c.in + local * c.speed;
+    if (c.reverse) { c.in = s; b.out = s; } // reversed: the first part on the timeline is the END of the footage
+    else { c.out = s; b.in = s; }
   }
   b.fadeIn = 0; c.fadeOut = 0;
   // keyframes: first half ends at the interpolated value, second half continues from it
@@ -904,6 +908,7 @@ export function detachAudio(project, sel) {
   }
   if (src.kind !== 'video') return fail('Only video clips have audio to detach.');
   if (src.hasAudio === false) return fail('This video has no audio, so there is nothing to detach.');
+  if (src.ramp || src.reverse) return fail('Detach audio is not available on a clip with a speed curve or Reverse (the detached sound would play at a constant speed). Switch to a constant speed first.');
   if (src.muted && sel.type !== 'overlay') return fail('This clip is muted (its audio may already be detached). Unmute it first if you want to detach its audio again.');
   if ((project.audio || []).some(x => x.mediaId === src.mediaId && Math.abs(x.start - start) < 0.002 && Math.abs(x.in - src.in) < 0.002 && Math.abs(x.out - src.out) < 0.002)) return fail('This audio is already detached (see the Audio tab).');
   const a = newAudio({ id: src.mediaId, duration: src.srcDuration, name: src.name }, start);
@@ -1201,7 +1206,7 @@ export function clipToOverlay(project, id, ripple, start) {
   const aspect = c.width > 0 && c.height > 0 ? c.width / c.height : W / H;
   const o = normalizeOverlay({
     kind: c.kind, mediaId: c.mediaId, name: c.name, srcDuration: c.srcDuration, width: c.width, height: c.height, hasAudio: c.hasAudio,
-    start: start ?? it.start, in: c.in, out: c.out, speed: c.speed, volume: c.volume, muted: c.muted, opacity: c.opacity, fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0,
+    start: start ?? it.start, in: c.in, out: c.out, speed: c.ramp || c.reverse ? clamp(RAMP.meanSpeed(c), 0.25, 4) : c.speed, volume: c.volume, muted: c.muted, opacity: c.opacity, fadeIn: c.fadeIn || 0, fadeOut: c.fadeOut || 0,
     x: 0.5, y: 0.5, w: Math.min(1, H * aspect / W), radius: 0, shadow: false, keyframes: volumeOnly(c),
   });
   o.fx = normFx(c.fx); if (c.color) { o.color = tidyColor({ preset: c.color.preset, filterAmount: c.color.filterAmount }); }

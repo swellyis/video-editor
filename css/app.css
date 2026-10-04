@@ -888,3 +888,22 @@ body.ws #multiPanel{padding:16px}
 .ctx-item.is-off{opacity:.45}
 .ctx-item kbd{font:inherit;font-size:11px;opacity:.65}
 .ctx-sep{display:block;height:1px;margin:4px 6px;background:#3a3a36}
+
+/* ---- speed curve + reverse (round 1) ---- */
+.speed-curve{margin-top:8px}
+.ramp-presets{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.ramp-presets .chip{min-height:32px;padding:0 10px;border-radius:16px;border:1px solid var(--line,#3a3a36);background:var(--surface-2);color:var(--ink);font-size:12px;font-weight:600;cursor:pointer}
+.ramp-presets .chip.selected{background:color-mix(in srgb,var(--accent) 30%,var(--surface-2));border-color:var(--accent)}
+.ramp-svg{width:100%;height:auto;display:block;touch-action:none;user-select:none;-webkit-user-select:none}
+.ramp-svg .ramp-bg{fill:var(--surface-2)}
+.ramp-svg .ramp-grid{stroke:rgba(128,128,120,.25);stroke-width:1}
+.ramp-svg .ramp-one{stroke:rgba(128,128,120,.6);stroke-width:1;stroke-dasharray:3 3}
+.ramp-svg .ramp-tick{fill:var(--muted);font-size:8px}
+.ramp-svg .ramp-path{stroke:var(--accent);stroke-width:2.2;stroke-linejoin:round}
+.ramp-svg .ramp-head{stroke:#fff;stroke-width:1;opacity:.8}
+.ramp-svg .ramp-pt{fill:var(--accent);stroke:#fff;stroke-width:1.6;cursor:grab}
+.ramp-svg .ramp-pt.end{fill:#fff;stroke:var(--accent)}
+.ramp-svg .ramp-pt:focus{outline:none;stroke-width:3}
+.ramp-svg .ramp-hit{fill:transparent;cursor:grab}
+.reverse-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 4px}
+.reverse-row .btn.selected{background:color-mix(in srgb,var(--accent) 30%,var(--surface-2));box-shadow:inset 0 0 0 1px var(--accent)}

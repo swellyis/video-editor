@@ -70,3 +70,39 @@ test('normalize drops junk, sorts, clamps', () => {
   const n = R.normalize({ pts: [{ t: 5, s: 99 }, { t: 1, s: 'x' }, { t: -1, s: 1 }], audio: 'zzz' });
   assert.deepEqual(n.pts.map(p => [p.t, p.s]), [[1, 1], [5, 4]]); assert.equal(n.audio, 'follow');
 });
+
+import { newProject, newClipFromMedia, layout, clipLen, sourceTime, splitAt, migrate } from '../js/model.js';
+const vid = { id: 'm1', kind: 'video', name: 'a.mp4', duration: 10, width: 640, height: 360, hasAudio: true };
+test('model: clipLen / sourceTime follow the ramp and reverse', () => {
+  const p = newProject('t'); const c = newClipFromMedia(vid, p.settings); p.clips.push(c);
+  const plain = clipLen(c); assert.equal(plain, 10);
+  c.ramp = R.fromPreset('hero', c); const lay = layout(p), it = lay.items[0];
+  near(clipLen(c), R.lengthOf(c)); assert.ok(clipLen(c) > 10, 'slow-mo middle makes it longer than the footage'); near(it.len, clipLen(c));
+  near(sourceTime(it, it.start + 1), R.sourceAtOffset(c, 1)); near(sourceTime(it, it.end - 1e-4), 10, 0.01);
+  c.reverse = true; near(sourceTime(it, it.start), 9.999, 0.01); near(sourceTime(it, it.start + 1), R.sourceAtOffset(c, 1));
+});
+test('model: splitting a ramped clip keeps the footage and the curve; reverse swaps the halves', () => {
+  const p = newProject('t'); const c = newClipFromMedia(vid, p.settings); p.clips.push(c); c.ramp = R.fromPreset('jumper', c);
+  const len = clipLen(c), pts = JSON.stringify(c.ramp.pts);
+  const b = splitAt(p, len / 2); assert.ok(b); near(p.clips[0].out, b.in); assert.equal(JSON.stringify(b.ramp.pts), pts);
+  near(clipLen(p.clips[0]) + clipLen(b), len, 0.02);
+  const q = newProject('t'); const d = newClipFromMedia(vid, q.settings); q.clips.push(d); d.reverse = true;
+  const e = splitAt(q, 3); assert.ok(e);
+  near(q.clips[0].in, 7); near(q.clips[0].out, 10); near(e.in, 0); near(e.out, 7); // first on the timeline = the end of the footage
+});
+test('model: migrate keeps / cleans ramp + reverse', () => {
+  const p = newProject('t'); const c = newClipFromMedia(vid, p.settings); p.clips.push(c); c.ramp = { pts: [{ t: 1, s: 9 }, { t: 3, s: 0.1 }], audio: 'mute' }; c.reverse = true;
+  const q = migrate(JSON.parse(JSON.stringify(p)));
+  assert.deepEqual(q.clips[0].ramp.pts, [{ t: 1, s: 4 }, { t: 3, s: 0.25 }]); assert.equal(q.clips[0].ramp.audio, 'mute'); assert.equal(q.clips[0].reverse, true);
+  c.ramp = { pts: 'junk' }; c.reverse = 'yes'; const r = migrate(JSON.parse(JSON.stringify(p)));
+  assert.ok(!('ramp' in r.clips[0]) && !('reverse' in r.clips[0]));
+});
+
+test('sourceBeyond / startShift: trimming keeps keyframes on the same footage', () => {
+  const c = clip({ ramp: R.fromPreset('hero', clip()) }), len = R.lengthOf(c);
+  near(R.sourceBeyond(c, len / 2), R.sourceAtOffset(c, len / 2)); assert.ok(R.sourceBeyond(c, len + 1) > 10); assert.ok(R.sourceBeyond(c, -1) < 0);
+  const n = { ...c, in: 2 }; near(R.startShift(c, n), R.offsetOfSource(c, 2)); near(R.startShift(n, c), -R.offsetOfSource(c, 2));
+  const r = { ...c, reverse: true }, rn = { ...r, out: 8 };
+  near(R.startShift(r, rn), R.offsetOfSource(r, 8)); assert.ok(R.startShift(r, rn) > 0);
+  const k = clip({ speed: 2 }); near(R.startShift(k, { ...k, in: 2 }), 1);
+});

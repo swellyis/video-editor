@@ -5,6 +5,7 @@ import { clamp, fmt, el, icon, toast } from './util.js';
 import { retimeWords } from './captions.js';
 import { timelineBeats, thin } from './beat.js';
 import * as G from './group.js';
+import { sourceBeyond, startShift, meanSpeed, lengthOf } from './ramp.js';
 
 function muteBadge(title, extra = '') {
   const i = icon('spkOff', 'ico badge-ico mute-badge' + (extra ? ' ' + extra : ''));
@@ -266,7 +267,7 @@ export class Timeline {
       n.classList.toggle('offline', !rec);
       n.querySelector('.meta b').textContent = c.name;
       n.setAttribute('aria-label', `${c.kind === 'image' ? 'Image' : 'Clip'} ${it.index + 1}: ${c.name}, ${fmt(it.start)} to ${fmt(it.end)}`);
-      n.querySelector('.meta span').textContent = fmt(it.len) + (c.kind === 'video' && c.speed !== 1 ? ' · ' + c.speed + '×' : '');
+      n.querySelector('.meta span').textContent = fmt(it.len) + (c.kind === 'video' ? (c.ramp ? ' · Curve' : c.speed !== 1 ? ' · ' + c.speed + '×' : '') + (c.reverse ? ' · ↺' : '') : '');
       const badges = [];
       if (c.kind === 'video' && c.muted && c.hasAudio) badges.push('muted');
       else if (c.kind === 'video' && !c.hasAudio) badges.push('noaudio');
@@ -479,7 +480,7 @@ export class Timeline {
     const frames = rec && rec.strip ? rec.strip : [];
     const tileW = 64;
     const n = Math.min(80, Math.max(1, Math.ceil(w / tileW)));
-    const key = [frames.length, n, c.in.toFixed(2), c.out.toFixed(2), c.speed, Math.round(this.pps)].join('|');
+    const key = [frames.length, n, c.in.toFixed(2), c.out.toFixed(2), c.speed, !!c.reverse, Math.round(this.pps)].join('|');
     if (strip._key === key) return;
     strip._key = key;
     strip.innerHTML = '';
@@ -487,7 +488,7 @@ export class Timeline {
     for (let i = 0; i < n; i++) {
       let idx = 0;
       if (c.kind === 'video' && rec.duration) {
-        const srcT = c.in + ((i + 0.5) / n) * (c.out - c.in);
+        const srcT = c.in + ((c.reverse ? n - i - 0.5 : i + 0.5) / n) * (c.out - c.in);
         idx = clamp(Math.floor((srcT / rec.duration) * frames.length), 0, frames.length - 1);
       }
       const im = document.createElement('img'); im.src = frames[idx]; im.alt = ''; im.draggable = false; im.decoding = 'async';
@@ -819,22 +820,25 @@ export class Timeline {
     if (type === 'clip') {
       const idx = p.clips.findIndex(c => c.id === id), c = p.clips[idx], it0 = lay0.items[idx];
       const orig = { in: c.in, out: c.out, kf: JSON.parse(JSON.stringify(c.keyframes || {})) };
-      const keyed = hasKeyframes(c);
+      const keyed = hasKeyframes(c), oc = { ...c }, curved = c.kind === 'video' && !!(c.ramp || c.reverse); // curved: speed curve / reverse trims through the curve
       d.onMove = (ev) => {
         const dt = dtOf(ev);
         if (!gate(ev, dt)) return;
         if (handle === 'l') {
           if (c.kind === 'image') c.out = clamp(orig.out - dt, MIN_CLIP, 3600);
+          else if (curved) { const src = sourceBeyond(oc, dt), mn = MIN_CLIP * meanSpeed(oc); if (c.reverse) c.out = clamp(src, orig.in + mn, c.srcDuration); else c.in = clamp(src, 0, orig.out - mn); }
           else c.in = clamp(orig.in + dt * c.speed, 0, orig.out - MIN_CLIP * c.speed);
           // keep keyframes on the same content: trimming the start shifts them by the trimmed amount
-          if (keyed) c.keyframes = rebaseKeyframes(orig.kf, c.kind === 'image' ? (orig.out - c.out) : (c.in - orig.in) / c.speed);
+          if (keyed) c.keyframes = rebaseKeyframes(orig.kf, c.kind === 'image' ? (orig.out - c.out) : curved ? startShift(oc, c) : (c.in - orig.in) / c.speed);
           tip((c.kind === 'image' ? 'Length ' : 'In ') + (c.kind === 'image' ? fmt(c.out) : c.in.toFixed(2) + 's'), it0.start);
           this.app.liveUpdate({ previewAt: it0.start });
         } else if (handle === 'r') {
-          let end = it0.start + (orig.out - orig.in) / (c.kind === 'image' ? 1 : c.speed) + dt;
+          let end = it0.start + (c.kind === 'image' ? orig.out - orig.in : lengthOf(oc)) + dt;
           const s = this.snap(end, null); if (s.snapped && Math.abs(s.t - it0.end) > 1e-3) { end = s.t; this.showSnap(end); } else this.snapLine.style.display = 'none';
           const len = Math.max(MIN_CLIP, end - it0.start);
-          if (c.kind === 'image') c.out = c.in + len; else c.out = clamp(orig.in + len * c.speed, orig.in + MIN_CLIP * c.speed, c.srcDuration);
+          if (c.kind === 'image') c.out = c.in + len;
+          else if (curved) { const src = sourceBeyond(oc, len), mn = MIN_CLIP * meanSpeed(oc); if (c.reverse) c.in = clamp(src, 0, orig.out - mn); else c.out = clamp(src, orig.in + mn, c.srcDuration); }
+          else c.out = clamp(orig.in + len * c.speed, orig.in + MIN_CLIP * c.speed, c.srcDuration);
           tip('Out ' + (c.kind === 'image' ? fmt(c.out) : c.out.toFixed(2) + 's') + ' · ' + fmt(clipLen(c)), it0.start + clipLen(c));
           this.app.liveUpdate({ previewAt: Math.max(it0.start, it0.start + clipLen(c) - 0.04) });
         }

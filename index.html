@@ -181,9 +181,22 @@
           </section>
           <section class="section" id="speedSection">
             <h2 class="sh">Speed &amp; sound</h2>
-            <span class="label">Speed</span>
-            <div class="segmented six" data-bind="clip.speed" data-num="1"><button data-value="0.25" type="button">¼×</button><button data-value="0.5" type="button">½×</button><button data-value="1" type="button">1×</button><button data-value="1.5" type="button">1.5×</button><button data-value="2" type="button">2×</button><button data-value="4" type="button">4×</button></div>
-            <div class="slider-row"><label>Fine speed</label><input type="range" min="0.25" max="4" step="0.05" data-bind="clip.speed" /><output data-out="clip.speed" data-fmt="x"></output></div>
+            <span class="label" id="speedLabel">Speed</span>
+            <div class="segmented two" id="speedMode" role="group" aria-labelledby="speedLabel"><button type="button" data-mode="const">Constant</button><button type="button" data-mode="curve">Curve</button></div>
+            <div id="speedConst">
+              <div class="segmented six" data-bind="clip.speed" data-num="1"><button data-value="0.25" type="button">¼×</button><button data-value="0.5" type="button">½×</button><button data-value="1" type="button">1×</button><button data-value="1.5" type="button">1.5×</button><button data-value="2" type="button">2×</button><button data-value="4" type="button">4×</button></div>
+              <div class="slider-row"><label>Fine speed</label><input type="range" min="0.25" max="4" step="0.05" data-bind="clip.speed" /><output data-out="clip.speed" data-fmt="x"></output></div>
+            </div>
+            <div id="speedCurve" class="speed-curve" hidden>
+              <div class="ramp-presets" id="rampPresets" role="group" aria-label="Speed curve presets"></div>
+              <svg id="rampSvg" class="ramp-svg" viewBox="0 0 300 132" role="group" aria-label="Speed curve. Tap the curve to add a point, drag a point to move it, double-tap a point to remove it."></svg>
+              <p class="hint" id="rampInfo"></p>
+              <label class="check"><input type="checkbox" id="rampSound" /> <span>Keep the sound (follows the speed, pitch kept)</span></label>
+            </div>
+            <div class="reverse-row">
+              <button class="btn secondary small" id="reverseBtn" type="button" aria-pressed="false" title="Play this clip backwards (video and sound)">↺ Reverse</button>
+              <span class="hint" id="reverseInfo" aria-live="polite"></span>
+            </div>
             <div class="slider-row"><label>Volume</label><input type="range" min="0" max="2" step="0.05" data-bind="clip.volume" /><output data-out="clip.volume" data-fmt="pct"></output><button class="kf-dia" type="button" data-action="addVolumeKey" aria-label="Keyframe the volume at the playhead" title="Keyframe the volume at the playhead (listed under Keyframes)">◆</button></div>
             <div class="clean-box" id="cleanBox" hidden>
               <div class="clean-head"><span class="label" id="cleanLabel">Clean voice</span><span class="clean-state" id="cleanState" aria-live="polite"></span></div>

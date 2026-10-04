@@ -154,3 +154,18 @@ export function removePoint(r, c, i) {
   w.pts.splice(i, 1); delete w.preset; return w;
 }
 export const clampSpeed = clampS;
+
+/** Source time reached `off` timeline seconds after the clip's start, also beyond the clip (continues at the speed of the nearest end). */
+export function sourceBeyond(c, off) {
+  const len = lengthOf(c);
+  if (off >= 0 && off <= len) return sourceAtOffset(c, off);
+  const rate = (src) => (c.ramp ? speedAt(c.ramp, src) : (c.speed || 1));
+  if (off > len) { const e = c.reverse ? c.in : c.out; return e + (c.reverse ? -1 : 1) * (off - len) * rate(e); }
+  const b = c.reverse ? c.out : c.in; return b + (c.reverse ? 1 : -1) * (-off) * rate(b);
+}
+/** After trimming (old clip -> new clip), how many timeline seconds earlier the footage that was at the old start now sits: keyframes move by this. */
+export function startShift(oldC, newC) {
+  const src = newC.reverse ? newC.out : newC.in, was = oldC.reverse ? oldC.out : oldC.in;
+  const ahead = newC.reverse ? src < was : src > was; // trimmed into the clip (true) or extended outward
+  return ahead ? offsetOfSource(oldC, src) : -offsetOfSource(newC, was);
+}
