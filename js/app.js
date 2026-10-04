@@ -1,7 +1,7 @@
 // Video Editor Pro — main controller
 import { initInstall } from './install.js';
-import { initConnect } from './connect-ui.js';
-import { shareOrDownload } from './connect.js';
+import { initAddMedia } from './add-media-ui.js';
+import { shareOrDownload } from './media-link.js';
 import { BUILD } from './build.js';
 import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar, perf, startLongTaskMonitor, stripExt } from './util.js';
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
@@ -1127,7 +1127,6 @@ async function importFiles(files, where = 'auto') {
   } else setSaveState(app.rev === app.savedRev ? 'saved' : 'dirty');
 }
 $('videoInput').onchange = e => { importFiles(e.target.files); e.target.value = ''; };
-$('addInput').onchange = e => { importFiles(e.target.files); e.target.value = ''; };
 $('musicInput').onchange = e => { importFiles(e.target.files); e.target.value = ''; };
 $('logoInput').onchange = async e => {
   const f = e.target.files[0]; e.target.value = '';
@@ -2257,9 +2256,9 @@ window.addEventListener('resize', debounce(() => { sizeStage(); if (timeline.aut
 window.addEventListener('pagehide', () => { scheduleSave.flush(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { player.pause(); scheduleSave.flush(); } });
 
-// ---------------------------------------------------------------- Connect tab + files shared from other apps
-const connect = initConnect({ importFiles, showTab });
-app.connect = connect;
+// ---------------------------------------------------------------- Add media dialog + files shared from other apps
+const addMedia = initAddMedia({ importFiles, openDialog, closeDialog });
+app.addMedia = addMedia;
 let inboxBusy = null;
 /** Take what the service worker stored from the OS share sheet (files, or a link) and put it into the project. */
 function consumeInbox() {
@@ -2270,7 +2269,7 @@ function consumeInbox() {
     const files = inbox.filter(x => x.blob).map(x => new File([x.blob], x.name || 'shared', { type: x.type || x.blob.type || '' }));
     const link = inbox.find(x => x.link);
     if (files.length) { showTab('clip'); toast(`Received ${files.length} shared file${files.length > 1 ? 's' : ''}…`, 2500); await importFiles(files); }
-    if (link && connect.receiveLink(link.link)) toast('A link was shared. Tap Import in the Connect tab to download it.', 5000);
+    if (link && addMedia.receiveLink(link.link)) toast('A link was shared. Tap Import to download it.', 5000);
     await db.inboxDelete(inbox.map(x => x.id)).catch(() => { });
   })().catch(e => { console.warn(e); toast('The shared files could not be added: ' + (e.message || e), 5000); }).finally(() => { inboxBusy = null; });
   return inboxBusy;

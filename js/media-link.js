@@ -1,4 +1,4 @@
-// Integrations ("Connect" tab): pure logic, no DOM. A browser can't drive other sites, so this covers what it CAN do:
+// Add media from a link and files shared in from other apps: pure logic, no DOM (the dialog is add-media-ui.js). A browser can't drive other sites, so this covers what it CAN do:
 // receive files shared from other apps (Web Share Target, see sw.js), download a media file from an https link (CORS),
 // and share results out.
 // Nothing here ever sends project data anywhere: the only requests are GETs of the links the user typed.
@@ -34,7 +34,7 @@ export function extractUrl(text) {
 }
 
 // ---- import from link
-export class ConnectError extends Error { constructor(code, message) { super(message); this.name = 'ConnectError'; this.code = code; } }
+export class LinkError extends Error { constructor(code, message) { super(message); this.name = 'LinkError'; this.code = code; } }
 const EXT_TYPE = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', '3gp': 'video/3gpp', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif', heic: 'image/heic', heif: 'image/heif' };
 const TYPE_EXT = { 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/ogg': 'ogg', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 const GENERIC = /^(application\/octet-stream|binary\/octet-stream|application\/x-binary|application\/download|application\/force-download)?$/;
@@ -47,33 +47,33 @@ export function nameFromUrl(url, type) {
   if (!/\.[a-z0-9]{2,5}$/i.test(n)) { const e = TYPE_EXT[type]; if (e) n += '.' + e; }
   return n;
 }
-/** Decide what a response is from its content type and URL: returns the media type to use, or throws ConnectError('notmedia'). */
+/** Decide what a response is from its content type and URL: returns the media type to use, or throws LinkError('notmedia'). */
 export function mediaTypeOf(contentType, url) {
   const ct = String(contentType || '').split(';')[0].trim().toLowerCase();
-  if (/^(video|audio|image)\//.test(ct)) { if (ct === 'image/svg+xml') throw new ConnectError('notmedia', 'SVG drawings are not supported. Use a PNG or JPG image.'); return ct; }
-  if (/mpegurl/.test(ct)) throw new ConnectError('notmedia', 'That link is a streaming playlist (HLS), not a single video file.');
+  if (/^(video|audio|image)\//.test(ct)) { if (ct === 'image/svg+xml') throw new LinkError('notmedia', 'SVG drawings are not supported. Use a PNG or JPG image.'); return ct; }
+  if (/mpegurl/.test(ct)) throw new LinkError('notmedia', 'That link is a streaming playlist (HLS), not a single video file.');
   if (GENERIC.test(ct) || ct === 'application/mp4' || ct === 'application/ogg') {
     const ext = ((/\.([a-z0-9]{2,5})(?:$|[?#])/i.exec((() => { try { return new URL(url).pathname; } catch { return ''; } })()) || [])[1] || '').toLowerCase();
     if (EXT_TYPE[ext]) return EXT_TYPE[ext];
   }
-  if (/^text\/html|application\/xhtml/.test(ct)) throw new ConnectError('notmedia', 'That link is a web page, not a media file. Open the page, then copy the address of the video file itself (it usually ends in .mp4, .mov, .mp3 or .jpg).');
-  throw new ConnectError('notmedia', 'That link is not a video, photo or audio file' + (ct ? ' (the server says it is ' + ct + ')' : '') + '.');
+  if (/^text\/html|application\/xhtml/.test(ct)) throw new LinkError('notmedia', 'That link is a web page, not a media file. Open the page, then copy the address of the video file itself (it usually ends in .mp4, .mov, .mp3 or .jpg).');
+  throw new LinkError('notmedia', 'That link is not a video, photo or audio file' + (ct ? ' (the server says it is ' + ct + ')' : '') + '.');
 }
 
 /**
  * Download one media file. opts: { signal, onProgress(loaded, total|0), maxBytes }.
- * Errors are ConnectError with code: badurl | offline | cors | unreachable | http | notmedia | toolarge | cancelled.
+ * Errors are LinkError with code: badurl | offline | cors | unreachable | http | notmedia | toolarge | cancelled.
  */
 export async function fetchMedia(input, opts = {}) {
-  const p = parseHttpsUrl(input); if (!p.ok) throw new ConnectError('badurl', p.error);
+  const p = parseHttpsUrl(input); if (!p.ok) throw new LinkError('badurl', p.error);
   const { signal, onProgress } = opts, maxBytes = opts.maxBytes || LIMITS.urlBytes;
-  const cancelled = () => new ConnectError('cancelled', 'Download cancelled.');
+  const cancelled = () => new LinkError('cancelled', 'Download cancelled.');
   let res;
   try {
     res = await fetch(p.url, { mode: 'cors', credentials: 'omit', redirect: 'follow', referrerPolicy: 'no-referrer', cache: 'no-store', signal });
   } catch (e) {
     if (signal && signal.aborted) throw cancelled();
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new ConnectError('offline', 'You are offline. Connect to the internet and try again.');
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new LinkError('offline', 'You are offline. Connect to the internet and try again.');
     // A blocked cross-origin read and a dead server both look the same to a page. Probe with an opaque request: if the server
     // answers, it is reachable and simply doesn't allow other websites to read the file (CORS).
     let reachable = false;
@@ -83,14 +83,14 @@ export async function fetchMedia(input, opts = {}) {
       clearTimeout(t); reachable = !!r; ac.abort();
     } catch { /* unreachable */ }
     if (signal && signal.aborted) throw cancelled();
-    if (reachable) throw new ConnectError('cors', 'This site does not allow other apps to download its files (CORS), so it cannot be imported from a link. Download the file in your browser, then add it with Add clips.');
-    throw new ConnectError('unreachable', 'Could not reach that address. You may be offline, the link may be wrong, or the site may be down.');
+    if (reachable) throw new LinkError('cors', 'This site does not allow other apps to download its files (CORS), so it cannot be imported from a link. Download the file in your browser, then add it with Add clips.');
+    throw new LinkError('unreachable', 'Could not reach that address. You may be offline, the link may be wrong, or the site may be down.');
   }
-  if (!res.url || !/^https:/i.test(res.url)) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw new ConnectError('badurl', 'That link redirected somewhere that is not https, so it was not downloaded.'); }
-  if (!res.ok) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw new ConnectError('http', `The server answered “${res.status}${res.statusText ? ' ' + res.statusText : ''}”. ${res.status === 404 ? 'The file was not found.' : res.status === 401 || res.status === 403 ? 'The file needs a login or is not shared publicly.' : 'Try again later.'}`); }
+  if (!res.url || !/^https:/i.test(res.url)) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw new LinkError('badurl', 'That link redirected somewhere that is not https, so it was not downloaded.'); }
+  if (!res.ok) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw new LinkError('http', `The server answered “${res.status}${res.statusText ? ' ' + res.statusText : ''}”. ${res.status === 404 ? 'The file was not found.' : res.status === 401 || res.status === 403 ? 'The file needs a login or is not shared publicly.' : 'Try again later.'}`); }
   let type; try { type = mediaTypeOf(res.headers.get('content-type'), res.url); } catch (e) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw e; }
   const total = parseInt(res.headers.get('content-length') || '0', 10) || 0; // only readable when the server exposes it
-  const tooBig = () => new ConnectError('toolarge', `That file is larger than ${Math.round(maxBytes / 1048576)} MB, which is more than this device can safely hold while downloading. Download it in your browser and add it with Add clips.`);
+  const tooBig = () => new LinkError('toolarge', `That file is larger than ${Math.round(maxBytes / 1048576)} MB, which is more than this device can safely hold while downloading. Download it in your browser and add it with Add clips.`);
   if (total > maxBytes) { try { res.body && res.body.cancel(); } catch { /* ignore */ } throw tooBig(); }
   const chunks = []; let loaded = 0;
   if (res.body && res.body.getReader) {
@@ -101,13 +101,13 @@ export async function fetchMedia(input, opts = {}) {
         loaded += value.byteLength; if (loaded > maxBytes) { rd.cancel().catch(() => { }); throw tooBig(); }
         chunks.push(value); onProgress && onProgress(loaded, total);
       }
-    } catch (e) { if (e instanceof ConnectError) throw e; if (signal && signal.aborted) throw cancelled(); throw new ConnectError('unreachable', 'The download was interrupted. Check your connection and try again.'); }
+    } catch (e) { if (e instanceof LinkError) throw e; if (signal && signal.aborted) throw cancelled(); throw new LinkError('unreachable', 'The download was interrupted. Check your connection and try again.'); }
   } else { const b = await res.blob(); if (b.size > maxBytes) throw tooBig(); chunks.push(b); loaded = b.size; onProgress && onProgress(loaded, loaded); }
   if (signal && signal.aborted) throw cancelled();
-  if (!loaded) throw new ConnectError('notmedia', 'The file is empty.');
+  if (!loaded) throw new LinkError('notmedia', 'The file is empty.');
   const name = nameFromUrl(res.url, type);
   const file = new File(chunks, name, { type });
-  if (!/^(video|audio|image)\//.test(type)) throw new ConnectError('notmedia', 'That is not a video, photo or audio file.');
+  if (!/^(video|audio|image)\//.test(type)) throw new LinkError('notmedia', 'That is not a video, photo or audio file.');
   return file;
 }
 

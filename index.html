@@ -125,14 +125,13 @@
         <button data-tab="audio" type="button" role="tab">Audio</button>
         <button data-tab="pip" type="button" role="tab">PiP</button>
         <button data-tab="look" type="button" role="tab">Looks</button>
-        <button data-tab="connect" type="button" role="tab">Connect</button>
       </div>
 
       <!-- CLIP -->
       <div class="tab-panel active" id="tab-clip">
         <section class="section">
-          <div class="section-head"><h2>Media</h2><label class="btn ghost" for="addInput">＋ Add clips</label><input id="addInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.heic,.heif,.gif,.mov,.mp4,.m4v,.webm" multiple /></div>
-          <p class="hint" id="clipEmptyHint">Select a clip on the timeline to trim it, change speed, volume, framing and color (transitions have their own tab). Images become title cards.</p>
+          <div class="section-head"><h2>Media</h2></div>
+          <p class="hint" id="clipEmptyHint">Select a clip on the timeline to trim it, change speed, volume, framing and color (transitions have their own tab). Images become title cards. Add more media with <b>＋ Media</b> on the timeline toolbar, or drag files in.</p>
         </section>
         <div id="clipPanel" hidden>
           <div class="offline-banner" id="offlineBanner" hidden>
@@ -646,42 +645,12 @@
         </section>
       </div>
 
-
-      <!-- CONNECT -->
-      <div class="tab-panel" id="tab-connect">
-        <section class="section" id="cnBring">
-          <div class="section-head"><h2>Add media</h2></div>
-          <div class="button-row">
-            <label class="btn primary" for="cloudInput" id="cloudBtn">Add from Drive, Photos or Files</label>
-            <input id="cloudInput" type="file" accept="video/*,image/*,audio/*" multiple />
-          </div>
-          <p class="hint" style="margin-top:8px">Opens your device's file picker. On Android, use the picker's menu to reach Google Drive and Photos; on iPhone choose Files or Photo Library. You can drag any of them to any lane or time on the timeline afterwards.</p>
-        </section>
-        <section class="section" id="cnLink">
-          <div class="section-head"><h2>Import from a link</h2></div>
-          <label class="label" for="linkInput">Direct address of a video, photo or audio file</label>
-          <div class="link-row">
-            <input class="field" id="linkInput" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://example.com/clip.mp4" aria-describedby="linkMsg" />
-            <button class="btn primary" id="linkGo" type="button">Import</button>
-          </div>
-          <div class="link-progress" id="linkProgress" hidden>
-            <div class="progress-track"><div class="progress-bar" id="linkBar"></div></div>
-            <div class="link-progress-row"><span id="linkStat" class="mono">Starting…</span><button class="btn secondary small" id="linkCancel" type="button">Cancel</button></div>
-          </div>
-          <p class="hint" id="linkMsg" role="status" aria-live="polite"></p>
-          <p class="hint">https:// only, and the site must allow other websites to download the file (CORS). Many don't; then download the file in your browser and use the button above. Only the link is fetched; nothing from your project is sent anywhere.</p>
-        </section>
-        <section class="section" id="cnShare">
-          <div class="section-head"><h2>Share in and out</h2></div>
-          <p class="hint" id="shareHint"><b>In:</b> once the editor is installed (browser menu, Install app or Add to Home screen), Share in Photos, Files, Drive or a browser lists Video Editor. Not available in iPhone Safari.</p>
-          <p class="hint" style="margin-top:6px"><b>Out:</b> the Share buttons after an export and in the Thumbnail maker open your device's share sheet, or download the file if sharing isn't supported.</p>
-        </section>
-      </div>
-
     </aside>
 
     <div class="timeline-panel">
       <div class="tl-toolbar" role="toolbar" aria-label="Timeline tools">
+        <button class="tool" id="addMediaBtn" type="button" aria-haspopup="dialog" title="Add media: choose files, or import from a link"><b aria-hidden="true">＋</b><span>Media</span></button>
+        <i class="sep"></i>
         <button class="tool" data-action="split" type="button" title="Split the selected item at the playhead (S)">✂<span>Split</span></button>
         <button class="tool" data-action="duplicate" type="button" title="Duplicate selected (Ctrl+D)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3.5V3a1.5 1.5 0 0 0-1.5-1.5h-6A1.5 1.5 0 0 0 2 3v6a1.5 1.5 0 0 0 1.5 1.5H4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>Duplicate</span></button>
         <button class="tool" data-action="delete" type="button" title="Delete selected (Del)">🗑<span>Delete</span></button>
@@ -732,6 +701,30 @@
     <p class="caps hint" id="capsNote"></p>
   </section>
 </main>
+
+<!-- Add media (choose files / import from a link) -->
+<dialog class="sheet" id="addMediaDialog" aria-labelledby="amTitle">
+  <div class="sheet-head"><h2 id="amTitle">Add media</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
+  <div class="button-row">
+    <label class="btn primary" for="addInput" id="addBtn">Choose videos, photos or audio…</label>
+    <input id="addInput" type="file" accept="video/*,image/*,audio/*" multiple />
+  </div>
+  <p class="hint" style="margin-top:8px">Opens your device's file picker. On Android, use the picker's menu to reach Google Drive and Photos; on iPhone choose Files or Photo Library. Afterwards you can drag anything to any lane or time on the timeline.</p>
+  <section class="section" id="amLink">
+    <label class="label" for="linkInput">Or paste a direct link to a video, photo or audio file</label>
+    <div class="link-row">
+      <input class="field" id="linkInput" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://example.com/clip.mp4" aria-describedby="linkMsg" />
+      <button class="btn primary" id="linkGo" type="button">Import</button>
+    </div>
+    <div class="link-progress" id="linkProgress" hidden>
+      <div class="progress-track"><div class="progress-bar" id="linkBar"></div></div>
+      <div class="link-progress-row"><span id="linkStat" class="mono">Starting…</span><button class="btn secondary small" id="linkCancel" type="button">Cancel</button></div>
+    </div>
+    <p class="hint" id="linkMsg" role="status" aria-live="polite"></p>
+    <p class="hint">https:// only, and the site must allow other websites to download the file (CORS). Many don't; then download the file in your browser and use the button above. Only the link is fetched; nothing from your project is sent anywhere.</p>
+  </section>
+  <p class="hint" id="shareHint"><b>Share in:</b> once the editor is installed (browser menu, Install app or Add to Home screen), Share in Photos, Files, Drive or a browser lists Video Editor. Not available in iPhone Safari.</p>
+</dialog>
 
 <!-- Projects -->
 <dialog class="sheet" id="projectsDialog" aria-labelledby="projectsTitle">

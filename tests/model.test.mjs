@@ -164,8 +164,8 @@ test('item names: defaults, trimming to 80 chars, blank clip names fall back, la
   assert.equal(blurLabel({ name: 'Face' }), 'Face');
 });
 
-test('connect: https-only URL validation, shared-text link extraction', async () => {
-  const c = await import('../js/connect.js');
+test('media link: https-only URL validation, shared-text link extraction', async () => {
+  const c = await import('../js/media-link.js');
   const good = { 'https://a.com/x.mp4': 'https://a.com/x.mp4', 'a.com/x': 'https://a.com/x', '//a.com/x': 'https://a.com/x', 'a.com:8080/x': 'https://a.com:8080/x', '  https://A.com/Path?q=1  ': 'https://a.com/Path?q=1' };
   for (const [i, o] of Object.entries(good)) assert.deepEqual(c.parseHttpsUrl(i), { ok: true, url: o }, i);
   for (const bad of ['', 'javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,hi', 'blob:https://a.com/x', 'file:///etc/passwd', 'http://a.com', 'ftp://a.com', 'https://u:p@a.com', 'https://a b.com', 'localhost', 'https://localhost/', 'https:a.com', 'x'.repeat(3000)]) assert.equal(c.parseHttpsUrl(bad).ok, false, bad);
@@ -173,8 +173,8 @@ test('connect: https-only URL validation, shared-text link extraction', async ()
   assert.equal(c.extractUrl('no link'), '');
 });
 
-test('connect: media type / file name detection', async () => {
-  const c = await import('../js/connect.js');
+test('media link: media type / file name detection', async () => {
+  const c = await import('../js/media-link.js');
   assert.equal(c.mediaTypeOf('video/mp4; codecs=avc1', 'https://a.com/x'), 'video/mp4');
   assert.equal(c.mediaTypeOf('application/octet-stream', 'https://a.com/clip.MOV?x=1'), 'video/quicktime');
   assert.equal(c.mediaTypeOf('', 'https://a.com/a.mp3'), 'audio/mpeg');

@@ -1,9 +1,9 @@
-// "Connect" tab: link import with progress, files shared in from other apps.
+// Add media dialog: choose files, import from a link (with progress), and files / links shared in from other apps.
 // Logic lives in connect.js (unit-testable); this file only wires the DOM. Nothing here sends project data anywhere.
 import { $, fmtBytes } from './util.js';
-import { parseHttpsUrl, extractUrl, fetchMedia, ConnectError, LIMITS } from './connect.js';
+import { parseHttpsUrl, extractUrl, fetchMedia, LinkError, LIMITS } from './connect.js';
 
-export function initConnect({ importFiles, showTab }) {
+export function initAddMedia({ importFiles, openDialog, closeDialog }) {
   // ------------------------------------------------------------ import from link
   const msg = (id, text, kind) => { const m = $(id); m.textContent = text; m.classList.toggle('err', kind === 'err'); m.classList.toggle('okm', kind === 'ok'); };
   let job = null;
@@ -30,14 +30,15 @@ export function initConnect({ importFiles, showTab }) {
       await importFiles([file]);
       msg('linkMsg', `Added ${file.name} (${fmtBytes(file.size)}) to the project.`, 'ok'); $('linkInput').value = '';
     } catch (e) {
-      if (e instanceof ConnectError) msg('linkMsg', e.code === 'cancelled' ? 'Download cancelled.' : e.message, e.code === 'cancelled' ? '' : 'err');
+      if (e instanceof LinkError) msg('linkMsg', e.code === 'cancelled' ? 'Download cancelled.' : e.message, e.code === 'cancelled' ? '' : 'err');
       else { console.warn(e); msg('linkMsg', 'Something went wrong: ' + (e && e.message || e), 'err'); }
     } finally { job = null; setBusy(false); }
   }
   $('linkGo').onclick = () => importLink($('linkInput').value);
   $('linkInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); importLink($('linkInput').value); } });
   $('linkCancel').onclick = () => { if (job) job.abort(); };
-  $('cloudInput').onchange = (e) => { importFiles(e.target.files); e.target.value = ''; };
+  $('addInput').onchange = (e) => { const fs = [...e.target.files]; e.target.value = ''; closeDialog('addMediaDialog'); importFiles(fs); };
+  $('addMediaBtn').onclick = () => openDialog('addMediaDialog');
 
   // Earlier builds kept a list of website shortcuts here; that feature is gone, so drop its leftover data.
   try { localStorage.removeItem('ve.sites'); } catch { /* storage blocked */ }
@@ -46,7 +47,7 @@ export function initConnect({ importFiles, showTab }) {
     /** A link arrived from another app (share sheet): show it in the import box, ready to import. */
     receiveLink(text) {
       const u = extractUrl(text); if (!u) return false;
-      showTab('connect'); $('linkInput').value = u; msg('linkMsg', 'A link was shared with the editor. Tap Import to download it if it is a direct media file.');
+      openDialog('addMediaDialog'); $('linkInput').value = u; msg('linkMsg', 'A link was shared with the editor. Tap Import to download it if it is a direct media file.');
       return true;
     },
   };
