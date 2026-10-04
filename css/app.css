@@ -855,3 +855,10 @@ body.ws .publish>.progress,body.ws .publish>.export-result,body.ws .publish>.che
 .menu-check{width:16px;flex:none;color:var(--accent);font-weight:700}
 .menu-item[aria-checked=true] .menu-check::before{content:"✓"}
 @media (pointer:coarse){.menu-item{min-height:44px}}
+body.ws .publish{row-gap:0}
+body.ws .export-settings{display:flex;flex-wrap:wrap;gap:6px 10px;justify-content:flex-end}
+body.ws .export-settings label{display:flex;align-items:center;gap:6px}
+body.ws .export-settings .label{margin:0;white-space:nowrap}
+body.ws .export-settings select{min-height:34px;padding:5px 8px}
+body.ws .publish>.check{margin-top:2px}
+body.ws .publish>.caps:empty{display:none}

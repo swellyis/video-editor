@@ -256,7 +256,7 @@ export function initLayout(ctx) {
 
   // ---------------------------------------------------------------- Layout menu
   function buildMenu() {
-    const item = (role, label, fn, extra = {}) => { const b = el('button', { class: 'menu-item', type: 'button', role, tabindex: '-1', ...extra }, el('span', { class: 'menu-check', 'aria-hidden': 'true' }), el('span', { text: label })); b.addEventListener('click', () => { fn(); if (role === 'menuitem') closeMenu(); }); return b; };
+    const item = (role, label, fn, extra = {}) => { const b = el('button', { class: 'menu-item', type: 'button', role, tabindex: '-1', ...extra }, el('span', { class: 'menu-check', 'aria-hidden': 'true' }), el('span', { text: label })); b.addEventListener('click', () => { fn(); closeMenu(); }); return b; };
     menu = el('div', { class: 'layout-menu', id: 'layoutMenu', role: 'menu', 'aria-label': 'Layout', hidden: '' });
     menu.append(el('div', { class: 'menu-label', text: 'Presets' }));
     for (const k of Object.keys(L.PRESETS)) menu.append(item('menuitemradio', L.PRESET_LABELS[k], () => set(L.applyPreset(st, k)), { 'data-preset': k }));
