@@ -98,14 +98,19 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
       console.warn('Shorts: voice analysis failed', e); return null;
     } finally { S.job = null; }
   }
+  /** Quick checks before the dialog opens: something on the timeline, and its video is on this device. Returns false (with a toast) if not. */
+  async function precheck() {
+    const p = app.project;
+    if (!p.clips.length) { toast('Add your sermon video to the timeline first, then find Shorts.', 4500); return false; }
+    const recs = await Promise.all(p.clips.filter(c => c.kind === 'video').map(c => media.get(c.mediaId)));
+    if (!recs.length || recs.every(r => !r || !r.blob)) { toast('The video for this project is missing on this device (red clip). Relink it first, then find Shorts.', 6000); return false; }
+    return true;
+  }
   async function analyse() {
     const my = ++S.epoch, p = app.project;
     stopPreview(); S.cands = []; S.on = new Set(); S.made = []; S.busy = false;
     $('shNote').textContent = ''; $('shIntro').hidden = false;
-    if (!p.clips.length) { show([]); toast('Add your sermon video to the timeline first.', 4000); return false; }
     const lay = layout(p); S.total = lay.total;
-    const recs = await Promise.all(p.clips.filter(c => c.kind === 'video').map(c => media.get(c.mediaId)));
-    if (!recs.length || recs.every(r => !r || !r.blob)) { show([]); toast('The video for this project is missing on this device (red clip). Relink it first, then find Shorts.', 6000); return false; }
     if (!(p.captions || []).length) { show(['shNeed']); return true; }
     S.words = wordsOf(p.captions);
     show(['shScan']);
@@ -168,6 +173,6 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
   $('shortsDialog').addEventListener('close', () => { S.epoch++; stopPreview(); if (S.job) S.job.abort(); v.removeAttribute('src'); delete v.dataset.url; v.load(); });
   return {
     state: S,
-    async open() { openDialog('shortsDialog'); applyOffset(); await analyse(); },
+    async open() { if (!(await precheck())) return; openDialog('shortsDialog'); applyOffset(); await analyse(); },
   };
 }
