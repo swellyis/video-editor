@@ -13,7 +13,7 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
   if (!$('shortsDialog') || !$('shList')) return { open() { toast('This copy of the page is out of date. Reload it to use Shorts.', 5000); }, state: {} }; // stale cached page
   const S = { cands: [], on: new Set(), words: [], total: 0, env: null, envKey: '', job: null, playing: null, made: [], busy: false, epoch: 0 };
   const show = (ids) => { for (const id of ['shNeed', 'shScan', 'shResults', 'shDone']) $(id).hidden = !ids.includes(id); };
-  const v = $('shVideo');
+  const v = $('shVideo'); $('shScan').classList.add('show'); // (the hidden attribute decides when it is visible)
 
   // ------------------------------------------------------------ preview (the source file itself, in a 9:16 window; nothing is loaded into memory)
   function stopPreview() { try { v.pause(); } catch { /* gone */ } S.playing = null; $('shPrevCap').textContent = ''; for (const c of document.querySelectorAll('.sh-card.playing')) c.classList.remove('playing'); }
