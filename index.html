@@ -150,6 +150,11 @@
             <div id="imageDurBlock" hidden>
               <div class="slider-row"><label>Duration</label><input type="range" id="imageDur" min="0.5" max="30" step="0.5" /><output id="imageDurOut">4s</output></div>
             </div>
+            <div id="freezeBlock" class="freeze-block">
+              <div class="slider-row"><label for="freezeDur">Freeze for</label><input type="range" id="freezeDur" min="0.5" max="10" step="0.5" value="2" /><output id="freezeDurOut">2s</output></div>
+              <button class="btn secondary small" type="button" data-action="freezeFrame" id="freezeBtn" title="Freeze the frame at the playhead: splits the clip and holds that frame">❄ Freeze frame at playhead</button>
+              <p class="hint" id="freezeHint">Splits this clip at the playhead and holds that frame as a still image.</p>
+            </div>
             <div class="button-row" style="margin-top:12px">
               <button class="btn secondary" data-action="moveLeft" type="button" aria-label="Move earlier">←</button>
               <button class="btn secondary" data-action="moveRight" type="button" aria-label="Move later">→</button>

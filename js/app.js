@@ -29,6 +29,7 @@ import { initShorts } from './shorts-ui.js';
 import { initMatch } from './match-ui.js';
 import { FILTERS, GROUPS as FILTER_GROUPS } from './filters.js';
 import { Timeline } from './timeline.js';
+import { insertFreeze, freezeTarget, freezeLen, FREEZE_DEFAULT } from './freeze.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
 import { initLayout } from './layout-ui.js';
@@ -425,7 +426,7 @@ function fillInspector() {
     $('clipTitle').textContent = (c.kind === 'image' ? 'Image ' : 'Clip ') + (it.index + 1) + ' of ' + lay.items.length;
     $('clipLenLabel').textContent = fmt(it.len) + ' on timeline';
     const isImg = c.kind === 'image';
-    $('trimBlock').hidden = isImg; $('imageDurBlock').hidden = !isImg; $('speedSection').hidden = isImg;
+    $('trimBlock').hidden = isImg; $('imageDurBlock').hidden = !isImg; $('speedSection').hidden = isImg; $('freezeBlock').hidden = isImg;
     if (isImg) { $('imageDur').value = c.out - c.in; $('imageDurOut').textContent = (c.out - c.in).toFixed(1) + 's'; }
     else {
       const d = c.srcDuration > 0 ? c.srcDuration : Math.max(c.out, 0.01); // media with an unknown duration
@@ -561,6 +562,7 @@ $('clipIn').addEventListener('change', () => { if (trimFrom('inputs')) trimCommi
 $('clipOut').addEventListener('change', () => { if (trimFrom('inputs')) trimCommit(); });
 $('imageDur').addEventListener('input', () => { const c = selected('clip'); if (!c) return; const b = layout(app.project); app._pendingTrimRipple = app._pendingTrimRipple || { end: b.items.find(i => i.clip.id === c.id).end, total: b.total, id: c.id, lay0: b }; c.out = c.in + parseFloat($('imageDur').value); app.liveUpdate(); });
 $('imageDur').addEventListener('change', trimCommit);
+$('freezeDur').addEventListener('input', () => { $('freezeDurOut').textContent = (+$('freezeDur').value).toFixed(1).replace(/\.0$/, '') + 's'; });
 $('audioLenInput').addEventListener('change', () => {
   const a = selected('audio'); if (!a) return; const l = parseFloat($('audioLenInput').value); if (!(l > 0)) return;
   if (a.loop) a.loopLen = Math.max(0.2, l); // looped: how long it repeats on the timeline
@@ -654,6 +656,32 @@ const actions = {
     else return toast(TOOL_HINT.delete.none);
     const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', caption: 'Caption', marker: 'Marker' }[s.type];
     app.selection = null; app.commit('Delete'); toast(what + ' deleted. Undo (Ctrl+Z) brings it back.');
+  },
+  async freezeFrame() {
+    const p = app.project, t = player.t, tg = freezeTarget(p, t);
+    if (tg.fail) return toast(tg.fail);
+    const c = tg.it.clip, url = media.url(c.mediaId);
+    if (!url) return toast('This clip\'s file is not stored on this device, so a frame cannot be taken. Relink it first.');
+    const btn = $('freezeBtn'); if (btn.dataset.busy) return; btn.dataset.busy = '1'; btn.textContent = 'Taking the frame…';
+    try {
+      player.pause();
+      const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto';
+      const src = await thumbVideoAt(v, url, tg.srcTime);
+      if (!src || !src.w) throw new Error('this browser could not decode the video here');
+      const k = Math.min(1, 2560 / Math.max(src.w, src.h)), cv = document.createElement('canvas');
+      cv.width = Math.round(src.w * k); cv.height = Math.round(src.h * k);
+      cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+      const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.95));
+      if (!blob) throw new Error('could not save the frame');
+      const rec = await media.importFile(new File([blob], 'Freeze ' + (c.name || 'frame') + ' ' + fmt(tg.srcTime) + '.jpg', { type: 'image/jpeg' }), 'image');
+      v.removeAttribute('src'); v.load();
+      const r = insertFreeze(app.project, t, rec, +$('freezeDur').value || FREEZE_DEFAULT);
+      if (r.fail) return toast(r.fail);
+      app.selection = { type: 'clip', id: r.freeze.id };
+      app.commit('Freeze frame'); if (timeline.autoFit) timeline.fit();
+      toast('Froze the frame for ' + freezeLen(+$('freezeDur').value || FREEZE_DEFAULT) + ' s. Undo (Ctrl+Z) takes it back.');
+    } catch (e) { console.warn('Freeze frame', e); toast('Could not freeze a frame: ' + (e && e.message ? e.message : 'unknown error')); }
+    finally { delete btn.dataset.busy; btn.textContent = '❄ Freeze frame at playhead'; }
   },
   volumeDown(_b, ev) { stepSelectedVolume(-1, ev); },
   volumeUp(_b, ev) { stepSelectedVolume(1, ev); },
