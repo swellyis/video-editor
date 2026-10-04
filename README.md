@@ -70,6 +70,7 @@ The app is plain static files (HTML, CSS and ES modules). There's no build step.
   - **Layout menu** (header): presets *Default*, *Editing (large timeline)*, *Preview focus*, *Compact*; show/hide Library and Properties; *Swap left / right*; *Reset layout*. Tablets and small laptops start with *Compact*.
   - The arrangement is saved in this browser's localStorage, separately for small / medium / large windows (`ve.layout.v1.<md|lg|xl>`).
   - Media bin: click a thumbnail to select it on the timeline, **＋** adds it again (music at the playhead), or drag it onto the timeline / preview.
+  - Prefer the old single column on a big screen? Open the app with `?layout=classic` (used by the pixel-comparison tests, since the preview is larger in the workspace).
   - Not built: free floating panels and docking to the bottom; panels dock left or right only.
 
 - **Keyboard:** shortcuts only act when you aren't typing, and a focused control keeps its own keys (arrows move a focused slider, Space presses a focused button). Every slider has a label and announces its current value. Press Tab to reach the timeline items: Enter selects, ←/→ nudges by a frame (Shift: 1 s; main clips swap with their neighbour), Alt+←/→ trims the end. Tabs support arrow keys. `[` and `]` lower and raise the selected item's volume (see above).

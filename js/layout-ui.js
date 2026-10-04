@@ -16,6 +16,8 @@ const RAIL = [ // data-tab, label, icon, library panel id
 ];
 const PROPS = { clip: ['tab-clip', 'Clip'], text: ['prop-text', 'Text'], audio: ['prop-audio', 'Audio track'], overlay: ['prop-pip', 'Picture-in-picture'], caption: ['prop-captions', 'Caption'], blur: ['prop-blur', 'Blur region'] };
 
+const CLASSIC = (() => { try { return new URLSearchParams(location.search).get('layout') === 'classic'; } catch { return false; } })();
+
 export function initLayout(ctx) {
   const { $, qs, qsa, app, media, addToTimeline, resized } = ctx;
   const editor = qs('.editor'), stageCol = qs('.stage-column'), inspector = qs('.inspector'), tabsEl = qs('.tabs');
@@ -327,7 +329,7 @@ export function initLayout(ctx) {
   // ---------------------------------------------------------------- window size + hotkeys
   let rt = 0;
   function check() {
-    const want = L.isWorkspace(window.innerWidth, window.innerHeight);
+    const want = L.isWorkspace(window.innerWidth, window.innerHeight) && !CLASSIC; // ?layout=classic keeps the original single-column layout at any size
     if (want && !on) { enable(); ctx.afterToggle && ctx.afterToggle(true); }
     else if (!want && on) { disable(); ctx.afterToggle && ctx.afterToggle(false); }
     else if (on) { const k = L.storageKey(window.innerWidth); if (k !== key) { save(); load(); } draw(); resized && resized(); }
