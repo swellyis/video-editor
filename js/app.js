@@ -1282,8 +1282,8 @@ function showTab(name) {
 
 // preset chips + fonts
 { // the project-wide filter picker uses the same library as the Looks tab
-  const sel = $('globalFilter'); sel.append(el('option', { value: 'none', text: 'None' }));
-  for (const g of FILTER_GROUPS) { const og = el('optgroup', { label: g }); for (const f of FILTERS.filter(x => x.group === g)) og.append(el('option', { value: f.id, text: f.label })); sel.append(og); }
+  const sel = $('globalFilter'); if (sel) sel.append(el('option', { value: 'none', text: 'None' }));
+  if (sel) for (const g of FILTER_GROUPS) { const og = el('optgroup', { label: g }); for (const f of FILTERS.filter(x => x.group === g)) og.append(el('option', { value: f.id, text: f.label })); sel.append(og); }
 }
 for (const [k, v] of Object.entries(FONTS)) { $('fontSelect').append(el('option', { value: k, text: v.label })); $('thumbFont').append(el('option', { value: k, text: v.label })); }
 
