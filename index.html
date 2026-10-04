@@ -778,40 +778,137 @@
   <p class="hint">On phones: tap a timeline item to select it, then drag it or its edges. Drag the time ruler to scrub.</p>
 </dialog>
 
-<!-- Thumbnail maker -->
+<!-- Thumbnail designer: layers on a video frame / colour / picture, one design per format (js/designer.js + js/designer-ui.js) -->
 <dialog class="sheet wide" id="thumbDialog" aria-labelledby="thumbTitle">
   <div class="sheet-head"><h2 id="thumbTitle">Thumbnail maker · 1280×720</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
   <div class="thumb-grid">
-    <div class="thumb-stage">
-      <canvas id="thumbCanvas" width="1280" height="720"></canvas>
-      <div id="thumbSafe" class="thumb-safe" aria-hidden="true"></div>
+    <div class="thumb-left">
+      <div class="thumb-stage" id="thumbStage">
+        <canvas id="thumbCanvas" width="1280" height="720" aria-label="Thumbnail preview. Tap a layer to select it; drag to move."></canvas>
+        <div id="thumbSafe" class="thumb-safe" aria-hidden="true"></div>
+        <div id="thumbBadge" class="thumb-badge" aria-hidden="true" hidden><span>0:00</span></div>
+        <div id="thumbGuideV" class="th-snap v" hidden></div><div id="thumbGuideH" class="th-snap h" hidden></div>
+        <div id="thumbSel" class="th-sel" hidden>
+          <i class="th-h nw" data-h="nw"></i><i class="th-h ne" data-h="ne"></i><i class="th-h sw" data-h="sw"></i><i class="th-h se" data-h="se"></i>
+          <i class="th-h e" data-h="e"></i><i class="th-h s" data-h="s"></i><i class="th-h rot" data-h="rot"></i>
+        </div>
+      </div>
+      <div class="th-actions" id="thumbActions" role="toolbar" aria-label="Selected layer" hidden>
+        <button class="btn ghost small" id="thumbDup" type="button">⧉ Duplicate</button>
+        <button class="btn ghost small" id="thumbLock" type="button">🔓 Lock</button>
+        <button class="btn ghost small" id="thumbFront" type="button" aria-label="Bring forward" title="Bring forward">▲</button>
+        <button class="btn ghost small" id="thumbBack" type="button" aria-label="Send backward" title="Send backward">▼</button>
+        <button class="btn ghost small" id="thumbDel" type="button">🗑 Delete</button>
+      </div>
     </div>
     <div class="thumb-controls">
-      <div class="field-row">
+      <div class="th-top">
         <label><span class="label">Format</span><select id="thumbFormat"><option value="auto">Auto · match project</option><option value="16:9">Widescreen 16:9 · 1280×720</option><option value="9:16">Vertical 9:16 (Shorts) · 1080×1920</option><option value="1:1">Square 1:1 · 1080×1080</option></select></label>
-        <label><span class="label">Frame fit</span><select id="thumbFit"><option value="cover">Fill (crop)</option><option value="contain">Fit (blurred edges)</option></select></label>
+        <button class="icon-btn" id="thumbUndo" type="button" aria-label="Undo" title="Undo" disabled>↶</button>
+        <button class="icon-btn" id="thumbRedo" type="button" aria-label="Redo" title="Redo" disabled>↷</button>
       </div>
-      <div class="slider-row wide"><label>Frame</label><input type="range" id="thumbTime" min="0" max="1" step="0.01" /><output id="thumbTimeOut">00:00</output></div>
-      <button class="btn ghost small" id="thumbUsePlayhead" type="button">Use playhead frame</button>
-      <label style="display:block;margin-top:10px"><span class="label">Headline</span><textarea id="thumbText" rows="2" maxlength="80" placeholder="BIG BOLD WORDS"></textarea></label>
-      <label style="display:block;margin-top:8px"><span class="label">Small line</span><input class="field" id="thumbSub" maxlength="80" placeholder="Episode 3 · Psalm 23" /></label>
-      <div class="field-row" style="margin-top:8px">
-        <label><span class="label">Font</span><select id="thumbFont"></select></label>
-        <label><span class="label">Layout</span><select id="thumbPos"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option><option value="top">Top band</option><option value="bottom">Bottom band</option></select></label>
+      <div class="segmented six th-tabs" id="thumbTabs" role="tablist">
+        <button type="button" role="tab" data-tab="templates">Layouts</button><button type="button" role="tab" data-tab="add">Add</button><button type="button" role="tab" data-tab="edit">Edit</button>
+        <button type="button" role="tab" data-tab="layers">Layers</button><button type="button" role="tab" data-tab="bg">Backdrop</button><button type="button" role="tab" data-tab="look">Look</button>
       </div>
-      <div class="field-row" style="margin-top:8px">
-        <label><span class="label">Text color</span><input class="field color" type="color" id="thumbColor" value="#ffffff" /></label>
-        <label><span class="label">Accent</span><input class="field color" type="color" id="thumbAccent" value="#df3f34" /></label>
+
+      <div class="th-panel" id="thP-templates" role="tabpanel">
+        <p class="hint">One tap sets up a ready layout for this format (your text and layers are replaced; undo brings them back).</p>
+        <div class="th-tpl-grid" id="thTemplates"></div>
       </div>
-      <div class="slider-row wide"><label>Darken</label><input type="range" id="thumbDarken" min="0" max="0.8" step="0.02" value="0.25" /><output id="thumbDarkenOut">25%</output></div>
-      <div class="slider-row wide"><label>Text size</label><input type="range" id="thumbSize" min="60" max="220" step="2" value="128" /><output id="thumbSizeOut">128</output></div>
-      <label class="check" id="thumbPipRow"><input type="checkbox" id="thumbPip" checked /> Include picture-in-picture overlays</label>
-      <label class="check" id="thumbLogoRow"><input type="checkbox" id="thumbLogo" checked /> Include logo</label>
-      <label class="check"><input type="checkbox" id="thumbGuides" checked /> Show safe area (not saved in the image)</label>
-      <div class="field-row" style="margin-top:10px">
-        <label><span class="label">File type (JPG is kept under 2 MB)</span><select id="thumbType"><option value="jpg">JPG</option><option value="png">PNG</option></select></label>
+
+      <div class="th-panel" id="thP-add" role="tabpanel" hidden>
+        <div class="th-add-row"><button class="btn secondary" id="thAddText" type="button">＋ Text</button><button class="btn secondary" id="thAddPic" type="button">＋ Picture</button><button class="btn secondary" id="thAddLogo" type="button" hidden>＋ Logo</button></div>
+        <input type="file" id="thFile" accept="image/*" hidden />
+        <span class="label">Shapes</span><div class="th-chips" id="thShapes"></div>
+        <span class="label">Stickers</span><div class="th-chips" id="thStickers"></div>
       </div>
-      <div class="button-row" style="margin-top:12px"><button class="btn primary" id="thumbSave" type="button" style="flex:1">Download JPG</button><button class="btn secondary" id="thumbShare" type="button">Share</button></div>
+
+      <div class="th-panel" id="thP-edit" role="tabpanel" hidden>
+        <p class="hint" id="thEditNone">Tap a layer on the picture, or pick one in Layers, to edit it. Add text, pictures or stickers in Add.</p>
+        <div id="thEditBox" hidden>
+          <div id="thEditText">
+            <label style="display:block"><span class="label">Text</span><textarea id="thumbText" rows="2" maxlength="300" placeholder="BIG BOLD WORDS"></textarea></label>
+            <div class="field-row" style="margin-top:8px">
+              <label><span class="label">Font</span><select id="thumbFont"></select></label>
+              <label><span class="label">Color</span><input class="field color" type="color" id="thumbColor" value="#ffffff" /></label>
+            </div>
+            <div class="slider-row wide"><label>Size</label><input type="range" id="thumbSize" min="2" max="40" step="0.5" value="10" /><output id="thumbSizeOut">10</output></div>
+            <div class="segmented" id="thAlign" role="group" aria-label="Alignment"><button type="button" data-align="left">Left</button><button type="button" data-align="center">Center</button><button type="button" data-align="right">Right</button></div>
+            <div class="th-fxs">
+              <div class="th-fx"><label class="check"><input type="checkbox" id="thStrokeOn" /> Outline</label><input class="field color" type="color" id="thStrokeColor" aria-label="Outline color" /><input type="range" id="thStrokeW" min="0" max="0.2" step="0.005" aria-label="Outline width" /></div>
+              <div class="th-fx"><label class="check"><input type="checkbox" id="thShadowOn" /> Shadow</label><input class="field color" type="color" id="thShadowColor" aria-label="Shadow color" /><input type="range" id="thShadowB" min="0" max="1.2" step="0.05" aria-label="Shadow softness" /></div>
+              <div class="th-fx"><label class="check"><input type="checkbox" id="thGlowOn" /> Glow</label><input class="field color" type="color" id="thGlowColor" aria-label="Glow color" /><input type="range" id="thGlowB" min="0" max="1.5" step="0.05" aria-label="Glow size" /></div>
+              <div class="th-fx"><label class="check"><input type="checkbox" id="thBoxOn" /> Box</label><input class="field color" type="color" id="thBoxColor" aria-label="Box color" /><input type="range" id="thBoxPad" min="0" max="1" step="0.05" aria-label="Box padding" /></div>
+            </div>
+            <details class="th-more"><summary>Spacing &amp; case</summary>
+              <div class="slider-row wide"><label>Letters</label><input type="range" id="thSpacing" min="-0.05" max="0.4" step="0.01" /><output id="thSpacingOut">0</output></div>
+              <div class="slider-row wide"><label>Lines</label><input type="range" id="thLineH" min="0.8" max="1.8" step="0.02" /><output id="thLineHOut">1</output></div>
+              <label class="check"><input type="checkbox" id="thUpper" /> ALL CAPS</label>
+            </details>
+          </div>
+          <div id="thEditShape" hidden>
+            <div class="field-row"><label><span class="label">Shape</span><select id="thShapeKind"></select></label><label><span class="label">Fill</span><input class="field color" type="color" id="thFill" /></label></div>
+            <div class="th-fx"><label class="check"><input type="checkbox" id="thFill2On" /> Gradient to</label><input class="field color" type="color" id="thFill2" aria-label="Second color" /><span></span></div>
+            <div class="th-fx"><label class="check"><input type="checkbox" id="thShStrokeOn" /> Outline</label><input class="field color" type="color" id="thShStrokeColor" aria-label="Outline color" /><input type="range" id="thShStrokeW" min="0" max="0.05" step="0.002" aria-label="Outline width" /></div>
+            <div class="slider-row wide"><label>Corners</label><input type="range" id="thRadius" min="0" max="0.5" step="0.01" /><output id="thRadiusOut">0</output></div>
+            <label class="check"><input type="checkbox" id="thShShadow" /> Shadow</label>
+          </div>
+          <div id="thEditSticker" hidden>
+            <label><span class="label">Color (shape stickers)</span><input class="field color" type="color" id="thStColor" /></label>
+          </div>
+          <div id="thEditImage" hidden>
+            <div class="slider-row wide"><label>Corners</label><input type="range" id="thImgRadius" min="0" max="0.5" step="0.01" /><output id="thImgRadiusOut">0</output></div>
+            <div class="th-fx"><label class="check"><input type="checkbox" id="thImgBorderOn" /> Border</label><input class="field color" type="color" id="thImgBorderColor" aria-label="Border color" /><input type="range" id="thImgBorderW" min="0" max="0.04" step="0.002" aria-label="Border width" /></div>
+            <div class="th-add-row"><label class="check"><input type="checkbox" id="thImgShadow" /> Shadow</label><label class="check"><input type="checkbox" id="thImgFlip" /> Flip</label></div>
+          </div>
+          <div class="slider-row wide"><label>Opacity</label><input type="range" id="thOpacity" min="0" max="1" step="0.02" /><output id="thOpacityOut">100%</output></div>
+          <div class="slider-row wide"><label>Rotate</label><input type="range" id="thRot" min="-180" max="180" step="1" /><output id="thRotOut">0°</output></div>
+        </div>
+      </div>
+
+      <div class="th-panel" id="thP-layers" role="tabpanel" hidden>
+        <p class="hint" id="thLayersNone" hidden>No layers yet. Pick a layout or add text.</p>
+        <ul class="th-layers" id="thLayers" aria-label="Layers, top first"></ul>
+      </div>
+
+      <div class="th-panel" id="thP-bg" role="tabpanel" hidden>
+        <div class="segmented four" id="thBgType" role="group" aria-label="Backdrop"><button type="button" data-bg="frame">Video</button><button type="button" data-bg="solid">Color</button><button type="button" data-bg="gradient">Gradient</button><button type="button" data-bg="image">Picture</button></div>
+        <div id="thBgFrame">
+          <div class="slider-row wide"><label>Frame</label><input type="range" id="thumbTime" min="0" max="1" step="0.01" /><output id="thumbTimeOut">00:00</output></div>
+          <button class="btn ghost small" id="thumbUsePlayhead" type="button">Use playhead frame</button>
+          <label class="check" id="thumbPipRow"><input type="checkbox" id="thumbPip" checked /> Include picture-in-picture overlays</label>
+          <label class="check" id="thumbLogoRow"><input type="checkbox" id="thumbLogo" checked /> Include logo</label>
+        </div>
+        <div id="thBgSolid" hidden><label><span class="label">Color</span><input class="field color" type="color" id="thBgColor" /></label></div>
+        <div id="thBgGrad" hidden>
+          <div class="field-row"><label><span class="label">From</span><input class="field color" type="color" id="thBgGrad1" /></label><label><span class="label">To</span><input class="field color" type="color" id="thBgGrad2" /></label></div>
+          <div class="slider-row wide"><label>Angle</label><input type="range" id="thBgAngle" min="0" max="360" step="5" /><output id="thBgAngleOut">135°</output></div>
+        </div>
+        <div id="thBgImage" hidden><button class="btn secondary" id="thBgPick" type="button">Choose a picture…</button><input type="file" id="thBgFile" accept="image/*" hidden /></div>
+        <label id="thFitRow" style="display:block;margin-top:8px"><span class="label">Fit</span><select id="thumbFit"><option value="cover">Fill (crop)</option><option value="contain">Fit (blurred edges)</option></select></label>
+      </div>
+
+      <div class="th-panel" id="thP-look" role="tabpanel" hidden>
+        <p class="hint">Grades the backdrop only, never your text. Uses the same Filters as the Looks tab.</p>
+        <label style="display:block"><span class="label">Filter</span><select id="thFilter"></select></label>
+        <div class="slider-row wide"><label>Intensity</label><input type="range" id="thFilterAmt" min="0" max="1" step="0.05" /><output id="thFilterAmtOut">100%</output></div>
+        <div class="slider-row wide"><label>Brightness</label><input type="range" id="thBri" min="-100" max="100" step="1" /><output id="thBriOut">0</output></div>
+        <div class="slider-row wide"><label>Contrast</label><input type="range" id="thCon" min="-100" max="100" step="1" /><output id="thConOut">0</output></div>
+        <div class="slider-row wide"><label>Saturation</label><input type="range" id="thSat" min="-100" max="100" step="1" /><output id="thSatOut">0</output></div>
+        <div class="slider-row wide"><label>Warmth</label><input type="range" id="thTmp" min="-100" max="100" step="1" /><output id="thTmpOut">0</output></div>
+        <div class="slider-row wide"><label>Vignette</label><input type="range" id="thumbVignette" min="0" max="100" step="1" /><output id="thumbVignetteOut">0</output></div>
+        <div class="slider-row wide"><label>Darken</label><input type="range" id="thumbDarken" min="0" max="0.8" step="0.02" value="0.25" /><output id="thumbDarkenOut">25%</output></div>
+        <button class="btn ghost small" id="thLookReset" type="button">Reset look</button>
+      </div>
+
+      <div class="th-foot">
+        <label class="check"><input type="checkbox" id="thumbGuides" checked /> Guides (safe area, YouTube time badge; not saved in the image)</label>
+        <div class="field-row" style="margin-top:6px">
+          <label><span class="label">File (JPG is kept under 2 MB)</span><select id="thumbType"><option value="jpg">JPG</option><option value="png">PNG</option></select></label>
+        </div>
+        <div class="button-row" style="margin-top:10px"><button class="btn primary" id="thumbSave" type="button" style="flex:1">Download JPG</button><button class="btn secondary" id="thumbShare" type="button">Share</button></div>
+      </div>
     </div>
   </div>
 </dialog>
