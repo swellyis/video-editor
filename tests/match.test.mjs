@@ -163,3 +163,12 @@ test('everything together in order: length, then end alignment, then loudness; f
   assert.equal(JSON.stringify(p), snap);
   assert.equal(describe(p, { type: 'whole' }).len, layout(p).total);
 });
+
+test('a looped track that never ends cannot be a length / end target; its start still works', () => {
+  const p = setup();
+  const b = newAudio({ id: 'm2', name: 'Bed', duration: 5 }, 0); b.id = 'a2'; b.loop = true; p.audio.push(b);
+  const av = available(p, A('a1'), A('a2'));
+  assert.equal(av.length.ok, false); assert.match(av.length.why, /repeats until the video ends/);
+  const r = applyMatch(p, A('a1'), A('a2'), { length: true });
+  assert.equal(r.ok, false);
+});

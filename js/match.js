@@ -75,7 +75,8 @@ export function available(project, sel, tgt) {
   const me = describe(project, sel), t = describe(project, tgt), no = (why) => ({ ok: false, why });
   if (!me || !t) { const w = 'Pick another item first.'; return { length: no(w), align: no(w), loud: no(w) }; }
   const out = { length: { ok: true }, align: { ok: true }, loud: { ok: true } };
-  if (me.video && t.len >= me.len - EPS) out.length = no('A video cannot be stretched, only shortened, and it is already ' + (t.len > me.len + EPS ? 'shorter than ' + t.name : 'the same length as ' + t.name) + '. Change its Speed in the Clip tab to make it fit.');
+  if (t.openLoop) { const w = 'Looped track “' + t.name + '” repeats until the video ends, so it has no length or end of its own. Set its length in the Audio tab (or turn Loop off), then match.'; out.length = no(w); out.align = no(w); }
+  else if (me.video && t.len >= me.len - EPS) out.length = no('A video cannot be stretched, only shortened, and it is already ' + (t.len > me.len + EPS ? 'shorter than ' + t.name : 'the same length as ' + t.name) + '. Change its Speed in the Clip tab to make it fit.');
   if (!me.sound) out.loud = no(me.image ? 'A picture has no sound.' : 'This has no sound to measure.');
   else if (!t.sound) out.loud = no(t.whole ? 'Pick one sound to compare with (the whole video has no single level).' : 'The other item has no sound to compare with.');
   return out;
