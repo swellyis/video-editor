@@ -632,6 +632,7 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .kf-details>summary::before{content:"▸";margin-right:6px;color:var(--muted)}
 .kf-details[open]>summary::before{content:"▾"}
 .kf-details>summary h2{margin:0;flex:1}
+.kf-details>summary .btn{flex:none}
 .kf-details>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .kf-row .kf-props{margin:0;font-size:11px}
 .kf-dia{flex:none;min-width:40px;min-height:40px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--ink);cursor:pointer;font-size:14px}
