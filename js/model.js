@@ -876,18 +876,6 @@ export function planMatchAudio(project, sel) {
   if (len > cap) { len = cap; capped = true; }
   return { clip: c, item: it, audio: chosen.a, len, oldLen: it.len, end: cs + len, capped };
 }
-/** Apply planMatchAudio: set the image's length (keyframes keep their relative place, Ken Burns follows the new length). */
-export function matchImageToAudio(project, sel, { ripple = false } = {}) {
-  const plan = planMatchAudio(project, sel);
-  if (plan.fail) return plan;
-  if (Math.abs(plan.len - plan.oldLen) < 1e-4) return { ...plan, unchanged: true };
-  const c = plan.clip, before = layout(project), k = plan.len / plan.oldLen, a0 = plan.audio.start;
-  for (const tr of Object.values(c.keyframes || {})) for (const key of tr) key.t = Math.round(key.t * k * 1e6) / 1e6;
-  c.out = c.in + plan.len;
-  if (ripple) { rippleShift(project, plan.item.end - 1e-3, layout(project).total - before.total); plan.audio.start = a0; }
-  return plan;
-}
-
 export function detachAudio(project, sel) {
   const fail = (reason) => ({ fail: true, reason });
   let src, start, fadeIn, fadeOut, speed, vol;

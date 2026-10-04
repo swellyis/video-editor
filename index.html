@@ -658,7 +658,7 @@
         <button class="tool" data-action="addMarker" type="button" title="Add marker (M)">⚑<span>Marker</span></button>
         <i class="sep"></i>
         <button class="tool" data-action="extractAudio" id="toolExtract" type="button" aria-label="Extract audio" title="Extract audio: save the selected clip's sound as an audio file (M4A, Opus or WAV)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Extract audio</span></button>
-        <button class="tool" data-action="matchAudio" id="toolMatchAudio" type="button" aria-label="Match audio" title="Match audio: make the selected image as long as the audio"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5v11M14 2.5v11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4.5 8h7M4.5 8l2-2M4.5 8l2 2M11.5 8l-2-2M11.5 8l-2 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Match audio</span></button>
+        <button class="tool" data-action="match" id="toolMatch" type="button" aria-label="Match" title="Match: make the selected item fit another one on the timeline (length, start / end, loudness)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5v11M14 2.5v11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4.5 8h7M4.5 8l2-2M4.5 8l2 2M11.5 8l-2-2M11.5 8l-2 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Match…</span></button>
         <i class="sep"></i>
         <button class="tool" data-action="volumeDown" id="toolVolumeDown" type="button" aria-label="Volume down" title="Volume down: lower the selected item's Volume by 10 points (Shift or Alt: 1 point). Shortcut: ["><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Vol −</span></button>
         <button class="tool" data-action="volumeUp" id="toolVolumeUp" type="button" aria-label="Volume up" title="Volume up: raise the selected item's Volume by 10 points (Shift or Alt: 1 point). Shortcut: ]"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Vol +</span></button>
@@ -927,6 +927,25 @@
     <div class="progress-copy"><span id="tdStatus">Starting…</span><span id="tdPercent">0%</span></div>
   </div>
   <div class="button-row" style="margin-top:12px"><button class="btn primary" id="tdGo" type="button">Start</button><button class="btn ghost" id="tdCancel" type="button">Cancel</button><button class="btn ghost small" id="tdFree" type="button" hidden>Free up space</button></div>
+</dialog>
+<dialog class="sheet" id="matchDialog" aria-labelledby="mtTitle">
+  <div class="sheet-head"><h2 id="mtTitle">Match</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="mtClose">✕</button></div>
+  <p class="hint" id="mtSel"></p>
+  <label style="display:block"><span class="label">Match it to</span><select id="mtTarget"></select></label>
+  <fieldset class="mt-what">
+    <legend class="label">What to match</legend>
+    <label class="check mt-opt"><input type="checkbox" id="mtLen" /> <span><b>Length</b><small id="mtLenNote"></small></span></label>
+    <label class="check mt-sub" id="mtSpreadRow" hidden><input type="checkbox" id="mtSpread" /> <span id="mtSpreadText">Share the length evenly between the pictures in a row</span></label>
+    <label class="check mt-sub" id="mtLoopRow" hidden><input type="checkbox" id="mtLoop" /> <span>Loop to fill if it is shorter</span></label>
+    <label class="check mt-opt"><input type="checkbox" id="mtAlign" /> <span><b>Start / end</b><small id="mtAlignNote"></small></span></label>
+    <div class="segmented two mt-sub" id="mtAlignWhich" hidden><button type="button" data-which="start" class="selected">Start together</button><button type="button" data-which="end">End together</button></div>
+    <label class="check mt-opt"><input type="checkbox" id="mtLoud" /> <span><b>Loudness</b><small id="mtLoudNote"></small></span></label>
+    <label class="mt-sub" id="mtOffRow" hidden><span class="label">Make it</span><select id="mtOffset"><option value="0">as loud as it</option><option value="-6">6 dB quieter</option><option value="-9">9 dB quieter</option><option value="-12">12 dB quieter (music under a voice)</option><option value="-15">15 dB quieter</option><option value="-20">20 dB quieter</option><option value="3">3 dB louder</option></select></label>
+  </fieldset>
+  <div class="progress" id="mtMeasure" aria-live="polite" hidden><div class="progress-track"><div class="progress-bar" id="mtBar"></div></div><div class="progress-copy"><span id="mtStatus">Measuring…</span><button class="btn ghost small" id="mtStop" type="button">Cancel</button></div></div>
+  <div class="mt-preview" id="mtPreview" aria-live="polite"></div>
+  <p class="hint">To line up two recordings of the same sound by their waveform (a camera and a recorder), use <b>Sync</b> in the Audio tab.</p>
+  <div class="button-row" style="margin-top:12px"><button class="btn primary" id="mtApply" type="button">Apply</button><button class="btn ghost" id="mtCancel" type="button">Cancel</button></div>
 </dialog>
 <dialog class="sheet" id="shortsDialog" aria-labelledby="shTitle">
   <div class="sheet-head"><h2 id="shTitle">Auto Shorts</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="shClose">✕</button></div>

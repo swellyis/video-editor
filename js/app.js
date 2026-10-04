@@ -8,7 +8,7 @@ import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
-  moveClip, rippleShift, ensureLanes, holdNextClip, matchImageToAudio, stepVolume, History, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
+  moveClip, rippleShift, ensureLanes, holdNextClip, stepVolume, History, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, ANIM_PROPS, detachAudio, soundTargets, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
@@ -25,6 +25,7 @@ import { initEffectsUI } from './effects-ui.js';
 import { initFiltersUI } from './filters-ui.js';
 import { initDesigner } from './designer-ui.js';
 import { initShorts } from './shorts-ui.js';
+import { initMatch } from './match-ui.js';
 import { FILTERS, GROUPS as FILTER_GROUPS } from './filters.js';
 import { Timeline } from './timeline.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
@@ -479,10 +480,9 @@ function fillInspector() {
   setState('.tl-toolbar [data-action=duplicate]', !!st, 'Duplicate selected (Ctrl+D)', TOOL_HINT.duplicate.none);
   setState('.tl-toolbar [data-action=delete]', !!st, 'Delete selected (Del)', TOOL_HINT.delete.none);
   {
-    const selClip = st === 'clip' ? selected('clip') : null;
-    const maOk = (selClip && selClip.kind === 'image') || st === 'audio';
-    setState('.tl-toolbar [data-action=matchAudio]', !!maOk, 'Match audio: make the selected image as long as the audio',
-      st === 'clip' ? 'A video clip can’t be stretched to fit the audio. Select an image clip instead.' : 'Match audio: select an image clip on the timeline first, then tap it to make the image as long as the audio.');
+    const maOk = st === 'clip' || st === 'overlay' || st === 'audio';
+    setState('.tl-toolbar [data-action=match]', !!maOk, 'Match: make the selected item fit another one on the timeline (length, start / end, loudness)',
+      'Match: select a clip, picture, overlay or audio track on the timeline first, then tap it to make that item fit another one.');
   }
   {
     const vt = volumeTarget(), vOk = !vt.why;
@@ -650,17 +650,7 @@ const actions = {
   },
   volumeDown(_b, ev) { stepSelectedVolume(-1, ev); },
   volumeUp(_b, ev) { stepSelectedVolume(1, ev); },
-  matchAudio() {
-    // Make the selected image as long as the audio (or, with an audio track selected, the image under its start).
-    const sel = app.selection && selected(app.selection.type) ? app.selection : null;
-    const r = matchImageToAudio(app.project, sel, { ripple: app.rippleEnabled });
-    if (r.fail) return toast(r.reason, 6000);
-    const L = (v) => { const w = Math.floor(v + 1e-6), f = Math.round((v - w) * 100); return fmt(w) + (f ? '.' + String(f).padStart(2, '0') : ''); };
-    const nm = r.audio.name || (r.audio.voice ? 'Voice' : 'Music');
-    if (r.unchanged) return toast('Image already ' + L(r.len) + ', matching ' + nm + '.');
-    app.commit('Match audio');
-    toast('Image now ' + L(r.len) + ', matching ' + nm + (r.capped ? ' (the longest an image can be here)' : '') + '. Undo (Ctrl+Z) puts it back.', 5000);
-  },
+  match() { app.match.open(); },
   moveLeft() { const c = selected('clip'); if (!c) return; const i = app.project.clips.indexOf(c); if (i > 0) { moveClip(app.project, i, i - 1); app.commit('Move clip'); } },
   moveRight() { const c = selected('clip'); if (!c) return; const i = app.project.clips.indexOf(c); if (i < app.project.clips.length - 1) { moveClip(app.project, i, i + 1); app.commit('Move clip'); } },
   resetTransform() { const c = selected('clip'); if (!c) return; c.transform = defaultTransform(); c.fit = 'inherit'; app.commit('Reset frame'); },
@@ -2263,6 +2253,7 @@ const addMedia = initAddMedia({ importFiles, openDialog, closeDialog });
 app.addMedia = addMedia;
 const shorts = initShorts({ app, media, db, actions, openDialog, closeDialog, toast, cleanProjectName, openProject, showProjects: () => { renderProjectList(); openDialog('projectsDialog'); } });
 app.shorts = shorts; actions.shorts = () => shorts.open();
+app.match = initMatch({ app, media, toast, openDialog, closeDialog });
 let inboxBusy = null;
 /** Take what the service worker stored from the OS share sheet (files, or a link) and put it into the project. */
 function consumeInbox() {
