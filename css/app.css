@@ -492,11 +492,8 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .volenv.editable .venv-dot{pointer-events:auto;cursor:grab;stroke:#fff}
 .volenv.editable{pointer-events:none}
 @media (pointer:coarse){.volenv.editable .venv-dot{r:8}.volenv.editable .venv-hit{r:20}}
-.detach-row{margin-top:10px}
-.detach-btn{width:100%;min-height:44px;justify-content:center;gap:8px}
-.detach-btn .ico{width:18px;height:18px}
-.detach-btn.busy{opacity:.85;pointer-events:none}
-.detach-btn.busy .ico{display:none}
+.tool.busy{opacity:.85;pointer-events:none}
+.tool.busy .ico{display:none}
 .spinner{display:inline-block;width:16px;height:16px;flex:none;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.spinner{animation-duration:2s!important}}

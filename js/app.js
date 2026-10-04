@@ -447,15 +447,6 @@ function fillInspector() {
   fillCaptionsPanel();
   $('blurPanel').hidden = !bl; $('blurEmptyHint').hidden = (p.blurs || []).length > 0;
   if (bl) $('blurRadiusRow').hidden = bl.shape === 'ellipse';
-  for (const [row, item, isClip] of [['detachClip', c, true], ['detachOvl', o, false]]) {
-    const btn = $(row + 'Btn'), hint = $(row + 'Hint'); if (!btn || !hint) continue; // (a stale cached page without the button: nothing to update)
-    const can = !!item && item.kind === 'video', none = can && item.hasAudio === false; // (a video with no sound keeps the button, greyed, with the reason)
-    btn.parentElement.hidden = !can;
-    if (can) {
-      const off = none || (isClip && item.muted); btn.setAttribute('aria-disabled', off ? 'true' : 'false'); btn.classList.toggle('is-off', off);
-      hint.textContent = btn.classList.contains('busy') ? 'Moving this video’s sound onto its own audio track…' : none ? 'This video has no audio, so there is nothing to detach.' : off ? 'Muted, so there is no sound to detach. Unmute it first, or its audio may already be detached (Audio tab).' : 'Copies this video’s sound onto its own audio track (same start, length, speed and volume) and mutes the video. Afterwards they are independent.';
-    }
-  }
   const cbl = c && c.blur; $('clipBlurBody').hidden = !(cbl && cbl.enabled); $('clipBlurKeep').hidden = !(cbl && cbl.enabled && cbl.keep);
   syncBlurBox();
   $('overlayPanel').hidden = !o; $('overlayEmptyHint').hidden = (p.overlays || []).length > 0;
@@ -491,6 +482,14 @@ function fillInspector() {
     const maOk = st === 'clip' || st === 'overlay' || st === 'audio';
     setState('.tl-toolbar [data-action=match]', !!maOk, 'Match: make the selected item fit another one on the timeline (length, start / end, loudness)',
       'Match: select a clip, picture, overlay or audio track on the timeline first, then tap it to make that item fit another one.');
+  }
+  {
+    // Detach audio (same action as always, now only here): a video clip / video overlay that has sound and isn't muted
+    const dItem = st === 'clip' || st === 'overlay' ? selected(st) : null, dVideo = !!dItem && dItem.kind === 'video';
+    const dWhy = !dVideo ? 'Detach audio: select a video clip or a video overlay with sound on the timeline first.'
+      : dItem.hasAudio === false ? 'This video has no audio, so there is nothing to detach.'
+        : st === 'clip' && dItem.muted ? 'Muted, so there is no sound to detach. Unmute it first, or its audio may already be detached (Audio tab).' : '';
+    setState('.tl-toolbar [data-action=detachAudio]', !dWhy, 'Detach audio: copy the selected video\'s sound onto its own audio track and mute the video', dWhy);
   }
   {
     const vt = volumeTarget(), vOk = !vt.why;
