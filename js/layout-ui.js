@@ -71,7 +71,8 @@ export function initLayout(ctx) {
     libTitle = el('h2', { id: 'libTitle', text: 'Library' });
     libCollapse = el('button', { class: 'dock-btn', id: 'libCollapse', type: 'button', 'aria-label': 'Collapse the library panel', title: 'Collapse / expand the library (Alt+1)', onclick: () => set(L.toggle(st, 'lib')) });
     libBody = el('div', { class: 'dock-body', id: 'libBody' });
-    libMain = el('div', { class: 'lib-main' }, el('div', { class: 'dock-head' }, libTitle, libCollapse), libBody);
+    libMain = el('div', { class: 'lib-main' }, el('div', { class: 'dock-head', title: 'Drag this header to the other side to dock the library there' }, libTitle, libCollapse), libBody);
+    libMain.firstChild.addEventListener('pointerdown', (e) => headDrag(e, 'lib', libMain.firstChild));
     lib = add(el('aside', { class: 'lib-dock', id: 'libDock', 'aria-label': 'Library' }, libRail, libMain), editor, stageCol);
     move(tabsEl, libRail);
     setAttr(tabsEl, 'aria-orientation', 'vertical'); setAttr(tabsEl, 'aria-label', 'Library');
@@ -95,7 +96,8 @@ export function initLayout(ctx) {
     propTitle = el('h2', { id: 'propTitle', text: 'Properties' });
     propCollapse = el('button', { class: 'dock-btn', id: 'propCollapse', type: 'button', 'aria-label': 'Hide the properties panel', title: 'Hide / show properties (Alt+2)', onclick: () => set(L.toggle(st, 'props')) });
     propBody = el('div', { class: 'dock-body', id: 'propBody' });
-    add(el('div', { class: 'dock-head' }, propTitle, propCollapse), inspector, inspector.firstChild);
+    const propHead = add(el('div', { class: 'dock-head', title: 'Drag this header to the other side to dock properties there' }, propTitle, propCollapse), inspector, inspector.firstChild);
+    propHead.addEventListener('pointerdown', (e) => headDrag(e, 'props', propHead));
     inspector.insertBefore(propBody, inspector.children[1]); created.push(propBody);
     const clipPanel = $('tab-clip'); move(clipPanel, propBody); setAttr(clipPanel, 'role', null); setAttr(clipPanel, 'aria-labelledby', null);
     const wrap = (id, inner) => { const w = add(el('div', { class: 'tab-panel prop-panel', id }), propBody); move($(inner), w); return w; };
@@ -252,6 +254,34 @@ export function initLayout(ctx) {
       else if (e.key === 'End') next = L.setWidth(st, part, L.maxWidth(st, part, editor.clientWidth));
     }
     if (!next) return; e.preventDefault(); if (part !== 'top') next = L.setWidth(next, part, Math.min(part === 'lib' ? next.libW : next.propW, L.maxWidth(next, part, editor.clientWidth))); set(next); resized && resized();
+  }
+
+
+  // ---------------------------------------------------------------- drag a dock by its header to the other side (snap zones)
+  function headDrag(e, which, head) {
+    if (e.button !== undefined && e.button !== 0) return;
+    if (e.target.closest('button')) return;
+    const x0 = e.clientX, y0 = e.clientY; let zones = null, side = null, done = false;
+    head.setPointerCapture && head.setPointerCapture(e.pointerId);
+    const mkZones = () => {
+      const z = { left: el('div', { class: 'snap-zone left', 'aria-hidden': 'true' }, el('span', { text: 'Dock here' })), right: el('div', { class: 'snap-zone right', 'aria-hidden': 'true' }, el('span', { text: 'Dock here' })) };
+      editor.append(z.left, z.right); editor.classList.add('dragging', 'docking'); head.classList.add('grabbing'); return z;
+    };
+    const end = (apply) => {
+      if (done) return; done = true;
+      head.removeEventListener('pointermove', mv); head.removeEventListener('pointerup', up); head.removeEventListener('pointercancel', cancel); document.removeEventListener('keydown', key, true);
+      if (zones) { zones.left.remove(); zones.right.remove(); editor.classList.remove('dragging', 'docking'); head.classList.remove('grabbing'); }
+      if (apply && side) { const wantSwap = which === 'lib' ? side === 'right' : side === 'left'; if (wantSwap !== st.swap) { set(L.swapSides(st)); resized && resized(); } }
+    };
+    const mv = (ev) => {
+      if (!zones && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 8) zones = mkZones();
+      if (!zones) return;
+      const r = editor.getBoundingClientRect(); side = ev.clientX < r.left + r.width / 2 ? 'left' : 'right';
+      zones.left.classList.toggle('hot', side === 'left'); zones.right.classList.toggle('hot', side === 'right');
+    };
+    const up = () => end(true), cancel = () => end(false);
+    const key = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); end(false); } };
+    head.addEventListener('pointermove', mv); head.addEventListener('pointerup', up); head.addEventListener('pointercancel', cancel); document.addEventListener('keydown', key, true);
   }
 
   // ---------------------------------------------------------------- Layout menu

@@ -63,6 +63,15 @@ The app is plain static files (HTML, CSS and ES modules). There's no build step.
   - An update banner when a new version is deployed.
   - An Android share target: share videos from the Gallery straight into the installed app.
 
+- **Workspace layout (wide windows, Filmora-style):** on windows at least 960 px wide and 560 px tall the editor is spread out instead of crammed into one inspector. A **Library** dock on the left (icon rail: *Media* bin with thumbnails, *Audio*, *Text* + sermon templates, *Transitions*, *Looks* (filters / effects / blur / canvas), *Captions* + Shorts, *PiP*), the large **Preview** in the centre, a **Properties** dock on the right that follows what you select on the timeline (clip, text + animation, audio track, overlay, caption, blur region), and the **Timeline** (its toolbar is unchanged) across the bottom, with the export settings as one slim bar under it. The same controls are *moved* between the old and new layout (never duplicated), so shrinking the window to a phone or portrait tablet puts everything back exactly as before.
+  - **Resize** by dragging the thin splitters (library | preview | properties, and preview | timeline); arrow keys move a focused splitter (Shift = bigger steps, Home/End = min/max), **double-click** (or Enter) resets that one splitter. Minimum and maximum sizes keep the preview usable; dragging a dock almost shut collapses it.
+  - **Collapse:** the « / » buttons in the dock headers, or **Alt+1** (library), **Alt+2** (properties), **Alt+0** (reset layout). A collapsed library leaves the icon rail; hidden properties leave a small tab at the edge.
+  - **Dock:** drag a dock's header to the other half of the workspace (snap zones light up; Esc cancels) to swap sides.
+  - **Layout menu** (header): presets *Default*, *Editing (large timeline)*, *Preview focus*, *Compact*; show/hide Library and Properties; *Swap left / right*; *Reset layout*. Tablets and small laptops start with *Compact*.
+  - The arrangement is saved in this browser's localStorage, separately for small / medium / large windows (`ve.layout.v1.<md|lg|xl>`).
+  - Media bin: click a thumbnail to select it on the timeline, **＋** adds it again (music at the playhead), or drag it onto the timeline / preview.
+  - Not built: free floating panels and docking to the bottom; panels dock left or right only.
+
 - **Keyboard:** shortcuts only act when you aren't typing, and a focused control keeps its own keys (arrows move a focused slider, Space presses a focused button). Every slider has a label and announces its current value. Press Tab to reach the timeline items: Enter selects, ←/→ nudges by a frame (Shift: 1 s; main clips swap with their neighbour), Alt+←/→ trims the end. Tabs support arrow keys. `[` and `]` lower and raise the selected item's volume (see above).
 
 ## Browser support for export
