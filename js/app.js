@@ -377,9 +377,9 @@ const TOOL_HINT = {
   duplicate: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Duplicate.' },
   delete: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Delete.' },
   addKeyframe: {
-    caption: 'A caption can’t be keyframed. Select a clip, text, overlay, music or voice track on the timeline, then tap Keyframe.',
-    none: 'Nothing selected. Tap a clip, text, overlay, music or voice track on the timeline first, then tap Keyframe.',
-    marker: 'A marker can\'t be keyframed. Select a clip, text, overlay, music or voice track on the timeline, then tap Keyframe.',
+    caption: 'A caption can’t be keyframed. Select a clip, text, overlay, music or voice track on the timeline, then use ◆ Add in its Keyframes section (or press Shift+K).',
+    none: 'Nothing selected. Tap a clip, text, overlay, music or voice track on the timeline first, then use ◆ Add in its Keyframes section (or press Shift+K).',
+    marker: 'A marker can\'t be keyframed. Select a clip, text, overlay, music or voice track on the timeline, then use ◆ Add in its Keyframes section (or press Shift+K).',
   },
 };
 function fillInspector() {
@@ -706,7 +706,7 @@ const actions = {
     let moved = false;
     if (!k.inside) { // the playhead is elsewhere: jump to the nearest point of the selected item instead of refusing
       player.pause(); player.setTime(k.start + clamp(k.raw, 0.02, Math.max(0.02, k.len - 0.02))); moved = true;
-      k = kfTarget(); if (!k || !k.inside) return toast('Could not place a keyframe on this item. Tap the timeline above it, then tap Keyframe.', 4500);
+      k = kfTarget(); if (!k || !k.inside) return toast('Could not place a keyframe on this item. Tap the timeline above it, then use ◆ Add in its Keyframes section (or press Shift+K).', 4500);
     }
     const vals = animated(k.type, k.item, k.local);
     for (const pr of animPropsOf(k.type, k.item)) setKeyframe(k.item, pr, k.local, vals[pr]);
