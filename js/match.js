@@ -2,7 +2,7 @@
 // Pure functions on the project (no DOM, no audio): the dialog (match-ui.js) picks the pair and measures loudness, this file plans and applies
 // the change, so it is unit-tested. applyMatch edits the project it is given; the caller commits ONE undo step (or runs it on a copy to preview).
 //   ref = { type: 'clip' | 'overlay' | 'audio' | 'whole', id }  ('whole' = the whole video, only as a target)
-import { layout, clipLen, overlayLen, audioLen, audioSpan, audioSpeed, rippleShift, placeItem, moveClipTo, laneOf, MIN_CLIP, planMatchAudio } from './model.js';
+import { layout, overlayLen, audioLen, audioSpan, audioSpeed, rippleShift, placeItem, moveClipTo, laneOf, MIN_CLIP, planMatchAudio } from './model.js';
 
 export const MAX_VOLUME = 2;       // the Volume control goes to 200 % (+6 dB)
 export const DB_FLOOR = -60;
@@ -75,9 +75,7 @@ export function available(project, sel, tgt) {
   const me = describe(project, sel), t = describe(project, tgt), no = (why) => ({ ok: false, why });
   if (!me || !t) { const w = 'Pick another item first.'; return { length: no(w), align: no(w), loud: no(w) }; }
   const out = { length: { ok: true }, align: { ok: true }, loud: { ok: true } };
-  if (me.video && !me.audio && t.len >= me.len - EPS && me.type !== 'overlay' && me.type !== 'clip') out.length = no('This cannot be lengthened.');
-  else if (me.video && t.len >= me.len - EPS) out.length = no('A video cannot be stretched, only shortened: it is already ' + (t.len > me.len + EPS ? 'shorter' : 'the same length') + '. Change its Speed in the Clip tab to make it fit.');
-  if (me.audio && me.openLoop && t.whole) out.length = { ok: true };
+  if (me.video && t.len >= me.len - EPS) out.length = no('A video cannot be stretched, only shortened, and it is already ' + (t.len > me.len + EPS ? 'shorter than ' + t.name : 'the same length as ' + t.name) + '. Change its Speed in the Clip tab to make it fit.');
   if (!me.sound) out.loud = no(me.image ? 'A picture has no sound.' : 'This has no sound to measure.');
   else if (!t.sound) out.loud = no(t.whole ? 'Pick one sound to compare with (the whole video has no single level).' : 'The other item has no sound to compare with.');
   return out;
