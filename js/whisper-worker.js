@@ -10,10 +10,29 @@ env.backends.onnx.logLevel = 'error';
 let asr = null, english = false;
 const post = (m, t) => self.postMessage(m, t || []);
 
-// CPU (WASM) only: a WebGPU path could not be verified on real hardware, and a hung GPU session would freeze the job.
-async function load({ repo }) {
+// Device: 'wasm' (CPU, 8-bit models) always works. 'webgpu' is tried only when the browser really offers a GPU adapter that supports
+// 16-bit floats; it uses the fp16 encoder + 4-bit decoder files and falls back to the CPU by itself if anything goes wrong. A
+// software-emulated adapter (no real GPU) is not used because it is slower than the CPU path.
+async function gpuUsable(force) {
+  try {
+    if (!self.navigator || !navigator.gpu) return false;
+    const ad = await navigator.gpu.requestAdapter(); if (!ad) return false;
+    if (force) return true; // (tests only: lets the GPU path run on a software adapter)
+    if (ad.isFallbackAdapter) return false;
+    return ad.features && ad.features.has('shader-f16');
+  } catch { return false; }
+}
+async function load({ repo, device, force }) {
   english = /\.en$/.test(repo);
   const progress = (p) => { if (p && (p.status === 'progress' || p.status === 'download' || p.status === 'done' || p.status === 'initiate')) post({ type: 'progress', status: p.status, file: p.file, loaded: p.loaded || 0, total: p.total || 0 }); };
+  if (device === 'webgpu' && await gpuUsable(force)) {
+    try {
+      asr = await pipeline('automatic-speech-recognition', repo, { device: 'webgpu', dtype: { encoder_model: 'fp16', decoder_model_merged: 'q4f16' }, progress_callback: progress });
+      // a short silent clip proves the GPU session really runs before we rely on it
+      await asr(new Float32Array(16000), { return_timestamps: 'word', chunk_length_s: 30, ...(english ? {} : { task: 'transcribe' }) });
+      return { device: 'webgpu' };
+    } catch (e) { asr = null; post({ type: 'progress', status: 'gpu-failed', file: String((e && e.message) || e).slice(0, 120), loaded: 0, total: 0 }); }
+  }
   asr = await pipeline('automatic-speech-recognition', repo, { device: 'wasm', dtype: 'q8', progress_callback: progress });
   return { device: 'wasm' };
 }
