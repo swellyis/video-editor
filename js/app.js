@@ -31,6 +31,7 @@ import { FILTERS, GROUPS as FILTER_GROUPS } from './filters.js';
 import { Timeline } from './timeline.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
+import { initLayout } from './layout-ui.js';
 import { exportTimelineAudio, ExtractCancelled } from './extract.js';
 import { runExport, capabilities, planFormat, ExportCancelled, createSink, canStreamToOPFS, cleanupExports, bitrateFor } from './exporter.js';
 
@@ -158,7 +159,7 @@ app.select = (sel, opts = {}) => {
   if (sel) {
     const tab = { clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip', blur: 'look', caption: 'captions' }[sel.type];
     if (sel.type === 'clip') app.trTarget = null; // the Transitions tab follows the selected clip again
-    if (tab && !((sel.type === 'clip' && qs('.tabs button.active')?.dataset.tab === 'trans') || ((sel.type === 'clip' || sel.type === 'overlay') && qs('.tabs button.active')?.dataset.tab === 'look' && (!prevSel || prevSel.type === 'clip' || prevSel.type === 'overlay')))) showTab(tab); // selecting a clip while browsing transitions stays on that tab
+    if (tab && !((sel.type === 'clip' && qs('.tabs button.active')?.dataset.tab === 'trans') || ((sel.type === 'clip' || sel.type === 'overlay') && qs('.tabs button.active')?.dataset.tab === 'look' && (!prevSel || prevSel.type === 'clip' || prevSel.type === 'overlay')))) showTab(tab, 'select'); // selecting a clip while browsing transitions stays on that tab
     if (opts.seekInto) {
       const t = player.t;
       if (sel.type === 'clip') { const it = layout(app.project).items.find(i => i.clip.id === sel.id); if (it && (t < it.start || t >= it.end)) player.setTime(it.start + 0.001); }
@@ -170,6 +171,7 @@ app.select = (sel, opts = {}) => {
     }
   }
   timeline.render(); fillInspector(); renderLists();
+  if (wsLayout) { wsLayout.syncProps(); wsLayout.refreshBin(); }
 };
 app.onZoom = (pps) => { $('zoomRange').value = String(ppsToRange(pps)); };
 
@@ -213,6 +215,7 @@ function renderAll() {
   timeline.render();
   fillInspector();
   renderLists();
+  if (wsLayout) { wsLayout.syncProps(); wsLayout.refreshBin(); }
   updateSummary();
   $('undoBtn').disabled = !app.history.canUndo;
   $('redoBtn').disabled = !app.history.canRedo;
@@ -228,7 +231,8 @@ function sizeStage() {
   const shell = $('dropTarget');
   const cs = getComputedStyle(shell);
   const availW = shell.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-  const maxH = Math.min(window.innerHeight * (window.innerWidth <= 620 ? 0.42 : window.innerWidth <= 940 ? 0.5 : 0.44), 820);
+  // workspace layout: the preview fills whatever room its panel has; otherwise it is capped to a share of the window height
+  const maxH = document.body.classList.contains('ws') ? Math.max(120, shell.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) : Math.min(window.innerHeight * (window.innerWidth <= 620 ? 0.42 : window.innerWidth <= 940 ? 0.5 : 0.44), 820);
   let cw = availW, ch = cw * H / W;
   if (ch > maxH) { ch = maxH; cw = ch * W / H; }
   stage.style.width = Math.floor(cw) + 'px'; stage.style.height = Math.floor(ch) + 'px';
@@ -1129,7 +1133,7 @@ const dropT = document.body;
 ['dragenter', 'dragover'].forEach(t => dropT.addEventListener(t, e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); $('dropzone').classList.add('drag'); $('dropTarget').classList.add('drag'); } }));
 ['dragleave', 'drop'].forEach(t => dropT.addEventListener(t, e => { if (t === 'dragleave' && e.relatedTarget) return; $('dropzone').classList.remove('drag'); $('dropTarget').classList.remove('drag'); }));
 dropT.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); importFiles(e.dataTransfer.files); } });
-media.onChange(() => { timeline.render(); player.invalidate(); fillInspector(); });
+media.onChange(() => { timeline.render(); player.invalidate(); fillInspector(); if (wsLayout) wsLayout.refreshBin(true); });
 
 // ---------------------------------------------------------------- transport & keyboard
 const frame = () => 1 / (app.project.settings.fps || 30);
@@ -1215,10 +1219,14 @@ $('rippleBtn').onclick = () => { app.rippleEnabled = !app.rippleEnabled; $('ripp
 $('snapBtn').onclick = () => { app.snapEnabled = !app.snapEnabled; $('snapBtn').setAttribute('aria-pressed', app.snapEnabled); db.kvSet('snap', app.snapEnabled); toast('Snapping ' + (app.snapEnabled ? 'on' : 'off')); };
 
 // tabs
-function showTab(name) {
-  qsa('.tabs button').forEach(x => { const on = x.dataset.tab === name; x.classList.toggle('active', on); x.setAttribute('aria-selected', on ? 'true' : 'false'); x.tabIndex = on ? 0 : -1; });
-  qsa('.tab-panel').forEach(x => x.classList.toggle('active', x.id === 'tab-' + name));
-  const act = qs('.tabs button.active'); if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+let wsLayout = null; // workspace layout (js/layout-ui.js): library dock on the left, properties on the right, only on wide windows
+function showTab(name, src) {
+  if (wsLayout && wsLayout.active) wsLayout.showTab(name, src === 'select');
+  else {
+    qsa('.tabs button').forEach(x => { const on = x.dataset.tab === name; x.classList.toggle('active', on); x.setAttribute('aria-selected', on ? 'true' : 'false'); x.tabIndex = on ? 0 : -1; });
+    qsa('.tab-panel').forEach(x => x.classList.toggle('active', x.id === 'tab-' + name));
+    const act = qs('.tabs button.active'); if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
   if (app.timeline) app.timeline.render(); // the join markers show which join the Transitions tab is editing
   if (name === 'look') { flUI.render(); fxUI.render(); } // draws the effect previews the first time the tab is shown
 }
@@ -1243,6 +1251,29 @@ function showTab(name) {
   }
   const cur = tabs.find(b => b.classList.contains('active')) || tabs[0]; if (cur) showTab(cur.dataset.tab);
 })();
+
+/** Media bin: put a file that is already in this project onto the timeline again (clips/photos at the end, music at the playhead). */
+async function addMediaToTimeline(id) {
+  const m = await media.get(id);
+  if (!m) { toast('That file is no longer stored on this device. Add it again with ＋ Media.'); return; }
+  const p = app.project;
+  if (m.kind === 'audio') { const a = newAudio(m, player.t < layout(p).total - 0.5 ? player.t : 0); p.audio.push(a); app.selection = { type: 'audio', id: a.id }; }
+  else { const c = newClipFromMedia(m, p.settings); p.clips.push(c); app.selection = { type: 'clip', id: c.id }; }
+  app.commit('Add from media bin'); if (timeline.autoFit) timeline.fit();
+  toast('“' + (m.name || 'File').replace(/\.[^/.]+$/, '') + '” added');
+}
+// wide windows get the workspace layout (library | preview | properties, timeline below); narrow ones keep the original layout
+wsLayout = initLayout({
+  $, qs, qsa, app, media, addToTimeline: addMediaToTimeline,
+  resized: () => { sizeStage(); if (timeline.autoFit) timeline.fit(); },
+  afterToggle: (isOn) => {
+    if (isOn) return;
+    const t = app.selection && ({ clip: 'clip', text: 'text', audio: 'audio', overlay: 'pip', blur: 'look', caption: 'captions' })[app.selection.type];
+    showTab(t || wsLayout.leftName || 'clip');
+  },
+});
+app.layout = wsLayout;
+wsLayout.start();
 // Sliders: every range input gets an accessible name (its row label) and announces the formatted value shown next to it.
 (() => {
   let n = 0;
