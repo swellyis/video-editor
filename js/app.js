@@ -805,7 +805,8 @@ function renderKfPanels() {
       const list = el('div', { class: 'item-list kf-list' });
       for (const r of rows) {
         const lt = r.lt, kids = [el('button', { type: 'button', class: 't', text: '◆ ' + fmtPrecise(k.start + lt, app.project.settings.fps), title: 'Jump to keyframe', onclick: () => { player.pause(); player.setTime(k.start + lt + 1e-4); } })];
-        kids.push(el('span', { class: 'hint kf-props', text: [...new Set(r.props.map(pr => KF_LABEL[pr]))].join(' · ') }), el('span', { class: 'grow' }));
+        if (type !== 'audio') kids.push(el('span', { class: 'hint kf-props', text: [...new Set(r.props.map(pr => KF_LABEL[pr]))].join(' · ') }));
+        kids.push(el('span', { class: 'grow' }));
         if (r.vol != null) {
           const num = el('input', { class: 'field mono vol-input', type: 'number', min: '0', max: String(VOL_KEY_MAX * 100), step: '5', inputmode: 'numeric', 'aria-label': 'Volume at ' + fmt(k.start + lt) + ' (percent of the slider)' });
           num.value = String(Math.round(r.vol * 100));

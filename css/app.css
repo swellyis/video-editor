@@ -637,3 +637,4 @@ kbd{font:600 11px "IBM Plex Mono",monospace;background:var(--surface-2);border:1
 .kf-row .kf-props{margin:0;font-size:11px}
 .kf-dia{flex:none;min-width:40px;min-height:40px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--ink);cursor:pointer;font-size:14px}
 .kf-dia:hover{border-color:var(--accent)}
+.kf-list .item.kf-row{flex-wrap:wrap}
