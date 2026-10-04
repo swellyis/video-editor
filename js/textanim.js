@@ -141,8 +141,8 @@ export const TEMPLATES = [
     L(s, d, 'Pastor John Smith', { x: 0.32, y: tall ? 0.7 : 0.78, size: tall ? 0.062 : 0.055, font: 'sans', style: 'box', align: 'left', bg: '#111111', bgOpacity: 0.82, maxWidth: tall ? 0.6 : 0.5 }, { in: 'slideRight', out: 'slideLeft', inDur: 0.6, outDur: 0.5 }),
     L(s + 0.25, d - 0.25, 'Senior Pastor, Grace Church', { x: 0.32, y: tall ? 0.765 : 0.865, size: tall ? 0.04 : 0.034, font: 'condensed', style: 'box', align: 'left', color: '#111111', bg: '#f0b429', bgOpacity: 0.95, maxWidth: tall ? 0.6 : 0.5 }, { in: 'slideRight', out: 'slideLeft', inDur: 0.6, outDur: 0.5 })] },
   { id: 'scripture', label: 'Scripture bar', hint: 'Verse + reference', dur: 7, make: (s, d, tall) => [
-    L(s, d, 'For God so loved the world that he gave his one and only Son.', { y: tall ? 0.74 : 0.8, size: tall ? 0.056 : 0.048, font: 'serif', style: 'band', bg: '#000000', bgOpacity: 0.7, maxWidth: tall ? 0.86 : 0.8 }, { in: 'wipe', out: 'fade', inDur: 0.9 }),
-    L(s + 0.6, d - 0.6, 'John 3:16', { y: tall ? 0.855 : 0.92, size: tall ? 0.04 : 0.036, font: 'mono', style: 'clean', color: '#f0b429', maxWidth: 0.6 }, { in: 'rise', out: 'fade' })] },
+    L(s, d, 'For God so loved the world that he gave his one and only Son.', { y: tall ? 0.66 : 0.8, size: tall ? 0.056 : 0.048, font: 'serif', style: 'band', bg: '#000000', bgOpacity: 0.7, maxWidth: tall ? 0.86 : 0.8 }, { in: 'wipe', out: 'fade', inDur: 0.9 }),
+    L(s + 0.6, d - 0.6, 'John 3:16', { y: tall ? 0.755 : 0.92, size: tall ? 0.04 : 0.036, font: 'mono', style: 'clean', color: '#f0b429', maxWidth: 0.6 }, { in: 'rise', out: 'fade' })] },
   { id: 'quote', label: 'Quote card', hint: 'Quote + who said it', dur: 6, make: (s, d, tall) => [
     L(s, d, '“Quote goes here, short and strong.”', { y: 0.45, size: tall ? 0.085 : 0.075, font: 'serifItalic', style: 'clean', maxWidth: 0.78 }, { in: 'rise', out: 'fade', inDur: 0.9 }),
     L(s + 0.8, d - 0.8, '— Name', { y: tall ? 0.62 : 0.65, size: tall ? 0.045 : 0.04, font: 'sans', color: '#f3d9a4', style: 'clean' }, { in: 'fade', out: 'fade', inDur: 0.6 })] },
