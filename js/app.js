@@ -24,6 +24,7 @@ import { initTransitionUI } from './transition-ui.js';
 import { initEffectsUI } from './effects-ui.js';
 import { initFiltersUI } from './filters-ui.js';
 import { initDesigner } from './designer-ui.js';
+import { initShorts } from './shorts-ui.js';
 import { FILTERS, GROUPS as FILTER_GROUPS } from './filters.js';
 import { Timeline } from './timeline.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
@@ -2022,6 +2023,7 @@ bind('tdGo', 'click', async () => {
     app.commit('Generate captions');
     set(1, 'Done', '100%');
     closeDialog('transDialog'); showTab('captions');
+    if (app.shortsAfterCaptions) { app.shortsAfterCaptions = false; setTimeout(() => actions.shorts(), 250); }
     const secs = Math.round((performance.now() - t0) / 1000);
     toast(made.length + ' captions made in ' + (secs < 90 ? secs + ' s' : Math.round(secs / 60) + ' min') + '. Tap one on the timeline to fix a word. Names may need a check.', 7000);
   } catch (e) {
@@ -2033,13 +2035,13 @@ bind('tdGo', 'click', async () => {
       $('tdOptions').hidden = false; $('tdProgress').classList.remove('show'); $('tdWarn').hidden = false; $('tdWarn').textContent = msg; toast(msg, 8000);
     }
   } finally {
-    transJob = null; try { app._wakeT && app._wakeT.release(); } catch { /* ignore */ }
+    app.shortsAfterCaptions = false; transJob = null; try { app._wakeT && app._wakeT.release(); } catch { /* ignore */ }
     $('tdGo').disabled = false; $('tdGo').classList.remove('busy');
     if ($('transDialog').open && !$('tdOptions').hidden) { refreshTransNote(); }
   }
 });
 bind('tdCancel', 'click', () => { if (transJob) transJob.abort(); else closeDialog('transDialog'); });
-bind('transDialog', 'close', () => { if (transJob) transJob.abort(); });
+bind('transDialog', 'close', () => { app.shortsAfterCaptions = false; if (transJob) transJob.abort(); });
 actions.extractAudio = async function extractAudioAction() {
   if (extractJob) { openDialog('extractDialog'); return; }
   const src = extractSource();
@@ -2259,6 +2261,8 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) { pla
 // ---------------------------------------------------------------- Add media dialog + files shared from other apps
 const addMedia = initAddMedia({ importFiles, openDialog, closeDialog });
 app.addMedia = addMedia;
+const shorts = initShorts({ app, media, db, actions, openDialog, closeDialog, toast, cleanProjectName, openProject, showProjects: () => { renderProjectList(); openDialog('projectsDialog'); } });
+app.shorts = shorts; actions.shorts = () => shorts.open();
 let inboxBusy = null;
 /** Take what the service worker stored from the OS share sheet (files, or a link) and put it into the project. */
 function consumeInbox() {
