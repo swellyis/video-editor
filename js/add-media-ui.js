@@ -4,6 +4,8 @@ import { $, fmtBytes } from './util.js';
 import { parseHttpsUrl, extractUrl, fetchMedia, LinkError, LIMITS } from './media-link.js';
 
 export function initAddMedia({ importFiles, openDialog, closeDialog }) {
+  // A stale cached page (old index.html + new scripts) may lack the dialog: do nothing instead of throwing; the page heals itself on reload.
+  if (!document.getElementById('addMediaDialog') || !document.getElementById('linkInput') || !document.getElementById('addMediaBtn')) return { receiveLink: () => false };
   // ------------------------------------------------------------ import from link
   const msg = (id, text, kind) => { const m = $(id); m.textContent = text; m.classList.toggle('err', kind === 'err'); m.classList.toggle('okm', kind === 'ok'); };
   let job = null;
