@@ -727,13 +727,13 @@ export function rippleShift(project, from, delta, { texts = true, audio = true, 
   if (markers) for (const m of project.markers) if (m.time >= from - 1e-6) m.time = Math.max(0, m.time + delta);
 }
 
-export function splitAt(project, t) {
+export function splitAt(project, t, minLen = MIN_CLIP) {
   const lay = layout(project);
   const it = clipAt(lay, t);
   if (!it) return null;
   const c = it.clip;
   const local = t - it.start;
-  if (local < MIN_CLIP || it.end - t < MIN_CLIP) return null;
+  if (local < minLen || it.end - t < minLen) return null;
   const b = deepClone(c);
   b.id = uid('clip'); b.gap = 0; // the second half follows the first directly
   b.transition = { type: 'cut', duration: c.transition.duration };

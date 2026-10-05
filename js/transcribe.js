@@ -259,7 +259,7 @@ export async function transcribe({ project, media, range, language = 'english', 
     for (;;) {
       guard(); if (errors.length) throw errors[0];
       await readMore(more); more = 30;
-      const db = frameDb(buf, Math.round(FRAME * SR)), est = noiseFloor(db); floor = floor == null ? est : 0.6 * floor + 0.4 * est;
+      const db = frameDb(buf, Math.round(FRAME * SR)), est = noiseFloor(db); floor = floor == null ? est : est < floor ? 0.5 * floor + 0.5 * est : 0.9 * floor + 0.1 * est;
       const regs = speechRegions(db, { frameSec: FRAME, floorDb: floor }), len = buf.length / SR;
       if (streamDone) { await emit(splitLong(regs, db, FRAME)); break; }
       const final = regs.filter(r => r.b < len - 2.5);       // followed by at least 2.5 s of audio: the speech really ended there

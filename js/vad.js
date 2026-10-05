@@ -22,6 +22,8 @@ export const noiseFloor = (db) => pct(db, 0.1);
  */
 export function speechRegions(db, { frameSec = 0.02, floorDb = null, marginDb = 9, minDb = -58, absMin = -66, hang = 0.3, minLen = 0.2, mergeGap = 0.5, pre = 0.15, post = 0.2 } = {}) {
   const floor = floorDb == null ? noiseFloor(db) : floorDb, top = pct(db, 0.95);
+  // no contrast between the loud and the quiet frames (and nothing loud): there is no speech here, only a steady noise
+  if (top - floor < 10 && top < -38) return [];
   // quiet recordings: never ask for more than 14 dB below the loud parts; below absMin (-66 dBFS) is always silence
   const thr = Math.max(absMin, Math.min(Math.max(minDb, floor + marginDb), top - 14));
   const regs = []; let start = -1, last = -1;
