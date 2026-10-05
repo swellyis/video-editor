@@ -445,7 +445,7 @@ function fillOutputs() {
 // What to tell the user when a toolbar action can't apply to the current selection.
 const TOOL_HINT = {
   duplicate: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Duplicate.' },
-  delete: { none: 'Nothing selected. Tap a clip, text, overlay, music track or marker on the timeline first, then tap Delete.' },
+  delete: { none: 'Nothing selected. Tap a clip, overlay, text, audio track, caption, blur region or marker on the timeline first, then tap Delete in the timeline toolbar (or press Del).' },
   addKeyframe: {
     caption: 'A caption can’t be keyframed. Select a clip, text, overlay, music or voice track on the timeline, then use ◆ Add in its Keyframes section (or press Shift+K).',
     none: 'Nothing selected. Tap a clip, text, overlay, music or voice track on the timeline first, then use ◆ Add in its Keyframes section (or press Shift+K).',
@@ -758,7 +758,8 @@ function setSelQuiet(list) {
 }
 const groupActions = {
   delete(list) {
-    const n = G.deleteMany(app.project, list, app.rippleEnabled);
+    const n = G.deleteMany(app.project, list || [], app.rippleEnabled);
+    if (!n) { app.selection = null; return toast(TOOL_HINT.delete.none); }
     app.selection = null; app.commit('Delete ' + plural(n, 'item')); toast(plural(n, 'item') + ' deleted. Undo (Ctrl+Z) brings them all back.');
   },
   duplicate(list) {
@@ -807,19 +808,20 @@ const actions = {
     const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', caption: 'Caption', marker: 'Marker' }[s.type];
     app.commit('Duplicate'); toast(what + ' duplicated.');
   },
+  // The timeline toolbar Delete (and the Del/Backspace key) is the only way to delete a timeline item: the per-panel
+  // Delete buttons and the right-click "Delete" were removed. Covers every item type plus multi-select; null-safe.
   delete() {
-    if (app.multi.length) return groupActions.delete(app.multi);
-    const s = app.selection, item = s && selected(s.type);
+    const multi = Array.isArray(app.multi) ? app.multi : [];
+    if (multi.length) return groupActions.delete(multi);
+    const s = app.selection, item = s && s.type && selected(s.type);
     if (!s || !item) return toast(TOOL_HINT.delete.none);
     const p = app.project;
     if (s.type === 'clip') removeClip(p, s.id, app.rippleEnabled);
-    else if (s.type === 'text') p.texts = p.texts.filter(t => t.id !== s.id);
-    else if (s.type === 'audio') p.audio = p.audio.filter(t => t.id !== s.id);
-    else if (s.type === 'marker') p.markers = p.markers.filter(t => t.id !== s.id);
-    else if (s.type === 'overlay') p.overlays = p.overlays.filter(t => t.id !== s.id);
-    else if (s.type === 'blur') p.blurs = p.blurs.filter(t => t.id !== s.id);
-    else if (s.type === 'caption') p.captions = p.captions.filter(t => t.id !== s.id);
-    else return toast(TOOL_HINT.delete.none);
+    else {
+      const key = { text: 'texts', audio: 'audio', marker: 'markers', overlay: 'overlays', blur: 'blurs', caption: 'captions' }[s.type];
+      if (!key) return toast(TOOL_HINT.delete.none);
+      p[key] = (p[key] || []).filter(t => t && t.id !== s.id);
+    }
     const what = { clip: 'Clip', text: 'Text', audio: item.voice ? 'Voice track' : 'Music track', overlay: 'Overlay', blur: 'Blur region', caption: 'Caption', marker: 'Marker' }[s.type];
     app.selection = null; app.commit('Delete'); toast(what + ' deleted. Undo (Ctrl+Z) brings it back.');
   },
@@ -942,11 +944,9 @@ const actions = {
     app.commit('Add text'); showTab('text');
     setTimeout(() => { const ta = qs('#textPanel textarea'); ta && ta.focus(); ta && ta.select(); }, 50);
   },
-  deleteText() { const t = selected('text'); if (!t) return; app.project.texts = app.project.texts.filter(x => x !== t); app.selection = null; app.commit('Delete text'); },
   textStartHere() { const t = selected('text'); if (!t) return; const len = t.end - t.start; t.start = player.t; if (t.end <= t.start + 0.1) t.end = t.start + len; app.commit('Text start'); },
   textEndHere() { const t = selected('text'); if (!t) return; if (player.t > t.start + 0.1) { t.end = player.t; app.commit('Text end'); } else toast('Playhead must be after the text start.'); },
   audioStartHere() { const a = selected('audio'); if (!a) return; a.start = player.t; app.commit('Move music'); },
-  deleteAudio() { const a = selected('audio'); if (!a) return; app.project.audio = app.project.audio.filter(x => x !== a); app.selection = null; app.commit('Remove music'); },
   addMarker() {
     const t = player.t;
     const m = { id: uid('mk'), time: t, name: 'Marker ' + (app.project.markers.length + 1) };
@@ -954,7 +954,6 @@ const actions = {
     app.commit('Add marker'); toast('Marker added at ' + fmt(t) + '. Drag it to move it, or select it and press Delete to remove it.');
   },
   removeLogo() { app.project.logo = null; app.commit('Remove logo'); },
-  deleteOverlay() { const o = selected('overlay'); if (!o) return; app.project.overlays = app.project.overlays.filter(x => x !== o); app.selection = null; app.commit('Delete overlay'); },
   ovlStartHere() { const o = selected('overlay'); if (!o) return; o.start = Math.max(0, player.t); app.commit('Move overlay'); },
   addBlur() {
     const p = app.project, total = layout(p).total;
@@ -965,7 +964,6 @@ const actions = {
     app.commit('Add blur region'); showTab('look');
     toast('Blur region added. Drag it on the preview and pull the handles to resize. Turn on “Blur everything outside” for a background blur.', 4200);
   },
-  deleteBlur() { const b = selected('blur'); if (!b) return; app.project.blurs = app.project.blurs.filter(x => x !== b); app.selection = null; app.commit('Delete blur region'); },
   blurStartHere() { const b = selected('blur'); if (!b) return; const len = b.end - b.start; b.start = Math.max(0, player.t); if (b.end <= b.start + 0.1) b.end = b.start + len; app.commit('Blur start'); },
   blurEndHere() { const b = selected('blur'); if (!b) return; if (player.t > b.start + 0.1) { b.end = player.t; app.commit('Blur end'); } else toast('Playhead must be after the blur region start.'); },
   addKeyframe() {
@@ -1506,7 +1504,7 @@ app.openCtx = (x, y, type, id) => {
   const hasVid = !!one && (list[0].type === 'clip' || list[0].type === 'overlay') && one.kind === 'video' && one.hasAudio !== false && !one.muted;
   const rows = [
     ['Cut', 'cut', 'Ctrl+X', n > 0], ['Copy', 'copy', 'Ctrl+C', n > 0], ['Paste', 'paste', 'Ctrl+V', !!app.clipboard], ['Paste look', 'pasteLook', 'Ctrl+Shift+V', !!app.clipboard && n > 0], null,
-    ['Duplicate', 'duplicate', 'Ctrl+D', n > 0], ['Split at playhead', 'split', 'S', true], ['Delete', 'delete', 'Del', n > 0], null,
+    ['Duplicate', 'duplicate', 'Ctrl+D', n > 0], ['Split at playhead', 'split', 'S', true], null, // Delete lives only on the timeline toolbar (and the Del key)
     ['Detach audio', 'detachAudio', '', hasVid], ['Mute / unmute sound', 'muteSel', '', n > 0], null,
     ['Select all', 'selectAll', 'Ctrl+A', true],
   ];

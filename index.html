@@ -176,7 +176,6 @@
             <div class="button-row" style="margin-top:12px">
               <button class="btn secondary" data-action="moveLeft" type="button" aria-label="Move earlier">←</button>
               <button class="btn secondary" data-action="moveRight" type="button" aria-label="Move later">→</button>
-              <button class="btn ghost danger" data-action="delete" type="button" title="Delete (Del)">Delete</button>
             </div>
           </section>
           <section class="section" id="speedSection">
@@ -452,7 +451,6 @@
               <label><span class="label">Fade in (s)</span><input class="field mono" type="number" min="0" max="5" step="0.1" data-bind="text.fadeIn" data-commit="change" /></label>
               <label><span class="label">Fade out (s)</span><input class="field mono" type="number" min="0" max="5" step="0.1" data-bind="text.fadeOut" data-commit="change" /></label>
             </div>
-            <div class="button-row" style="margin-top:12px"><button class="btn ghost danger" data-action="deleteText" type="button">Delete text</button></div>
           </section>
         </div>
       </div>
@@ -595,7 +593,7 @@
               <p class="hint" id="duckHint">Lowers this track while speech is present. Same envelope in the preview and the export. Attack starts before the speech; release fades back after.</p>
             </div>
             <section class="section kf-panel" data-kf="audio"></section>
-            <div class="button-row" style="margin-top:12px"><button class="btn secondary" data-action="audioStartHere" type="button">Start at playhead</button><button class="btn ghost danger" data-action="deleteAudio" type="button">Remove track</button></div>
+            <div class="button-row" style="margin-top:12px"><button class="btn secondary" data-action="audioStartHere" type="button">Start at playhead</button></div>
           </section>
         </div>
       </div>
@@ -619,7 +617,7 @@
               <label><span class="label">Trim in (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="ovl.in" data-commit="change" /></label>
               <label><span class="label">Trim out (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="ovl.out" data-commit="change" /></label>
             </div>
-            <div class="button-row" style="margin-top:10px"><button class="btn secondary" data-action="ovlStartHere" type="button">Start at playhead</button><button class="btn ghost danger" data-action="deleteOverlay" type="button">Delete</button></div>
+            <div class="button-row" style="margin-top:10px"><button class="btn secondary" data-action="ovlStartHere" type="button">Start at playhead</button></div>
           </section>
           <section class="section" id="ovlSpeedSection">
             <h2 class="sh">Speed</h2>
@@ -753,7 +751,6 @@
               <label><span class="label">End (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="blur.end" data-commit="change" /></label>
             </div>
             <div class="button-row" style="margin-top:8px"><button class="btn secondary" data-action="blurStartHere" type="button">Start at playhead</button><button class="btn secondary" data-action="blurEndHere" type="button">End at playhead</button></div>
-            <div class="button-row" style="margin-top:8px"><button class="btn ghost danger" data-action="deleteBlur" type="button">Delete</button></div>
           </section>
         </div>
         <section class="section">
