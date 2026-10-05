@@ -1,5 +1,5 @@
 /* Video Editor service worker: offline app shell (versioned cache) + share target inbox. */
-const VERSION = 'v6918ac78f4';
+const VERSION = 'va0c4e8ecbc';
 const CACHE = 'video-editor-shell-' + VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
