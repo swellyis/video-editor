@@ -33,6 +33,7 @@ import { FILTERS, GROUPS as FILTER_GROUPS } from './filters.js';
 import { Timeline } from './timeline.js';
 import * as G from './group.js';
 import { insertFreeze, freezeTarget, freezeLen, FREEZE_DEFAULT } from './freeze.js';
+import { autoReframeClip, ReframeCancelled } from './reframe-run.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
 import { initLayout } from './layout-ui.js';
@@ -826,6 +827,52 @@ const actions = {
       toast('Froze the frame for ' + freezeLen(+$('freezeDur').value || FREEZE_DEFAULT) + ' s. Undo (Ctrl+Z) takes it back.');
     } catch (e) { console.warn('Freeze frame', e); toast('Could not freeze a frame: ' + (e && e.message ? e.message : 'unknown error')); }
     finally { delete btn.dataset.busy; btn.textContent = '❄ Freeze frame at playhead'; }
+  },
+  async autoReframe() {
+    const c = selected('clip');
+    if (!c) return toast('Select a video clip first.');
+    if (c.kind === 'image') return toast('Auto reframe needs a video clip (not a still image).');
+    if (!c.mediaId) return toast('This clip has no video file.');
+    const btn = $('reframeBtn'), prog = $('reframeProg'), bar = $('reframeBar'), st = $('reframeStatus');
+    if (btn && btn.dataset.busy) return;
+    if (btn) { btn.dataset.busy = '1'; btn.disabled = true; }
+    if (prog) prog.hidden = false;
+    if (bar) bar.style.width = '0%';
+    if (st) st.textContent = 'Loading face model…';
+    const ac = new AbortController();
+    const onCancel = () => ac.abort();
+    if ($('reframeCancel')) $('reframeCancel').onclick = onCancel;
+    player.pause();
+    try {
+      const target = ($('reframeTarget') && $('reframeTarget').value) || 'project';
+      const setRatio = !($('reframeSetRatio') && !$('reframeSetRatio').checked);
+      const r = await autoReframeClip(app.project, c, async () => {
+        const m = await media.get(c.mediaId); return m && m.blob;
+      }, {
+        target, setProjectRatio: setRatio && target !== 'project', setFit: true, signal: ac.signal,
+        onProgress: (p) => {
+          const frac = Math.max(0, Math.min(1, p.frac || 0));
+          if (bar) bar.style.width = (frac * 100).toFixed(1) + '%';
+          if (!st) return;
+          if (p.phase === 'download') st.textContent = 'Downloading face model…';
+          else if (p.phase === 'load') st.textContent = 'Loading face model…';
+          else if (p.phase === 'detect') st.textContent = 'Tracking face… ' + (p.i || 0) + '/' + (p.n || '?');
+          else st.textContent = 'Working…';
+        },
+      });
+      app.commit('Auto reframe');
+      sizeStage(); renderAll();
+      const msg = r.faces
+        ? ('Reframed with ' + r.keys + ' keyframes (' + r.faces + ' faces found). Edit them under Keyframes.')
+        : ('No face found — centred the crop (' + r.keys + ' keyframes). Undo if you want the old framing.');
+      toast(msg, 5000);
+    } catch (e) {
+      if (e instanceof ReframeCancelled || (e && e.name === 'ReframeCancelled')) toast('Auto reframe cancelled.');
+      else { console.warn('Auto reframe', e); toast('Could not auto reframe: ' + (e && e.message ? e.message : 'unknown error'), 6000); }
+    } finally {
+      if (btn) { delete btn.dataset.busy; btn.disabled = false; }
+      if (prog) prog.hidden = true;
+    }
   },
   volumeDown(_b, ev) { stepSelectedVolume(-1, ev); },
   volumeUp(_b, ev) { stepSelectedVolume(1, ev); },

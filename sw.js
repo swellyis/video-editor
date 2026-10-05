@@ -5,7 +5,7 @@ const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css', './css/fonts.css',
   './js/app.js', './js/util.js', './js/db.js', './js/model.js', './js/designer.js', './js/designer-ui.js', './js/render.js', './js/blur.js', './js/media-link.js', './js/add-media-ui.js', './js/shorts.js', './js/shorts-ui.js', './js/shorts-scan.js', './js/match.js', './js/textanim.js', './js/textanim-ui.js', './js/layout.js', './js/layout-ui.js', './js/freeze.js', './js/group.js', './js/ramp.js', './js/speed-ui.js', './js/match-ui.js', './js/player.js', './js/timeline.js', './js/media.js', './js/audio.js', './js/extract.js', './js/exporter.js', './js/templates.js', './js/install.js', './js/install-early.js', './js/build.js',
-  './js/heic-worker.js', './js/captions.js', './js/transcribe.js', './js/whisper-worker.js', './js/vad.js', './js/asr-plan.js', './js/transcript-ui.js', './js/fillers.js', './js/cut.js', './js/duck.js',
+  './js/heic-worker.js', './js/captions.js', './js/transcribe.js', './js/whisper-worker.js', './js/vad.js', './js/asr-plan.js', './js/transcript-ui.js', './js/fillers.js', './js/cut.js', './js/duck.js', './js/reframe.js', './js/reframe-run.js', './js/face.js',
   './js/clean.js', './js/clean-ui.js', './js/voice-ui.js', './js/silence.js', './js/silence-scan.js', './js/silence-ui.js', './js/sync.js', './js/sync-scan.js', './js/sync-ui.js', './js/beat.js', './js/beat-scan.js', './js/beat-ui.js', './js/transitions.js', './js/transition-ui.js', './js/transition-thumbs.js', './js/effects.js', './js/effects-ui.js', './js/filters.js', './js/filters-ui.js', './js/fx-gl.js', './js/voice-dsp.js', './js/clean-dsp.js', './js/clean-worker.js', './vendor/clean/rnnoise.js', './vendor/clean/rnnoise.wasm', // Clean voice "Light" (RNNoise, ~125 KB); the big "Strong" model is never precached
  
   './vendor/mediabunny.min.mjs', './vendor/gifuct.min.mjs', './vendor/libheif/libheif.js', './vendor/libheif/libheif.wasm',
@@ -78,6 +78,18 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
   // The speech-to-text runtime (~22 MB of WebAssembly) is NOT part of the app shell. It is fetched the first time captions are
   // generated and kept in its own cache that survives app updates (the shell cache is replaced on every version).
+  // Face tracking (MediaPipe BlazeFace + WASM, ~11 MB): not in the shell; cached in video-editor-ai on first Auto reframe / Shorts reframe.
+  if (url.pathname.includes('/vendor/mediapipe/')) {
+    event.respondWith((async () => {
+      const c = await caches.open('video-editor-ai');
+      const hit = await c.match(req, { ignoreSearch: true });
+      if (hit) return hit;
+      const res = await fetch(req);
+      if (res.ok && res.type === 'basic') c.put(req, res.clone());
+      return res;
+    })());
+    return;
+  }
   if (url.pathname.includes('/vendor/whisper/')) {
     event.respondWith((async () => {
       const c = await caches.open('video-editor-ai');

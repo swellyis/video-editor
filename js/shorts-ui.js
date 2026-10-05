@@ -4,6 +4,7 @@ import { $, el, fmt } from './util.js';
 import { layout } from './model.js';
 import { captionAt } from './captions.js';
 import { findCandidates, nudge, wordsOf, makeShortProject, cropOffset } from './shorts.js';
+import { autoReframeClip } from './reframe-run.js';
 
 const STEP = 0.5;       // seconds per nudge tap
 const PRESELECT = 3;    // the best few start ticked
@@ -144,6 +145,22 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
         const r = makeShortProject(p, c.start, c.end, { name, offset: off, has });
         if (!r.clips || r.project.clips.every(x => x.kind === 'video' && !has(x.mediaId))) { skipped.push(name); continue; }
         if (r.missing.length) warn.push(name);
+        if ($('shReframe') && $('shReframe').checked) {
+          const rp = $('shReframeProg'), rb = $('shReframeBar'), rs = $('shReframeStatus');
+          if (rp) rp.hidden = false;
+          try {
+            for (const clip of r.project.clips.filter(x => x.kind !== 'image' && x.mediaId && has(x.mediaId))) {
+              await autoReframeClip(r.project, clip, async () => { const m = media.peek(clip.mediaId) || await media.get(clip.mediaId); return m && m.blob; }, {
+                target: '9:16', setProjectRatio: false, setFit: true,
+                onProgress: (pr) => {
+                  if (rb) rb.style.width = (((i + (pr.frac || 0)) / chosen.length) * 100).toFixed(1) + '%';
+                  if (rs) rs.textContent = 'Reframing Short ' + (i + 1) + '/' + chosen.length + '…';
+                },
+              });
+            }
+          } catch (e) { console.warn('Shorts reframe', e); warn.push(name + ' (reframe skipped)'); }
+          if (rp) rp.hidden = true;
+        }
         r.project.updated = now + (chosen.length - i); r.project.created = now;
         await db.saveProject(r.project);
         made.push({ id: r.project.id, name, start: c.start, end: c.end });
