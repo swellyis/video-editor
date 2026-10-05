@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { duckFactor, mergeIntervals, intervalsFromCaptions, intervalsFromPeaks, speechForTrack, normalizeDuck, dbToLevel, levelToDb, duckEnvelope, DEFAULT_DB } from '../js/duck.js';
-import { newProject, newClipFromMedia, newAudio, layout, musicGain, duckIntervalsFor } from '../js/model.js';
+import { newProject, newClipFromMedia, newAudio, layout, musicGain } from '../js/model.js';
 import { newCaption } from '../js/captions.js';
 
 test('db ↔ level round-trip (10 dB ≈ 0.316)', () => {
