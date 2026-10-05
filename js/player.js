@@ -320,7 +320,10 @@ export class Player {
   render() {
     const p = this.getProject();
     const W = this.canvas.width, H = this.canvas.height;
-    const r = this.comp.render(this.ctx, W, H, p, this.lay, this.t, this.getSource, { getLogo: this.getLogo, getOverlaySource: this.getOverlaySource });
+    const r = this.comp.render(this.ctx, W, H, p, this.lay, this.t, this.getSource, {
+      getLogo: this.getLogo, getOverlaySource: this.getOverlaySource,
+      getBgImage: (id) => { const im = this.media.imageSync(id); if (!im) { this.media.image(id).then(() => this.requestRender()).catch(() => {}); return null; } return im; },
+    });
     this.lastBoxes = r.boxes;
     return r;
   }

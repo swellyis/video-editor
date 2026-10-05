@@ -7,6 +7,8 @@ import { BlurFX } from './blur.js';
 import { FxGL } from './fx-gl.js';
 import { activeFx } from './effects.js';
 import { newIn, newOut, loopFx, karaokeCount } from './textanim.js';
+import { applyBgRemove, bgRemoveActive } from './bgremove.js';
+import { loadSegmenter, segmentPerson } from './segment.js';
 
 const VERT = `attribute vec2 p;varying vec2 uv;void main(){uv=vec2((p.x+1.0)*0.5,1.0-(p.y+1.0)*0.5);gl_Position=vec4(p,0.0,1.0);}`;
 const FRAG = `precision mediump float;varying vec2 uv;uniform sampler2D tex;
@@ -422,6 +424,34 @@ export class Compositor {
   _glo() { if (!this.glo) this.glo = new ColorGL(); return this.glo.ok ? this.glo : null; }
   _fx() { return sharedBlurFX(); }
   _key() { if (!this.key) this.key = new KeyGL(); return this.key.ok ? this.key : null; }
+  /** Lazy person segmenter (Selfie). Shared across frames; first call may be slow while the model loads. */
+  async ensureSegmenter() {
+    if (this._seg) return this._seg;
+    if (!this._segP) this._segP = loadSegmenter({ kind: 'landscape' }).then(s => { this._seg = s; return s; });
+    return this._segP;
+  }
+  /** Sync mask for src; key avoids re-running on the same preview frame. Kick off ensureSegmenter if needed. */
+  personMask(src, key) {
+    if (!this._seg) { this.ensureSegmenter(); return this._lastMask || null; }
+    if (key && key === this._maskKey && this._lastMask) return this._lastMask;
+    const m = segmentPerson(this._seg, src, { maxEdge: 640 });
+    if (m) { this._lastMask = m; this._maskKey = key; }
+    return m;
+  }
+  /** Apply bgremove to a source image/canvas; returns canvas/img to draw. bgImage optional HTMLImage/canvas. */
+  withBgRemove(item, srcImg, key, bgImage) {
+    const br = item && item.bgremove;
+    if (!br || br.mode === 'off') return srcImg;
+    const mask = this.personMask(srcImg, key || (item.id + ':' + br.mode));
+    if (!mask) return srcImg; // model still loading
+    if (!this._bgOut) this._bgOut = document.createElement('canvas');
+    let bg = bgImage;
+    if (!bg && br.mode === 'image' && br.mediaId && this._bgImageFn) {
+      const im = this._bgImageFn(br.mediaId);
+      bg = im && (im.img || im);
+    }
+    return applyBgRemove(srcImg, mask, { mode: br.mode, soft: br.soft, color: br.color, strength: br.strength, bgImage: bg, out: this._bgOut });
+  }
 
   drawOverlay(ctx, W, H, o, src, local, opts = {}) {
     const A = animated('overlay', o, local);
@@ -431,6 +461,9 @@ export class Compositor {
     if (o.fadeOut > 0) a *= clamp((len - local) / o.fadeOut, 0, 1);
     const bw = Math.max(4, o.w * W * A.scale), bh = bw * src.h / src.w;
     let img = src.img;
+    if (bgRemoveActive(o)) {
+      img = this.withBgRemove(o, img, o.id + ':' + (opts.t != null ? opts.t.toFixed(2) : local.toFixed(2)), opts.bgImage) || img;
+    }
     if (o.chroma && o.chroma.enabled) {
       const k = this._key();
       if (k) {
@@ -501,9 +534,17 @@ export class Compositor {
     return { cx: W / 2 - px * ox, cy: H / 2 - py * oy, s, rot, angle: tr.angle || 0, flipH: !!tr.flipH, flipV: !!tr.flipV, sw, sh };
   }
 
-  drawSource(ctx, src, clip, W, H, fit, progress, bg) {
-    const { img, w: sw, h: sh } = src;
+  drawSource(ctx, src, clip, W, H, fit, progress, bg, opts = {}) {
+    let { img, w: sw, h: sh } = src;
     if (!sw || !sh) return;
+    if (bgRemoveActive(clip)) {
+      const keyed = this.withBgRemove(clip, img, opts.maskKey || (clip.id + ':' + (opts.t || 0).toFixed(2)), opts.bgImage);
+      if (keyed && keyed !== img) {
+        img = keyed; sw = keyed.width; sh = keyed.height;
+        // remove mode: transparent person over project bg — draw bg first then person-only already composited for blur/color/image;
+        // for remove, applyBgRemove clears then draws person; drawSource still paints project bg behind.
+      }
+    }
     // background
     if (bg.mode === 'blur') {
       // Cheap, cross-browser blur: render a tiny cover-scaled copy, then upscale with smoothing.
@@ -539,6 +580,9 @@ export class Compositor {
    * getSource(item) -> {img,w,h} | null ; getLogo() -> {img,w,h} | null
    */
   render(ctx, W, H, project, lay, t, getSource, opts = {}) {
+    this._bgImageFn = opts.getBgImage || null;
+    // Warm the segmenter when any clip/overlay needs it (first frame may hitch; then ~2–10 ms/frame).
+    if (!this._seg && (project.clips || []).concat(project.overlays || []).some(x => x.bgremove && x.bgremove.mode && x.bgremove.mode !== 'off')) this.ensureSegmenter();
     const s = project.settings;
     const bgOf = (mode) => ({ mode: mode === 'blur' ? 'blur' : 'color', color: mode === 'white' ? '#ffffff' : mode === 'color' ? (s.bgColor || '#000') : '#000000' });
     const projBg = bgOf(s.bg);
@@ -585,12 +629,12 @@ export class Compositor {
         if (!unit && !gl && !fxg && (colorIsNeutral(col) || !this.filterOK)) {
           ctx.globalAlpha = a;
           if (bf) ctx.filter = bf;
-          this.drawSource(ctx, src, c, W, H, fit, prog, bg);
+          this.drawSource(ctx, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2) });
         } else {
           if (this.layer.width !== W || this.layer.height !== H) { this.layer.width = W; this.layer.height = H; }
           const l = this.lctx;
           l.globalAlpha = 1; l.filter = 'none';
-          this.drawSource(l, src, c, W, H, fit, prog, bg);
+          this.drawSource(l, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2) });
           ctx.globalAlpha = a;
           if (fxg) { // colour first, then the clip's effects (Effects tab), then the transition's blur / fade
             let pic = this.layer;

@@ -34,6 +34,7 @@ import { Timeline } from './timeline.js';
 import * as G from './group.js';
 import { insertFreeze, freezeTarget, freezeLen, FREEZE_DEFAULT } from './freeze.js';
 import { autoReframeClip, ReframeCancelled } from './reframe-run.js';
+import { loadSegmenter } from './segment.js';
 import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
 import * as trans from './transcribe.js';
 import { initLayout } from './layout-ui.js';
@@ -382,6 +383,11 @@ function afterSet(path, obj, old, before) {
   if (path === 'text.anim.in' || path === 'text.anim.out') { const t = selected('text'); const d = t.end - t.start; if (t.anim.inDur + t.anim.outDur > d) { t.anim.inDur = Math.min(t.anim.inDur, d * 0.6); t.anim.outDur = Math.min(t.anim.outDur, d * 0.35); } }
   if (path === 'proj.settings.ratio' || path === 'proj.settings.res') sizeStage();
   if (path.startsWith('proj.settings.') && ['res', 'fps', 'quality', 'format'].includes(path.split('.')[2])) refreshCaps();
+  if (path.includes('bgremove')) {
+    const which = path.startsWith('ovl') ? 'ovl' : 'clip';
+    syncBgRemoveUI(which === 'ovl' ? selected('overlay') : selected('clip'), which);
+    if (player && player.requestRender) player.requestRender();
+  }
 }
 const FMT = {
   x: v => (+v).toFixed(2).replace(/\.?0+$/, '') + '×', pct: v => Math.round(v * 100) + '%', s: v => (+v).toFixed(1) + 's',
@@ -515,6 +521,7 @@ function fillInspector() {
   $('blurPanel').hidden = !bl; $('blurEmptyHint').hidden = (p.blurs || []).length > 0;
   if (bl) $('blurRadiusRow').hidden = bl.shape === 'ellipse';
   const cbl = c && c.blur; $('clipBlurBody').hidden = !(cbl && cbl.enabled); $('clipBlurKeep').hidden = !(cbl && cbl.enabled && cbl.keep);
+  syncBgRemoveUI(c, 'clip');
   syncBlurBox();
   $('overlayPanel').hidden = !o; $('overlayEmptyHint').hidden = (p.overlays || []).length > 0;
   if (o) {
@@ -523,7 +530,8 @@ function fillInspector() {
     $('ovlSpeedSection').hidden = o.kind === 'image';
     $('ovlSoundSection').hidden = o.kind === 'image' || !o.hasAudio;
     $('ovlOfflineBanner').hidden = media.has(o.mediaId);
-  }
+    syncBgRemoveUI(o, 'ovl');
+  } else if ($('ovlBgBody')) $('ovlBgBody').hidden = true;
   renderKfPanels();
   $('textPanel').hidden = !t; $('textEmptyHint').hidden = p.texts.length > 0; if (t) taUI.render();
   const a = selected('audio');
@@ -631,6 +639,48 @@ $('clipIn').addEventListener('change', () => { if (trimFrom('inputs')) trimCommi
 $('clipOut').addEventListener('change', () => { if (trimFrom('inputs')) trimCommit(); });
 $('imageDur').addEventListener('input', () => { const c = selected('clip'); if (!c) return; const b = layout(app.project); app._pendingTrimRipple = app._pendingTrimRipple || { end: b.items.find(i => i.clip.id === c.id).end, total: b.total, id: c.id, lay0: b }; c.out = c.in + parseFloat($('imageDur').value); app.liveUpdate(); });
 $('imageDur').addEventListener('change', trimCommit);
+
+function syncBgRemoveUI(item, which) {
+  const body = $(which === 'ovl' ? 'ovlBgBody' : 'clipBgBody');
+  if (!body) return;
+  const br = item && item.bgremove;
+  const on = !!(br && br.mode && br.mode !== 'off');
+  body.hidden = !on;
+  const blurRow = $(which === 'ovl' ? 'ovlBgBlurRow' : 'clipBgBlurRow');
+  const colorRow = $(which === 'ovl' ? 'ovlBgColorRow' : 'clipBgColorRow');
+  const imgRow = $(which === 'ovl' ? 'ovlBgImageRow' : 'clipBgImageRow');
+  if (blurRow) blurRow.hidden = !(br && br.mode === 'blur');
+  if (colorRow) colorRow.hidden = !(br && br.mode === 'color');
+  if (imgRow) imgRow.hidden = !(br && br.mode === 'image');
+  const nameEl = $(which === 'ovl' ? 'ovlBgImgName' : 'clipBgImgName');
+  if (nameEl) {
+    if (br && br.mediaId && media.peek(br.mediaId)) { nameEl.hidden = false; nameEl.textContent = media.peek(br.mediaId).name || 'Image selected'; }
+    else { nameEl.hidden = true; nameEl.textContent = ''; }
+  }
+  if (on) loadSegmenter({ kind: 'landscape' }).then(() => player && player.requestRender && player.requestRender()).catch(e => console.warn('segmenter', e));
+}
+async function pickBgImage(which) {
+  const input = $(which === 'ovl' ? 'ovlBgImgInput' : 'clipBgImgInput');
+  if (!input) return;
+  input.value = '';
+  input.onchange = async () => {
+    const f = input.files && input.files[0]; if (!f) return;
+    try {
+      const rec = await media.importFile(f, 'image');
+      const item = which === 'ovl' ? selected('overlay') : selected('clip');
+      if (!item) return;
+      item.bgremove = item.bgremove || {}; item.bgremove.mode = 'image'; item.bgremove.mediaId = rec.id;
+      app.commit('Background image');
+      syncBgRemoveUI(item, which);
+      toast('Replacement image set.');
+    } catch (e) { toast('Could not add image: ' + (e && e.message || e)); }
+  };
+  input.click();
+}
+
+if ($('clipBgPickImg')) $('clipBgPickImg').onclick = () => pickBgImage('clip');
+if ($('ovlBgPickImg')) $('ovlBgPickImg').onclick = () => pickBgImage('ovl');
+
 if ($('freezeDur')) $('freezeDur').addEventListener('input', () => { $('freezeDurOut').textContent = (+$('freezeDur').value).toFixed(1).replace(/\.0$/, '') + 's'; });
 $('audioLenInput').addEventListener('change', () => {
   const a = selected('audio'); if (!a) return; const l = parseFloat($('audioLenInput').value); if (!(l > 0)) return;

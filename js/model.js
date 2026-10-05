@@ -10,6 +10,8 @@ export const MIN_CLIP = 0.1; // seconds on timeline
 import * as RAMP from './ramp.js';
 import { PRESETS, KEYS as COLOR_KEYS, filterParams, amountOf, normFilter } from './filters.js';
 import { normalizeDuck, duckFactor, speechForTrack, DEFAULT_ATTACK, DEFAULT_RELEASE, dbToLevel } from './duck.js';
+import { normalizeBgRemove } from './bgremove.js';
+export { defaultBgRemove } from './bgremove.js';
 export { PRESETS };
 export const FONTS = {
   sans: { label: 'Plex Sans Bold', css: '700 {s}px "IBM Plex Sans", system-ui, sans-serif' },
@@ -222,6 +224,7 @@ export function normalizeClip(c) {
     transform: Object.assign(defaultTransform(), c.transform || {}),
     transition: normTransition(c.transition),
     blur: Object.assign(defaultClipBlur(), c.blur && typeof c.blur === 'object' ? c.blur : {}),
+    bgremove: normalizeBgRemove(c.bgremove),
     fx: normFx(c.fx),
   });
 }
@@ -275,7 +278,7 @@ export function normalizeOverlay(o) {
     id: uid('ovl'), kind: 'video', mediaId: null, name: 'Overlay', srcDuration: 1, width: 16, height: 9, hasAudio: false,
     start: 0, in: 0, out: 1, speed: 1, x: 0.76, y: 0.26, w: 0.36, radius: 0.12, opacity: 1, rotation: 0, scale: 1,
     border: 0, borderColor: '#ffffff', shadow: true, volume: 1, muted: true, fadeIn: 0.25, fadeOut: 0.25,
-  }, o, { chroma: Object.assign(defaultChroma(), o.chroma || {}), keyframes: o.keyframes || {}, fx: normFx(o.fx), color: tidyColor({ preset: 'none', filterAmount: 1, ...(o.color && typeof o.color === 'object' ? { preset: o.color.preset, filterAmount: o.color.filterAmount } : {}) }) });
+  }, o, { chroma: Object.assign(defaultChroma(), o.chroma || {}), bgremove: normalizeBgRemove(o.bgremove), keyframes: o.keyframes || {}, fx: normFx(o.fx), color: tidyColor({ preset: 'none', filterAmount: 1, ...(o.color && typeof o.color === 'object' ? { preset: o.color.preset, filterAmount: o.color.filterAmount } : {}) }) });
 }
 export function newOverlay(media, start, settings) {
   const isImg = media.kind === 'image';

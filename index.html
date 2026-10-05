@@ -320,6 +320,31 @@
             </div>
           </section>
           <section class="section kf-panel" data-kf="clip"></section>
+          
+            <div id="bgRemoveBlock" class="bgremove-block" style="margin-top:14px">
+              <div class="section-head"><h2 style="font-size:inherit;margin:0">Background remove</h2></div>
+              <p class="hint">Cut the person out on this device (Selfie Segmenter, ~10 MB first use). Same result in preview and export; long clips are slower to export.</p>
+              <label><span class="label">Mode</span>
+                <select data-bind="clip.bgremove.mode" id="clipBgMode">
+                  <option value="off">Off</option>
+                  <option value="remove">Remove background</option>
+                  <option value="blur">Blur background</option>
+                  <option value="color">Replace with colour</option>
+                  <option value="image">Replace with image</option>
+                </select>
+              </label>
+              <div id="clipBgBody" hidden>
+                <div class="slider-row"><label>Edge softness</label><input type="range" min="0" max="1" step="0.01" data-bind="clip.bgremove.soft" /><output data-out="clip.bgremove.soft" data-fmt="pct"></output></div>
+                <div class="slider-row" id="clipBgBlurRow" hidden><label>Blur amount</label><input type="range" min="0" max="1" step="0.01" data-bind="clip.bgremove.strength" /><output data-out="clip.bgremove.strength" data-fmt="pct"></output></div>
+                <label id="clipBgColorRow" hidden><span class="label">Colour</span><input class="field color" type="color" data-bind="clip.bgremove.color" /></label>
+                <div id="clipBgImageRow" hidden style="margin-top:8px">
+                  <button class="btn secondary small" type="button" id="clipBgPickImg">Choose replacement image…</button>
+                  <input type="file" id="clipBgImgInput" accept="image/*" hidden />
+                  <p class="hint" id="clipBgImgName" hidden></p>
+                </div>
+              </div>
+            </div>
+
           <section class="section" id="clipBlurSection">
             <div class="section-head"><h2>Blur background</h2></div>
             <button type="button" class="tog-btn" data-toggle="clip.blur.enabled" aria-pressed="false"><span class="tg-sw" aria-hidden="true"></span><span class="tg-l">Blur this clip</span></button>
@@ -629,6 +654,30 @@
             <div class="slider-row"><label>Volume</label><input type="range" min="0" max="2" step="0.05" data-bind="ovl.volume" /><output data-out="ovl.volume" data-fmt="pct"></output><button class="kf-dia" type="button" data-action="addVolumeKey" aria-label="Keyframe the volume at the playhead" title="Keyframe the volume at the playhead (listed under Keyframes)">◆</button></div>
           </section>
           <section class="section">
+            
+            <div id="ovlBgRemoveBlock" class="bgremove-block" style="margin-top:14px">
+              <div class="section-head"><h2 style="font-size:inherit;margin:0">Background remove</h2></div>
+              <label><span class="label">Mode</span>
+                <select data-bind="ovl.bgremove.mode" id="ovlBgMode">
+                  <option value="off">Off</option>
+                  <option value="remove">Remove background</option>
+                  <option value="blur">Blur background</option>
+                  <option value="color">Replace with colour</option>
+                  <option value="image">Replace with image</option>
+                </select>
+              </label>
+              <div id="ovlBgBody" hidden>
+                <div class="slider-row"><label>Edge softness</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.bgremove.soft" /><output data-out="ovl.bgremove.soft" data-fmt="pct"></output></div>
+                <div class="slider-row" id="ovlBgBlurRow" hidden><label>Blur amount</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.bgremove.strength" /><output data-out="ovl.bgremove.strength" data-fmt="pct"></output></div>
+                <label id="ovlBgColorRow" hidden><span class="label">Colour</span><input class="field color" type="color" data-bind="ovl.bgremove.color" /></label>
+                <div id="ovlBgImageRow" hidden style="margin-top:8px">
+                  <button class="btn secondary small" type="button" id="ovlBgPickImg">Choose replacement image…</button>
+                  <input type="file" id="ovlBgImgInput" accept="image/*" hidden />
+                  <p class="hint" id="ovlBgImgName" hidden></p>
+                </div>
+              </div>
+            </div>
+
             <h2 class="sh">Green screen (chroma key)</h2>
             <label class="check"><input type="checkbox" data-bind="ovl.chroma.enabled" id="chromaEnable" /> Remove background color</label>
             <div class="field-row" style="margin-top:6px">

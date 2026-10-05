@@ -164,6 +164,10 @@ async function exportFast(project, media, { onProgress, signal, format, openSink
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d', { alpha: false });
   const comp = new Compositor();
+  // Background remove needs the Selfie Segmenter ready before the first frame (same path as preview).
+  if ((project.clips || []).concat(project.overlays || []).some(x => x.bgremove && x.bgremove.mode && x.bgremove.mode !== 'off')) {
+    await comp.ensureSegmenter();
+  }
   // Streamed sinks write straight to disk (MP4 index at the end, no seeking back through a giant buffer).
   const streamed = !!(sink && sink.writable);
   const output = new mb.Output({
@@ -295,7 +299,7 @@ async function exportFast(project, media, { onProgress, signal, format, openSink
         if (f) sources.set(o.id, f);
         if (lastFrame.get(o.id) === k) { r.close(); readers.delete(o.id); }
       }
-      comp.render(ctx, W, H, project, lay, (k + 0.001) / fps, (it) => sources.get(it.clip.id) || null, { getLogo: () => logo, getOverlaySource: (o) => sources.get(o.id) || null });
+      comp.render(ctx, W, H, project, lay, (k + 0.001) / fps, (it) => sources.get(it.clip.id) || null, { getLogo: () => logo, getOverlaySource: (o) => sources.get(o.id) || null, getBgImage: (id) => sources.get(id) || null });
       await vsrc.add(t, 1 / fps);
       await feedAudio(t + 2);
       if (k % 3 === 0 || k === N - 1) {
@@ -343,6 +347,9 @@ async function exportRealtime(project, media, { onProgress, signal, format, open
   canvas.style.cssText = 'position:fixed;left:-99999px;top:0;width:2px;height:2px;';
   document.body.appendChild(canvas);
   const comp = new Compositor();
+  if ((project.clips || []).concat(project.overlays || []).some(x => x.bgremove && x.bgremove.mode && x.bgremove.mode !== 'off')) {
+    await comp.ensureSegmenter();
+  }
   const player = new Player({ canvas, getProject: () => project, media, compositor: comp, audio: false });
   player.invalidate();
   const AC = window.AudioContext || window.webkitAudioContext;
