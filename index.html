@@ -418,7 +418,34 @@
           <p class="hint" id="capEmptyHint">Turn your speech into captions on this device (nothing is uploaded), import an .srt, or add them by hand. They appear as blocks on the timeline (move them to any lane) and are burned into the export.</p>
           <div class="button-row"><button class="btn secondary small" data-action="addCaption" type="button">＋ Caption at playhead</button><button class="btn secondary small" data-action="shorts" id="shortsBtn" type="button" title="Find the best 30–60 second moments and make vertical Shorts from them">✂ Shorts…</button><span class="hint grow" id="capCount"></span></div>
         </section>
-        <div id="capPanel" hidden>
+        
+        <section class="section" id="txSection">
+          <div class="section-head"><h2>Transcript</h2>
+            <button class="btn secondary small" id="txShowFillers" type="button" aria-expanded="false" title="Find and remove um, uh, repeated words…">Filler words…</button>
+          </div>
+          <p class="hint" id="txEmpty">Generate captions from speech (✨ Generate…) to get a transcript you can edit. Deleting words cuts them from the timeline.</p>
+          <div id="txTools" class="tx-tools" hidden>
+            <button class="btn secondary small" id="txDelete" type="button" disabled>Delete selected</button>
+            <button class="btn ghost small" id="txSelectAll" type="button">Select all</button>
+            <button class="btn ghost small" id="txClearSel" type="button">Clear</button>
+            <span class="hint grow" id="txSelCount"></span>
+          </div>
+          <div id="txList" class="tx-list" role="listbox" aria-label="Transcript words" aria-multiselectable="true" hidden tabindex="0"></div>
+          <div id="txFillers" class="tx-fillers" hidden>
+            <div id="txFillBody" hidden>
+              <p class="hint" id="txFillSum"></p>
+              <div class="tx-fill-opts">
+                <label class="check"><input type="checkbox" id="txOptPhrases" checked /> <span>Phrases (you know, sort of…)</span></label>
+                <label class="check"><input type="checkbox" id="txOptLike" /> <span>Also “like / basically / actually”</span></label>
+                <label class="check"><input type="checkbox" id="txOptStutter" checked /> <span>Repeated words (stutters)</span></label>
+              </div>
+              <p class="hint">Whisper often drops um/uh/er from the transcript — only what was timed can be removed. Keep any hit you want to leave in.</p>
+              <div id="txFillList" class="tx-fill-list"></div>
+              <div class="button-row" style="margin-top:8px"><button class="btn primary small" id="txRemoveFillers" type="button">Remove all listed</button></div>
+            </div>
+          </div>
+        </section>
+<div id="capPanel" hidden>
           <section class="section">
             <div class="section-head"><h2 class="sh">Selected caption</h2><span class="cap-nav"><button class="btn ghost small" data-action="capPrev" type="button" aria-label="Previous caption">‹</button><button class="btn ghost small" data-action="capNext" type="button" aria-label="Next caption">›</button></span></div>
             <label><span class="label">Text</span><textarea data-bind="cap.text" maxlength="300" placeholder="What is said"></textarea></label>

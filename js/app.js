@@ -18,6 +18,7 @@ import { Player } from './player.js';
 import { initCleanUI } from './clean-ui.js';
 import { initVoiceUI } from './voice-ui.js';
 import { initSilenceUI } from './silence-ui.js';
+import { initTranscriptUI } from './transcript-ui.js';
 import { initSyncUI } from './sync-ui.js';
 import { initBeatUI } from './beat-ui.js';
 import { initTransitionUI } from './transition-ui.js';
@@ -82,7 +83,7 @@ let taUI = { render() { }, kind: () => 'in' };
 let fxUI = { render() { } };
 let speedUI = { render() { } };
 let flUI = { render() { } };
-let cleanUI = null, voiceUI = null, silenceUI = null, syncUI = null, beatUI = null; // Clean voice / Change voice / Remove silences controls (set up below)
+let cleanUI = null, voiceUI = null, silenceUI = null, txUI = null, syncUI = null, beatUI = null; // Clean voice / Change voice / Remove silences controls (set up below)
 let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
 
 // media this tab still needs, reported to other tabs before they garbage-collect stored media
@@ -100,6 +101,7 @@ app.timeline = timeline;
 cleanUI = initCleanUI({ $, qs, app, media, player, selected, toast, fmtBytes, commit: (l) => app.commit(l), afterClean: (t, id) => voiceUI && voiceUI.autoRun(t, id) });
 voiceUI = initVoiceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, findItem: cleanUI.findItem });
 silenceUI = initSilenceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, redraw: () => timeline.render(), timeline });
+txUI = initTranscriptUI({ $, app, player, toast, showTab });
 syncUI = initSyncUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
 speedUI = initSpeedUI({ $, app, player, toast, selected: (t) => selected(t), sourceTime });
 beatUI = initBeatUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
@@ -297,6 +299,7 @@ function onTime(t, force) {
   if (app.selection && (app.selection.type === 'blur' || app.selection.type === 'clip')) syncBlurBox();
   if (!player.playing && app.selection) refreshAnimated();
   if (voice && voice.state === 'rec') voice.tick();
+  if (txUI) txUI.onTime(t);
 }
 
 // ---------------------------------------------------------------- data binding
@@ -2066,6 +2069,7 @@ function fillCaptionsPanel() {
   $('capCount').textContent = n ? n + (n === 1 ? ' caption' : ' captions') : '';
   $('transBtn').textContent = n ? '↻ Re-transcribe…' : '✨ Generate…';
   for (const b of qsa('#capPresets button')) b.classList.toggle('selected', b.dataset.preset === p.captionStyle.preset);
+  if (txUI) txUI.render();
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('#capPresets button'); if (!b) return;
@@ -2158,7 +2162,7 @@ async function refreshTransNote() {
 function refreshTransWarn() {
   const sc = $('tdSelOnly').checked && transScope ? transScope : null, total = layout(app.project).total;
   const dur = sc ? sc.end - sc.start : total;
-  const speed = trans.hooks.engine ? 1 : isPhone() ? 1.5 : 5; // rough realtime multiple of the tiny model in WebAssembly
+  const speed = trans.hooks.engine ? 1 : isPhone() ? 4 : 12; // speech finder skips quiet stretches; several engines share the work
   const warn = $('tdWarn');
   const slow = dur > 600 && isPhone() || dur > 2400;
   warn.hidden = !slow && dur < 900;
