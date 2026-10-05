@@ -170,7 +170,7 @@ const VISUAL = ['color', 'fx', 'blur', 'transform', 'opacity', 'fit', 'bg', 'vol
 export const ATTRS = {
   clip: VISUAL, overlay: VISUAL,
   text: ['color', 'bg', 'bgOpacity', 'style', 'font', 'size', 'align', 'fadeIn', 'fadeOut', 'maxWidth', 'scale', 'rotation', 'opacity', 'anim', 'keyframes'],
-  audio: ['volume', 'muted', 'fadeIn', 'fadeOut', 'duck', 'duckLevel', 'keyframes'],
+  audio: ['volume', 'muted', 'fadeIn', 'fadeOut', 'duck', 'duckLevel', 'duckDb', 'duckAttack', 'duckRelease', 'duckTrigger', 'keyframes'],
   blur: ['shape', 'mode', 'radius', 'strength', 'feather', 'invert', 'fadeIn', 'fadeOut'],
   caption: [],
 };

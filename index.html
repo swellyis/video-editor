@@ -513,7 +513,7 @@
         <section class="section">
           <div class="section-head"><h2>Music &amp; audio tracks</h2><label class="btn primary small" for="musicInput">＋ Add music</label><input id="musicInput" type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac" multiple /></div>
           <div class="item-list" id="audioList"></div>
-          <p class="hint" id="audioEmptyHint">Tap ＋ Add music above for background music. It starts at the playhead; drag it on the timeline to offset, drag its edges to trim. Ducking lowers music while clips have sound.</p>
+          <p class="hint" id="audioEmptyHint">Tap ＋ Add music above for background music. It starts at the playhead; drag it on the timeline to offset, drag its edges to trim. Ducking lowers music under speech (amount, attack/release and what counts as speech are in the track settings).</p>
         </section>
         <div id="audioPanel" hidden>
           <section class="section">
@@ -533,9 +533,21 @@
               <label><span class="label">Fade in (s)</span><input class="field mono" type="number" min="0" max="20" step="0.1" data-bind="audio.fadeIn" data-commit="change" /></label>
               <label><span class="label">Fade out (s)</span><input class="field mono" type="number" min="0" max="20" step="0.1" data-bind="audio.fadeOut" data-commit="change" /></label>
             </div>
-            <label class="check"><input type="checkbox" data-bind="audio.duck" /> Auto-lower (duck) under speech &amp; voiceover</label>
+            <label class="check"><input type="checkbox" data-bind="audio.duck" id="audioDuck" /> Auto-lower (duck) under speech &amp; voiceover</label>
             <label class="check"><input type="checkbox" data-bind="audio.voice" /> This is a voice track (other music ducks under it)</label>
-            <div class="slider-row"><label>Duck to</label><input type="range" min="0" max="1" step="0.01" data-bind="audio.duckLevel" /><output data-out="audio.duckLevel" data-fmt="pct"></output></div>
+            <div id="duckControls">
+              <div class="slider-row"><label for="duckDb">Duck by</label><input type="range" id="duckDb" min="0" max="24" step="1" value="10" /><output id="duckDbOut">10 dB</output></div>
+              <div class="slider-row"><label for="duckAttack">Attack</label><input type="range" id="duckAttack" min="0.02" max="1" step="0.02" value="0.12" /><output id="duckAttackOut">0.12 s</output></div>
+              <div class="slider-row"><label for="duckRelease">Release</label><input type="range" id="duckRelease" min="0.05" max="2" step="0.05" value="0.45" /><output id="duckReleaseOut">0.45 s</output></div>
+              <label style="display:block;margin-top:8px"><span class="label">Duck under</span><select id="duckTrigger" class="field">
+                <option value="any">Any speech (clips, voice, overlays)</option>
+                <option value="voice">Voice tracks</option>
+                <option value="detached">Detached audio &amp; voice tracks</option>
+                <option value="clips">Main video clips only</option>
+                <option value="captions">Transcript / captions (when available)</option>
+              </select></label>
+              <p class="hint" id="duckHint">Lowers this track while speech is present. Same envelope in the preview and the export. Attack starts before the speech; release fades back after.</p>
+            </div>
             <section class="section kf-panel" data-kf="audio"></section>
             <div class="button-row" style="margin-top:12px"><button class="btn secondary" data-action="audioStartHere" type="button">Start at playhead</button><button class="btn ghost danger" data-action="deleteAudio" type="button">Remove track</button></div>
           </section>

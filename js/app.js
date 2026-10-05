@@ -19,6 +19,7 @@ import { initCleanUI } from './clean-ui.js';
 import { initVoiceUI } from './voice-ui.js';
 import { initSilenceUI } from './silence-ui.js';
 import { initTranscriptUI } from './transcript-ui.js';
+import { normalizeDuck } from './duck.js';
 import { initSyncUI } from './sync-ui.js';
 import { initBeatUI } from './beat-ui.js';
 import { initTransitionUI } from './transition-ui.js';
@@ -102,6 +103,22 @@ cleanUI = initCleanUI({ $, qs, app, media, player, selected, toast, fmtBytes, co
 voiceUI = initVoiceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, findItem: cleanUI.findItem });
 silenceUI = initSilenceUI({ $, app, media, player, toast, commit: (l) => app.commit(l), current: cleanUI.current, redraw: () => timeline.render(), timeline });
 txUI = initTranscriptUI({ $, app, player, toast, showTab });
+
+// Duck controls (same Audio panel — upgrades the old "Duck to" slider in place)
+(() => {
+  const live = (fn) => (e) => { const a = selected('audio'); if (!a) return; normalizeDuck(a); fn(a, e); app.liveUpdate(); syncDuckControls(); };
+  const commit = (label) => () => { const a = selected('audio'); if (!a) return; app.commit(label); };
+  $('duckDb')?.addEventListener('input', live((a, e) => { a.duckDb = +e.target.value; a.duckLevel = Math.pow(10, -a.duckDb / 20); }));
+  $('duckDb')?.addEventListener('change', commit('Duck amount'));
+  $('duckAttack')?.addEventListener('input', live((a, e) => { a.duckAttack = +e.target.value; }));
+  $('duckAttack')?.addEventListener('change', commit('Duck attack'));
+  $('duckRelease')?.addEventListener('input', live((a, e) => { a.duckRelease = +e.target.value; }));
+  $('duckRelease')?.addEventListener('change', commit('Duck release'));
+  $('duckTrigger')?.addEventListener('change', (e) => { const a = selected('audio'); if (!a) return; a.duckTrigger = e.target.value; app.commit('Duck trigger'); syncDuckControls(); });
+  // when the duck checkbox flips, show/hide the extra controls
+  document.addEventListener('change', (e) => { if (e.target && e.target.matches && e.target.matches('[data-bind="audio.duck"]')) syncDuckControls(); });
+})();
+
 syncUI = initSyncUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
 speedUI = initSpeedUI({ $, app, player, toast, selected: (t) => selected(t), sourceTime });
 beatUI = initBeatUI({ $, app, media, toast, commit: (l) => app.commit(l), current: cleanUI.current });
@@ -2060,6 +2077,19 @@ function resplitCaptions() {
   p.captions = rechunk(p.captions, { maxWords: p.captionStyle.maxWords });
   if (app.selection && app.selection.type === 'caption' && !selected('caption')) app.selection = null;
   toast('Captions re-split into ' + p.captions.length + ' (about ' + p.captionStyle.maxWords + ' words each). Undo (Ctrl+Z) brings the old split back.', 4500);
+}
+
+function syncDuckControls() {
+  const a = selected('audio'), box = $('duckControls');
+  if (!box) return;
+  if (!a) { box.hidden = true; return; }
+  normalizeDuck(a);
+  box.hidden = !a.duck;
+  const set = (id, v, out, fmt) => { const e = $(id), o = $(out); if (!e) return; if (document.activeElement !== e) e.value = v; if (o) o.textContent = fmt(v); };
+  set('duckDb', a.duckDb, 'duckDbOut', (v) => (+v).toFixed(0) + ' dB');
+  set('duckAttack', a.duckAttack, 'duckAttackOut', (v) => (+v).toFixed(2) + ' s');
+  set('duckRelease', a.duckRelease, 'duckReleaseOut', (v) => (+v).toFixed(2) + ' s');
+  const tr = $('duckTrigger'); if (tr && document.activeElement !== tr) tr.value = a.duckTrigger || 'any';
 }
 function fillCaptionsPanel() {
   if (!$('capPanel')) return; // (a stale cached page)

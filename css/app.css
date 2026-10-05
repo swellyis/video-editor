@@ -927,3 +927,9 @@ body.ws #multiPanel{padding:16px}
 @media (pointer:coarse){
   .tx-word{min-height:44px;padding:8px 10px;font-size:16px}
 }
+
+/* Duck envelope (speech-aware lowering) on music tracks */
+.tl-audioitem .duckenv{position:absolute;inset:0;pointer-events:none;z-index:2}
+.tl-audioitem .duckenv svg{display:block;width:100%;height:100%}
+.duck-line{fill:none;stroke:#f5c542;stroke-width:1.6;stroke-linejoin:round;opacity:.9}
+#duckControls{margin-top:6px;padding-top:6px;border-top:1px solid rgba(127,127,127,.15)}

@@ -9,6 +9,7 @@ export const MIN_CLIP = 0.1; // seconds on timeline
 
 import * as RAMP from './ramp.js';
 import { PRESETS, KEYS as COLOR_KEYS, filterParams, amountOf, normFilter } from './filters.js';
+import { normalizeDuck, duckFactor, speechForTrack, DEFAULT_ATTACK, DEFAULT_RELEASE, dbToLevel } from './duck.js';
 export { PRESETS };
 export const FONTS = {
   sans: { label: 'Plex Sans Bold', css: '700 {s}px "IBM Plex Sans", system-ui, sans-serif' },
@@ -133,7 +134,7 @@ export function sanitizeProject(p) {
   }
   for (const b of p.blurs || []) cleanBlur(b);
   for (const a of p.audio) {
-    cleanName(a, 'Music'); a.muted = a.muted === true; a.volume = num(a.volume, 0, 2, 0.6); a.duckLevel = num(a.duckLevel, 0, 1, 0.3); a.start = num(a.start, 0, 1e6, 0);
+    cleanName(a, 'Music'); a.muted = a.muted === true; a.volume = num(a.volume, 0, 2, 0.6); a.duckLevel = num(a.duckLevel, 0, 1, 0.3); normalizeDuck(a); a.start = num(a.start, 0, 1e6, 0);
     a.in = num(a.in, 0, 1e6, 0); a.out = num(a.out, a.in + 0.01, 1e6, a.in + 1); a.loopLen = num(a.loopLen, 0, 1e6, 0); a.phase = num(a.phase, 0, 1e6, 0);
     a.fadeIn = num(a.fadeIn, 0, 60, 0); a.fadeOut = num(a.fadeOut, 0, 60, 0); a.speed = num(a.speed, 0.25, 4, 1);
   }
@@ -260,7 +261,7 @@ export function cleanTextAnim(a) {
 export function newAudio(media, start = 0) {
   return {
     id: uid('aud'), mediaId: media.id, name: (media.name || 'Music').replace(/\.[^/.]+$/, ''), srcDuration: media.duration,
-    start, in: 0, out: media.duration, volume: 0.6, muted: false, fadeIn: 1, fadeOut: 2, duck: true, duckLevel: 0.3, loop: false, voice: false,
+    start, in: 0, out: media.duration, volume: 0.6, muted: false, fadeIn: 1, fadeOut: 2, duck: true, duckLevel: dbToLevel(10), duckDb: 10, duckAttack: DEFAULT_ATTACK, duckRelease: DEFAULT_RELEASE, duckTrigger: 'any', loop: false, voice: false,
     loopLen: 0, // looped length on the timeline in seconds (0 = repeat until the end of the video)
     phase: 0, // looped tracks: offset into the loop at the track start (set when a looped track is split)
     speed: 1, // playback speed (a detached video clip keeps its speed); 1 for ordinary music
@@ -631,20 +632,18 @@ export function speechIntervals(lay, project, excludeId) {
   for (const x of iv) { if (m.length && x[0] <= m[m.length - 1][1] + 0.05) m[m.length - 1][1] = Math.max(m[m.length - 1][1], x[1]); else m.push([...x]); }
   return m;
 }
-const DUCK_RAMP = 0.35;
-export function duckFactor(intervals, t, level) {
-  let f = 1;
-  for (const [a, b] of intervals) {
-    if (t < a - DUCK_RAMP || t > b + DUCK_RAMP) continue;
-    let d;
-    if (t < a) d = (a - t) / DUCK_RAMP; else if (t > b) d = (t - b) / DUCK_RAMP; else d = 0;
-    f = Math.min(f, level + (1 - level) * clamp(d, 0, 1));
+export { duckFactor, normalizeDuck }; // from duck.js (attack/release aware)
+/** Speech intervals that duck audio track `a` (trigger + VAD/captions aware). `shared` is ignored when the track has its own trigger. */
+export function duckIntervalsFor(a, lay, project, shared, peaksOf) {
+  normalizeDuck(a);
+  // voice tracks never duck under themselves
+  if (a.voice && (a.duckTrigger === 'any' || a.duckTrigger === 'voice' || a.duckTrigger === 'detached' || !a.duckTrigger)) {
+    return speechForTrack(a, lay, project, { peaksOf, excludeId: a.id });
   }
-  return f;
-}
-/** Speech intervals that duck audio track `a` (its own audio excluded). */
-export function duckIntervalsFor(a, lay, project, shared) {
-  return a.voice ? speechIntervals(lay, project, a.id) : (shared || speechIntervals(lay, project));
+  if (a.duckTrigger && a.duckTrigger !== 'any') return speechForTrack(a, lay, project, { peaksOf });
+  // default "any": prefer the richer speechForTrack (peaks + captions), fall back to the classic audible list
+  const rich = speechForTrack(a, lay, project, { peaksOf });
+  return rich.length ? rich : (shared || speechIntervals(lay, project));
 }
 /** Music gain at sequence time t */
 export function musicGain(a, t, intervals, total) {
@@ -657,7 +656,7 @@ export function musicGain(a, t, intervals, total) {
     const L = audioLen(a), ph = (local + (a.phase || 0)) % L, d = Math.min(ph, L - ph);
     if (local > 0.02 && rem > 0.02 && L > 0.1) g *= ramp(d, 0.012);
   }
-  if (a.duck && intervals) g *= duckFactor(intervals, t, a.duckLevel ?? 0.3);
+  if (a.duck && intervals) { normalizeDuck(a); g *= duckFactor(intervals, t, a.duckLevel ?? 0.3, { attack: a.duckAttack, release: a.duckRelease }); }
   return Math.max(0, g);
 }
 

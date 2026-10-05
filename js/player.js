@@ -24,8 +24,9 @@ export class Player {
   invalidate() {
     const p = this.getProject();
     this.lay = layout(p); this.speech = speechIntervals(this.lay, p);
-    this.duck = new Map(); // per voice track: ducking driven only by OTHER speech sources
-    for (const a of p.audio) if (a.voice) this.duck.set(a.id, duckIntervalsFor(a, this.lay, p, this.speech));
+    this.duck = new Map(); // per-track duck intervals (trigger + peaks/captions)
+    const peaksOf = (id) => { try { const r = this.media && this.media.peek && this.media.peek(id); return r && r.peaks; } catch { return null; } };
+    for (const a of p.audio) this.duck.set(a.id, duckIntervalsFor(a, this.lay, p, this.speech, peaksOf));
     const live = new Set([...p.clips.map(c => c.id), ...(p.overlays || []).map(o => o.id)]), liveA = new Set(p.audio.map(a => a.id));
     for (const [id, v] of this.videos) {
       const c = p.clips.find(x => x.id === id) || (p.overlays || []).find(x => x.id === id);
@@ -283,7 +284,7 @@ export class Player {
         if (!e.el.paused) e.el.pause();
         if (Math.abs(e.el.currentTime - desired) > 0.05) e.el.currentTime = desired;
       }
-      const iv = this.duck.get(a.id) || this.speech;
+      const iv = this.duck.get(a.id) || this.speech; // (every track is keyed; speech is the fallback)
       this._setGain(e, active && fwd && this.rate === 1 ? musicGain(a, t, iv, this.total) : 0, active && fwd && this.rate === 1 && hasKeyframes(a, 'volume') ? musicGain(a, Math.min(a.start + len, t + LOOK_AHEAD), iv, this.total) : null);
     }
     for (const id of [...this.revNodes.keys()]) if (!revUsed.has(id)) this._stopRev(id);

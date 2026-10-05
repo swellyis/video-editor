@@ -235,7 +235,7 @@ export function applyEnvelope(param, t0, t1, fn, step = 0.02, marks = null) {
 const envMarks = (item, start) => (item.keyframes && item.keyframes.volume ? item.keyframes.volume.map(k => start + k.t) : null);
 
 /** Everything audible on the timeline as independent segments (timeline range → source range + gain). */
-export function audioSegments(project, lay) {
+export function audioSegments(project, lay, peaksOf) {
   const total = lay.total, segs = [];
   const speech = speechIntervals(lay, project);
   for (const it of lay.items) {
@@ -261,7 +261,7 @@ export function audioSegments(project, lay) {
   }
   for (const a of project.audio || []) {
     if (a.muted || a.volume <= 0 || a.start >= total) continue;
-    const iv = duckIntervalsFor(a, lay, project, speech);
+    const iv = duckIntervalsFor(a, lay, project, speech, peaksOf);
     const gain = (t) => musicGain(a, t, iv, total);
     const end = Math.min(total, a.start + audioSpan(a, total));
     const sp = audioSpeed(a), marks = envMarks(a, a.start);
@@ -284,7 +284,8 @@ export function hasAudio(project, lay) { return audioSegments(project, lay).leng
  */
 export async function* mixChunks(project, lay, media, { sampleRate = 48000, chunkSec = CHUNK_SEC, onStatus, onWarn, from = 0 } = {}) {
   const total = lay.total;
-  const segs = audioSegments(project, lay).sort((a, b) => a.t0 - b.t0);
+  const peaksOf = (id) => { try { const r = media.peek && media.peek(id); return r && r.peaks; } catch { return null; } };
+  const segs = audioSegments(project, lay, peaksOf).sort((a, b) => a.t0 - b.t0);
   const totalLen = Math.max(1, Math.ceil(total * sampleRate));
   const M = 0.05; // resampler context margin
   // Readers are opened per segment, except that all passes of a looped track share one reader (reading from the

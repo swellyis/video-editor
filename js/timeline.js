@@ -1,6 +1,7 @@
 // Interactive multi-track timeline (video / text / audio + markers). Pointer events: mouse, pen and touch.
 import { isOverlap, labelOf } from './transitions.js';
-import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX, laneOf, laneCount, insertLane, spanCtx, findItem, planItem, placeItem, moveClipTo, holdNextClip } from './model.js';
+import { textLabel, blurLabel, layout, clipLen, audioLen, audioSpan, audioSpeed, loopSeams, moveClip, rippleShift, MIN_CLIP, overlayLen, kfTimes, rebaseKeyframes, hasKeyframes, volumeEnv, hasSound, VOL_KEY_MAX, laneOf, laneCount, insertLane, spanCtx, findItem, planItem, placeItem, moveClipTo, holdNextClip, duckIntervalsFor, normalizeDuck } from './model.js';
+import { duckEnvelope } from './duck.js';
 import { clamp, fmt, el, icon, toast } from './util.js';
 import { retimeWords } from './captions.js';
 import { timelineBeats, thin } from './beat.js';
@@ -369,7 +370,7 @@ export class Timeline {
     // music, voice and detached audio
     for (const a of p.audio) {
       const n = this._node('a:' + a.id, () => {
-        const d = el('div', { class: 'tl-item tl-audioitem' }, el('canvas', { class: 'wave' }), el('div', { class: 'seams' }), el('div', { class: 'volenv' }), el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
+        const d = el('div', { class: 'tl-item tl-audioitem' }, el('canvas', { class: 'wave' }), el('div', { class: 'seams' }), el('div', { class: 'volenv' }), el('div', { class: 'duckenv' }), el('span'), el('div', { class: 'h-l' }), el('div', { class: 'h-r' }));
         d.addEventListener('pointerdown', e => this.onItemDown(e, 'audio', d._id));
         this.keyable(d, 'audio');
         return d;
@@ -391,6 +392,7 @@ export class Timeline {
       n.classList.toggle('offline', !this.app.media.peek(a.mediaId));
       this.renderWave(n.querySelector('.wave'), a, w, null, 30, 1, span);
       this.renderVolEnv(n, a, 'audio', a.start, span, ITEM_H, this.single('audio', a.id));
+      this.renderDuckEnv(n, a, a.start, span, ITEM_H);
     }
     this.renderSilences(top);
     this.renderBeats(top);
@@ -512,6 +514,27 @@ export class Timeline {
       d.addEventListener('click', (e) => { e.stopPropagation(); const it = this._findItem(n._id); if (it) { this.app.select(it.sel); this.app.seek(it.start + lt + 1e-4); } });
       box.appendChild(d);
     }
+  }
+
+  /** Cheap duck envelope on a music track: thin line showing how much the track is lowered under speech (1 = full). */
+  renderDuckEnv(n, a, start, len, H) {
+    const box = n.querySelector('.duckenv'); if (!box) return;
+    if (!a.duck || a.muted || a.voice) { if (box._key !== 'off') { box._key = 'off'; box.replaceChildren(); } return; }
+    normalizeDuck(a);
+    const W = Math.max(1, Math.round((len || 0) * this.pps));
+    const peaksOf = (id) => { try { const r = this.app.media.peek(id); return r && r.peaks; } catch { return null; } };
+    const iv = duckIntervalsFor(a, layout(this.project), this.project, null, peaksOf);
+    const key = [W, H, a.duckDb, a.duckAttack, a.duckRelease, a.duckTrigger, iv.map(x => x[0].toFixed(2) + '-' + x[1].toFixed(2)).join(',')].join('|');
+    if (box._key === key) return; box._key = key;
+    box.replaceChildren();
+    if (!iv.length || W < 8) return;
+    const NS = 'http://www.w3.org/2000/svg', pad = 4;
+    const yOf = (g) => pad + (H - 2 * pad) * (1 - Math.max(0, Math.min(1, g)));
+    const env = duckEnvelope(iv, start, start + len, a.duckLevel, { attack: a.duckAttack, release: a.duckRelease }, Math.max(0.05, len / Math.min(200, W)));
+    const pts = env.map(p => (((p.t - start) / Math.max(1e-6, len)) * W).toFixed(1) + ',' + yOf(p.g).toFixed(1));
+    const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('aria-hidden', 'true');
+    const line = document.createElementNS(NS, 'polyline'); line.setAttribute('points', pts.join(' ')); line.setAttribute('class', 'duck-line'); svg.append(line);
+    box.append(svg);
   }
   /**
    * Volume envelope on a timeline item: a line (1× sits in the middle, the top is 200%) and, on the selected item, draggable dots
