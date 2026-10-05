@@ -12,7 +12,7 @@ export { FACE_MB, isFaceCached, ReframeCancelled, DEFAULTS, resolveTarget };
  * signal: AbortSignal
  */
 export async function sampleClipFaces(clip, getBlob, {
-  sampleSec = DEFAULTS.sampleSec, mode = 'full', onProgress, signal, maxSamples = 400,
+  sampleSec = DEFAULTS.sampleSec, mode = 'short', onProgress, signal, maxSamples = 400,
 } = {}) {
   if (signal && signal.aborted) throw new ReframeCancelled();
   const blob = await getBlob();

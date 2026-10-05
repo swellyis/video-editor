@@ -299,7 +299,7 @@
             <label style="display:block;margin-top:10px"><span class="label">Ken Burns motion (preset)</span><select data-bind="clip.transform.kenBurns"><option value="none">None</option><option value="in">Slow zoom in</option><option value="out">Slow zoom out</option><option value="left">Pan left → right</option><option value="right">Pan right → left</option></select></label>
             <div id="reframeBlock" class="reframe-block" style="margin-top:14px">
               <div class="section-head"><h2 style="font-size:inherit;margin:0">Auto reframe</h2></div>
-              <p class="hint">Tracks the speaker’s face and writes pan/zoom keyframes so a widescreen clip fills a vertical or square frame. Editable afterwards in Keyframes. Runs on this device (first use downloads ~11 MB).</p>
+              <p class="hint">Tracks the speaker’s face and writes pan/zoom keyframes so a widescreen clip fills a vertical or square frame. Editable afterwards in Keyframes. Runs on this device (first use downloads ~10 MB).</p>
               <label><span class="label">Target frame</span>
                 <select id="reframeTarget">
                   <option value="project">Match project</option>
@@ -1066,7 +1066,7 @@
         <p class="hint" id="shCount"></p>
         <div class="slider-row"><label for="shOffset">Crop position</label><input type="range" id="shOffset" min="-1" max="1" step="0.05" value="0" /><output id="shOffsetOut">Centre</output></div>
         <label class="check" style="margin-top:8px"><input type="checkbox" id="shReframe" checked /> Auto reframe with face tracking (writes pan/zoom keyframes on each Short)</label>
-        <p class="hint">Fills the 9:16 frame. With Auto reframe on, each Short tracks the speaker’s face (on this device; first use ~11 MB). Off: a fixed crop from the slider for every Short.</p>
+        <p class="hint">Fills the 9:16 frame. With Auto reframe on, each Short tracks the speaker’s face (on this device; first use ~10 MB). Off: a fixed crop from the slider for every Short.</p>
         <div class="progress" id="shReframeProg" aria-live="polite" hidden>
           <div class="progress-track"><div class="progress-bar" id="shReframeBar"></div></div>
           <div class="progress-copy"><span id="shReframeStatus">Reframing…</span></div>

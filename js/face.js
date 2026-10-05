@@ -4,12 +4,13 @@
 import { FilesetResolver, FaceDetector } from '../vendor/mediapipe/vision_bundle.mjs';
 
 export const WASM_BASE = new URL('../vendor/mediapipe/wasm', import.meta.url).href;
-export const MODEL_FULL = new URL('../vendor/mediapipe/models/blaze_face_full_range.tflite', import.meta.url).href;
 export const MODEL_SHORT = new URL('../vendor/mediapipe/models/blaze_face_short_range.tflite', import.meta.url).href;
+/** @deprecated full-range TFLite mismatches this tasks-vision graph; alias to short. */
+export const MODEL_FULL = MODEL_SHORT;
 export const CACHE_NAME = 'video-editor-ai';
 
 /** Approximate download sizes shown in the UI (vendored on this site). */
-export const FACE_MB = { wasm: 9.5, full: 1.1, short: 0.23 };
+export const FACE_MB = { wasm: 9.5, short: 0.23, total: 9.8 }; // short-range model (full-range TFLite is incompatible with this WASM build)
 
 /** Test seam: set hooks.createDetector to return { detect(image) → {detections} }. */
 export const hooks = { createDetector: null };
@@ -43,23 +44,35 @@ async function warm(url) {
  * Load (or reuse) a FaceDetector. mode: 'full' (sermons / distance) or 'short' (close-up).
  * onProgress({ phase, frac }) optional.
  */
-export async function loadFaceDetector({ mode = 'full', onProgress } = {}) {
+export async function loadFaceDetector({ mode = 'short', onProgress } = {}) {
   if (hooks.createDetector) return hooks.createDetector({ mode });
+  // BlazeFace full-range float16 currently mismatches this tasks-vision graph (2304 vs 896 boxes) — use short-range.
+  if (mode === 'full') mode = 'short';
   if (_det && _mode === mode) return _det;
   if (_loading) return _loading;
   _loading = (async () => {
     onProgress && onProgress({ phase: 'download', frac: 0 });
-    const model = mode === 'short' ? MODEL_SHORT : MODEL_FULL;
+    const model = MODEL_SHORT;
     await warm(WASM_BASE + '/vision_wasm_internal.wasm');
     onProgress && onProgress({ phase: 'download', frac: 0.55 });
     await warm(model);
     onProgress && onProgress({ phase: 'load', frac: 0.75 });
     const vision = await FilesetResolver.forVisionTasks(WASM_BASE);
-    const det = await FaceDetector.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: model, delegate: 'GPU' },
-      runningMode: 'IMAGE',
-      minDetectionConfidence: 0.45,
-    });
+    let det;
+    try {
+      det = await FaceDetector.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: model, delegate: 'GPU' },
+        runningMode: 'IMAGE',
+        minDetectionConfidence: 0.45,
+      });
+    } catch (e) {
+      // CPU fallback when GPU delegate fails
+      det = await FaceDetector.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: model, delegate: 'CPU' },
+        runningMode: 'IMAGE',
+        minDetectionConfidence: 0.45,
+      });
+    }
     if (_det && _det.close) try { _det.close(); } catch { /* */ }
     _det = det; _mode = mode;
     onProgress && onProgress({ phase: 'load', frac: 1 });
@@ -87,15 +100,20 @@ export function normDetections(result, iw, ih) {
 /** Detect faces on a canvas/video/image. Returns normalised boxes. */
 export async function detectFaces(det, image) {
   if (!det) return [];
-  if (hooks.createDetector && det.detect) {
+  try {
+    if (hooks.createDetector && det.detect) {
+      const r = det.detect(image);
+      if (Array.isArray(r)) return r;
+      return normDetections(r, image.videoWidth || image.naturalWidth || image.width, image.videoHeight || image.naturalHeight || image.height);
+    }
     const r = det.detect(image);
-    if (Array.isArray(r)) return r;
-    return normDetections(r, image.videoWidth || image.naturalWidth || image.width, image.videoHeight || image.naturalHeight || image.height);
+    const iw = image.videoWidth || image.naturalWidth || image.width;
+    const ih = image.videoHeight || image.naturalHeight || image.height;
+    return normDetections(r, iw, ih);
+  } catch (e) {
+    console.warn('face detect failed', e);
+    return [];
   }
-  const r = det.detect(image);
-  const iw = image.videoWidth || image.naturalWidth || image.width;
-  const ih = image.videoHeight || image.naturalHeight || image.height;
-  return normDetections(r, iw, ih);
 }
 
 export function closeFaceDetector() {
