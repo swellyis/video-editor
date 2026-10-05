@@ -151,10 +151,10 @@ export function speechForTrack(track, lay, project, { peaksOf, excludeId } = {})
     }
   }
 
-  // Prefer caption word timings when the trigger is "any" or "captions" and captions exist — they follow speech more tightly than whole-clip spans
+  // Prefer caption word timings when available — they follow speech pauses; whole-clip spans would keep music ducked for the entire clip
   if ((trig === 'any' || trig === 'captions') && (project.captions || []).length) {
     const caps = intervalsFromCaptions(project.captions);
-    if (caps.length) return mergeIntervals([...iv, ...caps], 0.1);
+    if (caps.length) return caps;
   }
   return mergeIntervals(iv, 0.1);
 }

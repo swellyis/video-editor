@@ -82,6 +82,16 @@ test('duckEnvelope samples for the timeline draw', () => {
   assert.ok(e.length >= 6);
   assert.ok(e.find(p => p.t >= 1 && p.t <= 2).g <= 0.51);
 });
+test('any trigger prefers caption timings over whole-clip spans', () => {
+  const vid = (id, d = 6) => ({ id, kind: 'video', name: id, duration: d, width: 640, height: 360, hasAudio: true });
+  const p = newProject('t');
+  p.clips.push(newClipFromMedia(vid('c1', 6), p.settings));
+  p.audio.push(Object.assign(newAudio(vid('m1', 10), 0), { duck: true, duckTrigger: 'any' }));
+  p.captions = [newCaption(1, 2, 'hi', [{ w: 'hi', start: 1, end: 1.5 }])];
+  const iv = speechForTrack(p.audio[0], layout(p), p);
+  assert.ok(iv.every(x => x[1] <= 2.5), 'should not cover the whole 6 s clip: ' + JSON.stringify(iv));
+  assert.ok(iv.some(x => x[0] < 1.2 && x[1] > 1.2));
+});
 test('DEFAULT_DB is a sensible starting point (~10 dB)', () => {
   assert.equal(DEFAULT_DB, 10);
 });
