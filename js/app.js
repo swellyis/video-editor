@@ -535,7 +535,7 @@ function fillInspector() {
   renderKfPanels();
   $('textPanel').hidden = !t; $('textEmptyHint').hidden = p.texts.length > 0; if (t) taUI.render();
   const a = selected('audio');
-  $('audioPanel').hidden = !a; $('audioEmptyHint').hidden = p.audio.length > 0;
+  $('audioPanel').hidden = !a; { const h = $('audioAddHint'); if (h) h.hidden = !!a; } // (the Music & audio tracks section was removed: add audio with ＋ Media)
   if (a && document.activeElement !== $('audioLenInput')) $('audioLenInput').value = audioSpan(a, layout(p).total).toFixed(2);
   if (a) {
     $('audioLenLabel').textContent = a.loop ? 'Length on timeline (s)' : 'Length (s)';
@@ -586,12 +586,13 @@ function renderList(id, rows, build) {
   const key = JSON.stringify(rows.map(r => r.key));
   if (listKeys[id] === key) return;
   listKeys[id] = key;
-  const box = $(id), focusedIdx = [...box.children].indexOf(document.activeElement);
+  const box = $(id); if (!box) return; // a list whose section was removed (e.g. the old Music & audio tracks list)
+  const focusedIdx = [...box.children].indexOf(document.activeElement);
   box.replaceChildren(...rows.map(build));
   if (focusedIdx >= 0 && box.children[focusedIdx]) box.children[focusedIdx].focus();
 }
 function renderLists(light) {
-  const p = app.project, sel = app.selection || {}, total = layout(p).total;
+  const p = app.project, sel = app.selection || {};
   const isSel = (type, id) => sel.type === type && sel.id === id;
   const texts = [...p.texts].sort((a, b) => a.start - b.start).map(t => ({ t, key: [t.id, fmt(t.start), t.text, t.name, isSel('text', t.id)] }));
   renderList('textList', texts, ({ t }) => { const txt = textLabel(t); return listItem(isSel('text', t.id), `Text at ${fmt(t.start)}: ${txt}`, () => app.select({ type: 'text', id: t.id }, { seekInto: true }),
@@ -599,9 +600,6 @@ function renderLists(light) {
   const blrs = [...(p.blurs || [])].sort((a, b) => a.start - b.start).map(b => ({ b, key: [b.id, b.name, b.mode, b.invert, b.shape, fmt(b.start), fmt(b.end), isSel('blur', b.id)] }));
   renderList('blurList', blrs, ({ b }) => listItem(isSel('blur', b.id), `${blurLabel(b)} region at ${fmt(b.start)}`, () => app.select({ type: 'blur', id: b.id }, { seekInto: true }),
     el('span', { class: 'item-ico' }, icon('blur')), el('span', { class: 'grow', text: blurLabel(b) + ' · ' + (b.shape === 'ellipse' ? 'ellipse' : 'box') }), el('span', { class: 't', text: fmt(b.start) + ' · ' + fmt(b.end - b.start) })));
-  const auds = p.audio.map(a => ({ a, span: audioSpan(a, total), key: [a.id, a.name, a.voice, a.loop, fmt(a.start), fmt(audioSpan(a, total)), isSel('audio', a.id)] }));
-  renderList('audioList', auds, ({ a, span }) => listItem(isSel('audio', a.id), `${a.voice ? 'Voice' : 'Music'} track ${a.name}${a.loop ? ', looped' : ''}, ${fmt(a.start)}`, () => app.select({ type: 'audio', id: a.id }),
-    el('span', { text: a.voice ? '🎙' : '♪' }), el('span', { class: 'grow', text: a.name + (a.loop ? ' (loop)' : '') }), el('span', { class: 't', text: fmt(a.start) + ' · ' + fmt(span) })));
   const ovs = (p.overlays || []).map(o => ({ o, key: [o.id, o.name, !!(o.chroma && o.chroma.enabled), fmt(o.start), fmt(overlayLen(o)), isSel('overlay', o.id)] }));
   renderList('overlayList', ovs, ({ o }) => { const keyed = o.chroma && o.chroma.enabled; return listItem(isSel('overlay', o.id), `Overlay ${o.name}, ${fmt(o.start)}`, () => app.select({ type: 'overlay', id: o.id }, { seekInto: true }),
     el('span', { class: 'item-ico', title: keyed ? 'Green screen' : 'Picture-in-picture' }, icon(keyed ? 'key' : 'pip')), el('span', { class: 'grow', text: o.name }), el('span', { class: 't', text: fmt(o.start) + ' · ' + fmt(overlayLen(o)) })); });
@@ -1381,7 +1379,6 @@ async function importFiles(files, where = 'auto') {
   } else setSaveState(app.rev === app.savedRev ? 'saved' : 'dirty');
 }
 $('videoInput').onchange = e => { importFiles(e.target.files); e.target.value = ''; };
-$('musicInput').onchange = e => { importFiles(e.target.files); e.target.value = ''; };
 $('logoInput').onchange = async e => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;

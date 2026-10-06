@@ -554,11 +554,7 @@
           <label class="check"><input type="checkbox" id="voMute" checked /> Silence timeline audio while recording</label>
           <p class="hint" id="voHint">Records from your microphone into a new voice track starting at the playhead. Music automatically ducks under your voice.</p>
         </section>
-        <section class="section">
-          <div class="section-head"><h2>Music &amp; audio tracks</h2><label class="btn primary small" for="musicInput">＋ Add music</label><input id="musicInput" type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac" multiple /></div>
-          <div class="item-list" id="audioList"></div>
-          <p class="hint" id="audioEmptyHint">Tap ＋ Add music above for background music. It starts at the playhead; drag it on the timeline to offset, drag its edges to trim. Ducking lowers music under speech (amount, attack/release and what counts as speech are in the track settings).</p>
-        </section>
+        <p class="hint section" id="audioAddHint">Add music or other audio with <b>＋ Media</b> on the timeline toolbar, or drop the file on the timeline. Tap a track on the timeline to trim, loop, set its volume and ducking.</p>
         <div id="audioPanel" hidden>
           <section class="section">
             <label><span class="label">Name</span><input class="field" data-bind="audio.name" data-commit="change" /></label>
