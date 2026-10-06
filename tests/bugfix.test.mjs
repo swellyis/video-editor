@@ -96,3 +96,77 @@ test('bug 5: AI files have content-hash cache keys, and sw.js carries the same m
   assert.deepEqual(JSON.parse(m[1]), AI_FILES);
   assert.ok(/'\.\/js\/ai-manifest\.js'/.test(sw), 'the manifest module is part of the app shell');
 });
+
+// ---------------------------------------------------------------- sweep: ducking maps a clip's speech through reverse / speed ramps
+test('sweep: speech in a reversed or ramped clip ducks music at the right timeline time', async () => {
+  const { speechForTrack } = await import('../js/duck.js');
+  const RAMP = await import('../js/ramp.js');
+  const rate = 20, data = new Uint8Array(10 * rate); for (let i = 0; i < 2 * rate; i++) data[i] = 200; // speech in source 0–2 s only
+  const peaks = { rate, data };
+  const mk = (extra) => { const p = newProject('d'); p.clips.push({ ...newClipFromMedia(vid), ...extra }); return p; };
+  const track = { id: 'mus', duckTrigger: 'clips' };
+  // reversed: source 0–2 s plays at the END (timeline 8–10 s)
+  let p = mk({ reverse: true });
+  let iv = speechForTrack(track, layout(p), p, { peaksOf: () => peaks });
+  assert.equal(iv.length, 1); assert.ok(iv[0][0] > 7.5 && iv[0][1] > 9.5, 'reverse → end of the clip: ' + JSON.stringify(iv));
+  // speed ramp: wherever the curve puts source 2 s
+  p = mk({ ramp: RAMP.fromPreset('montage', { in: 0, out: 10 }) });
+  const c = p.clips[0], want = RAMP.offsetOfSource(c, 2);
+  iv = speechForTrack(track, layout(p), p, { peaksOf: () => peaks });
+  assert.equal(iv.length, 1); assert.ok(Math.abs(iv[0][1] - RAMP.offsetOfSource(c, 2.1)) < 0.05 && iv[0][0] < 0.05, 'ramp end ' + iv[0][1] + ' vs ' + want);
+});
+
+// ---------------------------------------------------------------- sweep: Shorts cut the right source section of reversed / ramped clips
+test('sweep: cutRange (Shorts) takes the source section that actually plays, through reverse and speed ramps', async () => {
+  const { cutRange } = await import('../js/shorts.js');
+  const RAMP = await import('../js/ramp.js');
+  let p = newProject('s'); p.clips.push({ ...newClipFromMedia(vid), reverse: true });
+  let r = cutRange(p, 0, 2);
+  assert.equal(r.clips.length, 1); assert.ok(near(r.clips[0].in, 8, 0.01) && near(r.clips[0].out, 10, 0.01), 'reversed: first 2 s on the timeline = source 8–10 s, got ' + r.clips[0].in + '–' + r.clips[0].out);
+  p = newProject('s'); p.clips.push({ ...newClipFromMedia(vid), ramp: RAMP.fromPreset('montage', { in: 0, out: 10 }) });
+  const c = p.clips[0], a = 1, b = 3;
+  r = cutRange(p, a, b);
+  assert.ok(near(r.clips[0].in, RAMP.sourceAtOffset(c, a), 0.01) && near(r.clips[0].out, RAMP.sourceAtOffset(c, b), 0.01), 'ramp source section');
+  assert.ok(near(layout({ ...p, clips: r.clips }).total, b - a, 0.02), 'and the same length on the timeline: ' + layout({ ...p, clips: r.clips }).total);
+});
+
+// ---------------------------------------------------------------- sweep: Match length shortens reversed / ramped clips at their END
+test('sweep: Match length cuts the end of a reversed or ramped clip to exactly the target length', async () => {
+  const { applyMatch } = await import('../js/match.js');
+  const RAMP = await import('../js/ramp.js');
+  for (const extra of [{ reverse: true }, { ramp: RAMP.fromPreset('montage', { in: 0, out: 10 }) }]) {
+    const p = newProject('m'); p.clips.push({ ...newClipFromMedia(vid), id: 'c1', ...extra }); p.audio.push({ id: 'a1', mediaId: 'm9', name: 'Music', in: 0, out: 4, start: 0, volume: 1 });
+    const firstSrc = RAMP.sourceAtOffset(p.clips[0], 0);
+    const r = applyMatch(p, { type: 'clip', id: 'c1' }, { type: 'audio', id: 'a1' }, { length: true });
+    assert.ok(r.ok, JSON.stringify(r));
+    const c = p.clips[0];
+    assert.ok(near(layout(p).total, 4, 0.02), Object.keys(extra)[0] + ': clip is now 4 s, got ' + layout(p).total);
+    assert.ok(near(RAMP.sourceAtOffset(c, 0), firstSrc, 0.01), Object.keys(extra)[0] + ': the start still shows the same frame');
+  }
+});
+
+// ---------------------------------------------------------------- sweep: Remove silences refuses reversed / speed-curve clips
+test('sweep: silence cutting (linear source→timeline maths) is not offered on reversed or speed-curve clips', async () => {
+  const { cuttable, cutSilences } = await import('../js/silence.js');
+  const RAMP = await import('../js/ramp.js');
+  for (const extra of [{ reverse: true }, { ramp: RAMP.fromPreset('montage', { in: 0, out: 10 }) }]) {
+    const p = newProject('q'); p.clips.push({ ...newClipFromMedia(vid), id: 'c1', ...extra });
+    assert.equal(cuttable('clip', p.clips[0]), false, Object.keys(extra)[0]);
+    assert.equal(cutSilences(p, { type: 'clip', id: 'c1' }, [{ a: 1, b: 3 }]), null, 'nothing is cut');
+  }
+  assert.equal(cuttable('clip', newClipFromMedia(vid)), true);
+});
+
+// ---------------------------------------------------------------- sweep: Sync sound reads a reversed / ramped clip's sound in playing order
+test('sweep: sync envelope of a reversed or ramped clip follows the timeline (alongClip)', async () => {
+  const { alongClip, atSpeed, RATE } = await import('../js/sync.js');
+  const RAMP = await import('../js/ramp.js');
+  const env = new Float32Array(10 * RATE).fill(-100); for (let i = 1 * RATE; i < 2 * RATE; i++) env[i] = -10; // loud at source 1–2 s
+  const peak = (e) => { let a = -1, b = -1; for (let i = 0; i < e.length; i++) if (e[i] > -50) { if (a < 0) a = i; b = i; } return [a / RATE, b / RATE]; };
+  const plain = { ...newClipFromMedia(vid), speed: 2 };
+  assert.deepEqual(Array.from(alongClip(env, plain)), Array.from(atSpeed(env, 2)), 'plain clips: same as before');
+  const rev = { ...newClipFromMedia(vid), reverse: true }, [a, b] = peak(alongClip(env, rev));
+  assert.ok(Math.abs(a - 8) < 0.05 && Math.abs(b - 9) < 0.05, 'reversed: loud at timeline 8–9 s, got ' + a + '–' + b);
+  const rc = { ...newClipFromMedia(vid), ramp: RAMP.fromPreset('montage', { in: 0, out: 10 }) }, [c, d] = peak(alongClip(env, rc));
+  assert.ok(Math.abs(c - RAMP.offsetOfSource(rc, 1)) < 0.05 && Math.abs(d - RAMP.offsetOfSource(rc, 2)) < 0.05, 'ramp');
+});

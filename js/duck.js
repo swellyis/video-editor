@@ -1,6 +1,7 @@
 // Speech-aware ducking maths (pure). The music track stores duck / duckLevel / duckDb / duckAttack / duckRelease / duckTrigger;
 // this module turns speech intervals + those settings into a gain multiplier identical in the preview and both exporters.
 import { captionWords } from './captions.js';
+import * as RAMP from './ramp.js';
 
 export const DUCK_TRIGGERS = [
   { id: 'any', label: 'Any speech (clips, voice, overlays)' },
@@ -97,7 +98,8 @@ export function intervalsFromPeaks(peaks, { src0 = 0, src1 = Infinity, mapSrc = 
   const out = [];
   for (const [a, b] of regs) {
     if (b - a < minLen) continue;
-    const ta = mapSrc(Math.max(src0, a - pad)), tb = mapSrc(Math.min(src1, b + pad));
+    const t1 = mapSrc(Math.max(src0, a - pad)), t2 = mapSrc(Math.min(src1, b + pad));
+    const ta = Math.min(t1, t2), tb = Math.max(t1, t2); // a reversed clip maps source time backwards
     if (tb > ta + 1e-3) out.push([ta, tb]);
   }
   return mergeIntervals(out, 0.12);
@@ -119,10 +121,10 @@ export function speechForTrack(track, lay, project, { peaksOf, excludeId } = {})
   const wantVoice = trig === 'any' || trig === 'voice' || trig === 'detached' || trig === 'captions';
   const wantOvl = trig === 'any' || trig === 'detached' || trig === 'captions';
 
-  const pushPeaksOrSpan = (spanStart, spanEnd, item, srcIn, srcOut, speed) => {
+  const pushPeaksOrSpan = (spanStart, spanEnd, item, srcIn, srcOut, speed, map) => {
     const peaks = peaksOf && item.mediaId ? peaksOf(item.mediaId) : null;
     if (peaks) {
-      const mapSrc = (src) => spanStart + (src - srcIn) / Math.max(1e-6, speed || 1);
+      const mapSrc = map || ((src) => spanStart + (src - srcIn) / Math.max(1e-6, speed || 1));
       const got = intervalsFromPeaks(peaks, { src0: srcIn, src1: srcOut, mapSrc });
       if (got.length) { iv.push(...got); return; }
     }
@@ -133,7 +135,8 @@ export function speechForTrack(track, lay, project, { peaksOf, excludeId } = {})
     for (const it of lay.items) {
       const c = it.clip;
       if (c.kind !== 'video' || c.muted || c.hasAudio === false || c.volume <= 0.02) continue;
-      pushPeaksOrSpan(it.start, it.end, c, c.in, c.out, c.speed || 1);
+      // main clips can be reversed or speed-ramped: map source → timeline with the clip's own curve
+      pushPeaksOrSpan(it.start, it.end, c, c.in, c.out, c.speed || 1, (c.ramp || c.reverse) ? (src) => it.start + RAMP.offsetOfSource(c, src) : null);
     }
   }
   if (wantOvl) {

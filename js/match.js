@@ -2,6 +2,7 @@
 // Pure functions on the project (no DOM, no audio): the dialog (match-ui.js) picks the pair and measures loudness, this file plans and applies
 // the change, so it is unit-tested. applyMatch edits the project it is given; the caller commits ONE undo step (or runs it on a copy to preview).
 //   ref = { type: 'clip' | 'overlay' | 'audio' | 'whole', id }  ('whole' = the whole video, only as a target)
+import * as RAMP from './ramp.js';
 import { layout, overlayLen, audioLen, audioSpan, audioSpeed, rippleShift, placeItem, moveClipTo, laneOf, MIN_CLIP, planMatchAudio } from './model.js';
 
 export const MAX_VOLUME = 2;       // the Volume control goes to 200 % (+6 dB)
@@ -188,8 +189,15 @@ export function applyMatch(project, sel, tgt, req) {
     } else { // video clip / overlay: shorten only
       const cur = me.len;
       if (cur > T + EPS) {
-        const before = layout(project).total, newOut = r3(it.in + T * me.speed);
-        it.out = Math.max(it.in + MIN_CLIP * me.speed, newOut); changed = true;
+        const before = layout(project).total;
+        if (me.main && (it.ramp || it.reverse)) { // through the clip's curve: a reversed clip ends at its IN point, a ramp isn't linear
+          const src = r3(RAMP.sourceAtOffset(it, T)), mn = MIN_CLIP * RAMP.meanSpeed(it);
+          if (it.reverse) it.in = Math.min(it.out - mn, src); else it.out = Math.max(it.in + mn, src);
+        } else {
+          const newOut = r3(it.in + T * me.speed);
+          it.out = Math.max(it.in + MIN_CLIP * me.speed, newOut);
+        }
+        changed = true;
         if (me.main && req.ripple) { const delta = layout(project).total - before; if (delta) rippleShift(project, me.end - 1e-3, delta); }
         lines.push('Video trimmed from ' + say(cur) + ' to ' + say(T) + ' (the end is cut, nothing is stretched).');
       } else lines.push('Video is already ' + (cur < T - EPS ? 'shorter than ' + t.name : 'the same length as ' + t.name) + '.');

@@ -72,9 +72,11 @@ const listOf = (p, type) => (type === 'clip' ? p.clips : type === 'overlay' ? p.
 /** An item that can be cut by source time: it has sound and is not a looped track or a photo. */
 export function cuttable(type, item) {
   if (!item || !item.mediaId || item.kind === 'image' || item.hasAudio === false) return false;
-  if (type === 'audio') return !item.loop;
-  return type === 'clip' || type === 'overlay';
+  if (curvedClip(type, item)) return false; // the cut maths maps source → timeline linearly
+  return type === 'audio' ? !item.loop : (type === 'clip' || type === 'overlay');
 }
+/** A main clip played in reverse or on a speed curve (Remove silences explains instead of cutting it). */
+export const curvedClip = (type, item) => type === 'clip' && !!item && item.kind !== 'image' && !!(item.ramp || item.reverse);
 /** Where an item sits: start on the timeline, length, speed, source window. */
 export function spanOf(project, type, id) {
   const item = listOf(project, type).find(x => x.id === id); if (!item) return null;

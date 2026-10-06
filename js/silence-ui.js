@@ -2,7 +2,7 @@
 // Detection is in silence.js (settings -> ranges, instantly from the stored loudness curve) and silence-scan.js (reads the sound in pieces);
 // the cut is silence.js cutSilences(), applied as ONE project change so it is one undo step.
 import { soundTargets } from './model.js';
-import { DEFAULTS, MIN_REMOVE, normSettings, autoThreshold, findSilences, spanOf, srcToTimeline, cuttable, cutSilences, alignedWith } from './silence.js';
+import { DEFAULTS, MIN_REMOVE, normSettings, autoThreshold, findSilences, spanOf, srcToTimeline, cuttable, curvedClip, cutSilences, alignedWith } from './silence.js';
 import { etaText } from './clean-ui.js';
 
 const LS = 've.silence';
@@ -92,6 +92,14 @@ export function initSilenceUI(ctx) {
 
   function render() {
     const cur = current();
+    if (cur && curvedClip(cur.type, cur.item) && cur.item.mediaId && cur.item.hasAudio !== false) { // explain instead of hiding
+      if (voiceBox && voiceBox.nextElementSibling !== box) voiceBox.after(box);
+      box.hidden = false; if (lastId) { lastId = null; stopPreview(); }
+      $('silFind').hidden = true; $('silTune').hidden = true; $('silProg').classList.remove('show'); $('silState').textContent = '';
+      const h = $('silHint'); h.hidden = false; h.classList.remove('warn');
+      h.textContent = 'Remove silences works on clips that play forwards at a steady speed. Turn off Reverse and the speed curve first (you can turn them back on after).';
+      return;
+    }
     if (!cur || !cuttable(cur.type, cur.item)) { box.hidden = true; if (lastId) { lastId = null; stopPreview(); } return; }
     const { item, type } = cur;
     if (voiceBox && voiceBox.nextElementSibling !== box) voiceBox.after(box);

@@ -4,6 +4,7 @@
 // normalised cross-correlation by FFT at 50 Hz, then the best candidate is checked and refined at 200 Hz in several windows spread over the
 // recording. The windows must agree (consensus); their trend over time gives the clock drift between the two devices.
 import { planItem, placeItem, listOf, laneOf, findItem } from './model.js';
+import * as RAMP from './ramp.js';
 
 export const RATE = 200;      // envelope values per second
 const COARSE = 4;             // 200 Hz -> 50 Hz
@@ -35,6 +36,19 @@ export function fft(re, im, inverse = false) {
 }
 const pow2 = (n) => { let p = 1; while (p < n) p <<= 1; return p; };
 
+/**
+ * Envelope of a clip's trimmed source (starting at clip.in) -> its envelope along the timeline. Reversed and speed-curve clips play
+ * their source backwards / unevenly, so each timeline step reads the source time the clip shows there; other items: atSpeed().
+ */
+export function alongClip(env, clip) {
+  if (!clip || !(clip.reverse || clip.ramp)) return atSpeed(env, (clip && clip.speed) || 1);
+  const n = Math.max(1, Math.floor(RAMP.lengthOf(clip) * RATE)), out = new Float32Array(n), last = env.length - 1;
+  for (let k = 0; k < n; k++) {
+    const x = Math.max(0, Math.min(last, (RAMP.sourceAtOffset(clip, k / RATE) - clip.in) * RATE)), i = Math.floor(x), f = x - i;
+    out[k] = env[i] * (1 - f) + env[Math.min(last, i + 1)] * f;
+  }
+  return out;
+}
 /** dB envelope (RATE per second, source time) -> time-line envelope: resampled for the playing speed. */
 export function atSpeed(env, speed) {
   if (!(speed > 0) || Math.abs(speed - 1) < 1e-6) return env;

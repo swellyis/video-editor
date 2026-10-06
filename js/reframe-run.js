@@ -81,6 +81,8 @@ export async function sampleClipFaces(clip, getBlob, {
  */
 export async function autoReframeClip(project, clip, getBlob, opts = {}) {
   const { samples, sw, sh } = await sampleClipFaces(clip, getBlob, opts);
+  // the run takes a while: if the clip left the project (deleted, another project opened) don't write into a detached copy
+  if (opts.stillValid && !opts.stillValid()) { const e = new ReframeCancelled(); e.stale = true; throw e; }
   const built = buildReframe(samples, sw, sh, opts.target || 'project', { ...opts, projectRatio: project && project.settings && project.settings.ratio, transform: clip.transform });
   const { applyReframeToClip } = await import('./reframe.js');
   const info = applyReframeToClip(clip, built.keyframes, { setFit: opts.setFit !== false });

@@ -932,10 +932,12 @@ const actions = {
     try {
       const target = ($('reframeTarget') && $('reframeTarget').value) || 'project';
       const setRatio = !($('reframeSetRatio') && !$('reframeSetRatio').checked);
-      const r = await autoReframeClip(app.project, c, async () => {
+      const proj = app.project;
+      const r = await autoReframeClip(proj, c, async () => {
         const m = await media.get(c.mediaId); return m && m.blob;
       }, {
         target, setProjectRatio: setRatio && target !== 'project', setFit: true, signal: ac.signal,
+        stillValid: () => app.project === proj && proj.clips.includes(c), // another project opened / clip deleted meanwhile
         onProgress: (p) => {
           const frac = Math.max(0, Math.min(1, p.frac || 0));
           if (bar) bar.style.width = (frac * 100).toFixed(1) + '%';
@@ -953,7 +955,8 @@ const actions = {
         : ('No face found — centred the crop (' + r.keys + ' keyframes). Undo if you want the old framing.');
       toast(msg, 5000);
     } catch (e) {
-      if (e instanceof ReframeCancelled || (e && e.name === 'ReframeCancelled')) toast('Auto reframe cancelled.');
+      if (e && e.stale) toast('Auto reframe stopped: the clip was removed or another project was opened, so nothing was changed.', 4500);
+      else if (e instanceof ReframeCancelled || (e && e.name === 'ReframeCancelled')) toast('Auto reframe cancelled.');
       else { console.warn('Auto reframe', e); toast('Could not auto reframe: ' + (e && e.message ? e.message : 'unknown error'), 6000); }
     } finally {
       if (btn) { delete btn.dataset.busy; btn.disabled = false; }

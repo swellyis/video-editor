@@ -2,7 +2,7 @@
 // The comparison is in sync.js (pure) and sync-scan.js (reads the sound in pieces); this file only drives the control and applies the result
 // as ONE project change, so it is one undo step.
 import { soundTargets } from './model.js';
-import { atSpeed, prepare, align, applySync } from './sync.js';
+import { atSpeed, alongClip, prepare, align, applySync } from './sync.js';
 import { spanOf } from './silence.js';
 import { etaText } from './clean-ui.js';
 import { fmt } from './util.js';
@@ -79,7 +79,7 @@ export function initSyncUI(ctx) {
       env = await S.scanEnvelope(rec.blob, rec.name, rec.duration, Math.max(0, item.in), Math.max(item.in + 0.1, item.out), { signal, onProgress: onProg });
       envCache.set(key, env); while (envCache.size > 4) envCache.delete(envCache.keys().next().value);
     } else onProg({ frac: 1 });
-    return prepare(atSpeed(env, sp.sp));
+    return prepare(sp.type === 'clip' ? alongClip(env, item) : atSpeed(env, sp.sp)); // reversed / speed-curve clips: in playing order
   }
   async function run(cur) {
     if (job) return;

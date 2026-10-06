@@ -5,6 +5,7 @@
 import { captionWords, rechunk, applyPreset, defaultCaptionStyle, normalizeCaption } from './captions.js';
 import { layout, newProject, migrate, audioSpeed, normalizeClip } from './model.js';
 import { uid } from './util.js';
+import * as RAMP from './ramp.js';
 
 export const DEFAULTS = { minLen: 20, maxLen: 60, idealMin: 30, idealMax: 50, minWords: 30, minRate: 0.8, count: 8, lead: 0.25, tail: 0.45, minGap: 0.05 };
 const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -251,10 +252,13 @@ export function cutRange(project, a, b, has = () => true) {
   for (const it of lay.items) {
     const c = it.clip, s0 = Math.max(a, it.start, a + t), s1 = Math.min(b, it.end);
     if (s1 - s0 < 0.05) continue;
-    const sp = c.kind === 'image' ? 1 : (c.speed || 1);
+    const sp = c.kind === 'image' ? 1 : (c.speed || 1), curved = c.kind !== 'image' && !!(c.ramp || c.reverse);
+    // reversed / speed-ramped clips: the section that plays comes from the clip's own curve (a reversed clip starts at its out point)
+    const cs0 = curved ? RAMP.sourceAtOffset(c, s0 - it.start) : 0, cs1 = curved ? RAMP.sourceAtOffset(c, s1 - it.start) : 0;
     const n = normalizeClip({
       ...JSON.parse(JSON.stringify(c)), id: uid('clip'), gap: Math.max(0, r3(s0 - a - t)),
-      in: c.kind === 'image' ? 0 : r3(c.in + (s0 - it.start) * sp), out: c.kind === 'image' ? r3(s1 - s0) : r3(Math.min(c.out, c.in + (s1 - it.start) * sp)),
+      in: c.kind === 'image' ? 0 : curved ? r3(Math.max(c.in, Math.min(cs0, cs1))) : r3(c.in + (s0 - it.start) * sp),
+      out: c.kind === 'image' ? r3(s1 - s0) : curved ? r3(Math.min(c.out, Math.max(cs0, cs1))) : r3(Math.min(c.out, c.in + (s1 - it.start) * sp)),
       transition: { type: 'cut', duration: 0.6 }, keyframes: {}, fadeIn: 0, fadeOut: 0,
     });
     if (c.kind !== 'image' && n.out - n.in < 0.05) continue;
