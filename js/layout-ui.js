@@ -339,6 +339,9 @@ export function initLayout(ctx) {
   tabsEl.addEventListener('click', (e) => { if (on && e.target.closest('button[data-tab]')) openLib(); }, true);
   document.addEventListener('keydown', (e) => {
     if (!on || !e.altKey || e.ctrlKey || e.metaKey) return;
+    const t = e.target; // Option+digit types a character on a Mac keyboard: never toggle panels while typing or under a dialog
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) && !['range', 'checkbox', 'radio', 'button', 'color'].includes(t.type)) return;
+    if (document.querySelector('dialog[open]')) return;
     if (e.code === 'Digit1') { e.preventDefault(); set(L.toggle(st, 'lib')); resized && resized(); }
     else if (e.code === 'Digit2') { e.preventDefault(); set(L.toggle(st, 'props')); resized && resized(); }
     else if (e.code === 'Digit0') { e.preventDefault(); reset(); }

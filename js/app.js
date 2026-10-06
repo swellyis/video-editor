@@ -1469,11 +1469,12 @@ document.addEventListener('keydown', (e) => {
   const ctx = keyContext(e.target);
   const typing = ctx === 'text';
   const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
-  if (mod && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); redo(); return; }
+  const dlg = qs('dialog[open]'); // a dialog (export, projects, captions…) is on top: the timeline behind it must not change
+  if (mod && e.key.toLowerCase() === 'z' && !typing && !dlg) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && e.key.toLowerCase() === 'y' && !typing && !dlg) { e.preventDefault(); redo(); return; }
   if (typing) { if (e.key === 'Escape') e.target.blur(); return; }
   const handled0 = () => e.preventDefault();
-  if (qs('dialog[open]')) return;
+  if (dlg) return;
   if (ctx === 'control' && CONTROL_KEYS.has(e.key)) return; // e.g. arrows move the focused slider, Space presses the focused button
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); actions.duplicate(); return; }
   if (mod && !e.altKey) {
