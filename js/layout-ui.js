@@ -255,7 +255,7 @@ export function initLayout(ctx) {
       else if (e.key === 'Home') next = L.setWidth(st, part, part === 'lib' ? L.LIB_MIN : L.PROP_MIN);
       else if (e.key === 'End') next = L.setWidth(st, part, L.maxWidth(st, part, editor.clientWidth));
     }
-    if (!next) return; e.preventDefault(); if (part !== 'top') next = L.setWidth(next, part, Math.min(part === 'lib' ? next.libW : next.propW, L.maxWidth(next, part, editor.clientWidth))); set(next); resized && resized();
+    if (!next) return; e.preventDefault(); e.stopPropagation(); /* the splitter owns these keys: no playhead move / shortcut */ if (part !== 'top') next = L.setWidth(next, part, Math.min(part === 'lib' ? next.libW : next.propW, L.maxWidth(next, part, editor.clientWidth))); set(next); resized && resized();
   }
 
 
@@ -300,6 +300,7 @@ export function initLayout(ctx) {
     document.body.append(menu);
     menu.addEventListener('keydown', (e) => {
       const items = [...menu.querySelectorAll('.menu-item')]; const i = items.indexOf(document.activeElement);
+      if (/^(ArrowDown|ArrowUp|Home|End)$/.test(e.key)) e.stopPropagation(); // menu navigation: never the playhead
       if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
       else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); } else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); menuBtn.focus(); } else if (e.key === 'Tab') closeMenu();

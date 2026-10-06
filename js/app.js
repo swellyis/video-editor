@@ -1459,7 +1459,7 @@ function keyContext(t) {
   const tag = t.tagName;
   if (tag === 'TEXTAREA' || tag === 'SELECT') return 'text';
   if (tag === 'INPUT') return ['range', 'checkbox', 'radio', 'color', 'button', 'submit', 'reset', 'file'].includes(t.type) ? 'control' : 'text';
-  if (t.closest('button, a[href], summary, [role=button], [role=tab], [role=slider], [role=switch], [role=checkbox], [role=option], [role=menuitem]')) return 'control';
+  if (t.closest('button, a[href], summary, [role=button], [role=tab], [role=slider], [role=switch], [role=checkbox], [role=option], [role=menuitem], [role=separator], [role=spinbutton], [role=radio], [role=menuitemradio], [role=menuitemcheckbox], [role=scrollbar]')) return 'control'; // splitters etc. own their arrow keys
   return 'global';
 }
 document.addEventListener('keydown', (e) => {
@@ -1554,7 +1554,8 @@ app.openCtx = (x, y, type, id) => {
   const first = m.querySelector('.ctx-item:not(.is-off)'); if (first) first.focus({ preventScroll: true });
   m.addEventListener('keydown', (e) => {
     const items = [...m.querySelectorAll('.ctx-item')], i = items.indexOf(document.activeElement);
-    if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); items[(i + 1) % items.length].focus(); } else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); items[(i - 1 + items.length) % items.length].focus(); }
+    else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); e.stopPropagation(); items[e.key === 'Home' ? 0 : items.length - 1].focus(); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeCtx(); }
   });
   setTimeout(() => document.addEventListener('pointerdown', ctxAway, true), 0);
