@@ -95,6 +95,7 @@ let keepProvider = () => [];
 export function setKeepProvider(fn) { keepProvider = fn; }
 const localKeep = () => { try { return [...keepProvider()]; } catch { return []; } };
 const chan = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(DB_NAME + '-gc') : null;
+if (chan && chan.unref) chan.unref(); // (Node test runs: don't keep the process alive)
 if (chan) chan.onmessage = (e) => { const d = e.data || {}; if (d.type === 'ask') chan.postMessage({ type: 'keep', q: d.q, ids: localKeep() }); };
 function askOtherTabs(timeout = 350) {
   if (!chan) return Promise.resolve([]);
