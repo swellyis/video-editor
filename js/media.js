@@ -152,7 +152,8 @@ export async function computePeaks(blob, rate = 20, duration = 0) {
     } finally { input.dispose && input.dispose(); }
   } catch (e) { /* fall through to the small-file path */ }
   if (blob.size > 60 * 1024 * 1024) return null; // never decode a big file in one piece
-  if (!(duration > 0) || duration * 48000 * 2 * 4 > 256 * 1024 * 1024) return null; // ...nor a long one: 60 MB of AAC can be an hour = 1.4 GB of PCM (tab crash)
+  // ...nor a long one: 60 MB of AAC can be an hour = 1.4 GB of PCM (tab crash). Unknown length (NaN / Infinity, MediaRecorder WebM): small files only.
+  if (goodDur(duration) ? duration * 48000 * 2 * 4 > 256 * 1024 * 1024 : blob.size > 15 * 1024 * 1024) return null;
   try {
     const buf = await blob.arrayBuffer();
     const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;

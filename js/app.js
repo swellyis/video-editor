@@ -1318,10 +1318,10 @@ voice = (() => {
     const ext = V.blob.type.includes('mp4') ? 'm4a' : V.blob.type.includes('ogg') ? 'ogg' : 'webm';
     try {
       const m = await media.importFile(new File([V.blob], `Voiceover ${n}.${ext}`, { type: V.blob.type }), 'audio');
-      if (!(m.duration > 0)) { m.duration = V.dur; await db.updateMediaMeta(m.id, { duration: V.dur }).catch(() => { }); }
+      if (!(Number.isFinite(m.duration) && m.duration > 0)) { m.duration = V.dur; /* MediaRecorder WebM: NaN / Infinity / 0 */ await db.updateMediaMeta(m.id, { duration: V.dur }).catch(() => { }); }
       const a = newAudio(m, V.t0);
       Object.assign(a, { name: 'Voiceover ' + n, voice: true, duck: false, volume: 1, fadeIn: 0.05, fadeOut: 0.15 });
-      if (!(a.out > 0)) { a.out = V.dur; a.srcDuration = V.dur; }
+      if (!(Number.isFinite(a.out) && a.out > 0)) { a.out = V.dur; a.srcDuration = V.dur; }
       app.project.audio.push(a);
       app.selection = { type: 'audio', id: a.id };
       discard(true);
