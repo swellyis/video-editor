@@ -90,7 +90,35 @@ let cleanUI = null, voiceUI = null, silenceUI = null, txUI = null, syncUI = null
 let voice = { busy: false, state: 'idle', toggle() { }, keyR() { }, cancelCountdown() { }, tick() { } }; // replaced by the voiceover recorder below
 
 // media this tab still needs, reported to other tabs before they garbage-collect stored media
-setKeepProvider(() => [...mediaIdsOf(app.project), ...app.history.mediaIds(), ...media.recs.keys(), ...media.pending]);
+/** Media ids the clipboard refers to (it outlives the project it was copied from, so storage clean-up must keep them). */
+function clipboardMediaIds(cb = app.clipboard) {
+  if (!cb || !Array.isArray(cb.items)) return [];
+  const of = (t) => cb.items.filter(i => i.type === t).map(i => i.data);
+  return [...mediaIdsOf({ clips: of('clip'), overlays: of('overlay'), audio: of('audio') })];
+}
+/** Remember the media records (blob references, no copy) with the clipboard so a paste can re-import them if storage lost them. */
+function withMedia(cb) {
+  if (!cb) return cb;
+  const recs = new Map();
+  for (const id of clipboardMediaIds(cb)) { const r = media.peek(id); if (r) recs.set(id, r); }
+  Object.defineProperty(cb, 'recs', { value: recs, enumerable: false, writable: true }); // not part of deep clones / JSON
+  return cb;
+}
+/** Make the clipboard's media available here: load from storage, else re-import the remembered record, else drop the items that need it. */
+async function resolveClipboardMedia(cb) {
+  const missing = new Set();
+  for (const id of clipboardMediaIds(cb)) {
+    if (await media.get(id)) continue;
+    const r = cb.recs && cb.recs.get(id);
+    if (r && r.blob) { try { await db.putMedia(r); if (await media.get(id)) continue; } catch { /* storage full or blocked */ } }
+    missing.add(id);
+  }
+  if (!missing.size) return cb;
+  const needs = (i) => (i.type === 'clip' || i.type === 'overlay' || i.type === 'audio') && i.data.mediaId && missing.has(i.data.mediaId);
+  const items = cb.items.filter(i => !needs(i));
+  return { ...cb, items, dropped: cb.items.length - items.length };
+}
+setKeepProvider(() => [...mediaIdsOf(app.project), ...app.history.mediaIds(), ...clipboardMediaIds(), ...media.recs.keys(), ...media.pending]);
 
 const compositor = new Compositor();
 const stage = $('stage');
@@ -828,19 +856,27 @@ const actions = {
   muteSel() { const l = app.selList(); if (!l.length) return toast('Select clips, overlays or audio tracks first.'); groupActions.mute(l); },
   copy() {
     const l = app.selList(); if (!l.length) return toast('Select something on the timeline first, then copy it (Ctrl+C).');
-    app.clipboard = G.copyItems(app.project, l); fillInspector();
+    app.clipboard = withMedia(G.copyItems(app.project, l)); fillInspector();
     toast('Copied ' + plural(l.length, 'item') + '. Move the playhead and paste with Ctrl+V.', 2600);
   },
   cut() {
     const l = app.selList(); if (!l.length) return toast('Select something on the timeline first, then cut it (Ctrl+X).');
-    app.clipboard = G.copyItems(app.project, l);
+    app.clipboard = withMedia(G.copyItems(app.project, l));
     const n = G.deleteMany(app.project, l, app.rippleEnabled); app.selection = null;
     app.commit('Cut ' + plural(n, 'item')); toast('Cut ' + plural(n, 'item') + '. Paste with Ctrl+V; Undo (Ctrl+Z) puts them back.', 2800);
   },
-  paste() {
+  async paste() {
     if (!app.clipboard) return toast('Nothing copied yet. Select items and press Ctrl+C (or Ctrl+X) first.');
-    const out = G.pasteItems(app.project, app.clipboard, player.t, app.rippleEnabled);
+    // The clipboard can come from another project: load (or re-import) the media it uses before the items land.
+    const cb = await resolveClipboardMedia(app.clipboard);
+    if (!cb.items.length) return toast('The copied items' + "'" + ' media files are no longer stored on this device, so there is nothing to paste.', 3600);
+    const out = G.pasteItems(app.project, cb, player.t, app.rippleEnabled);
     if (!out.length) return;
+    for (const id of clipboardMediaIds(cb)) {
+      const rec = media.peek(id);
+      if (rec && rec.kind !== 'image' && rec.hasAudio !== false && !rec.peaks) media.fillPeaks(id).catch(() => { });
+    }
+    if (cb.dropped) toast(plural(cb.dropped, 'copied item') + ' skipped: its media file is no longer stored on this device.', 3600);
     setSelQuiet(out); app.commit('Paste ' + plural(out.length, 'item'));
     if (timeline.autoFit) timeline.fit();
     toast('Pasted ' + plural(out.length, 'item') + ' at ' + fmt(player.t) + '. An overlap goes to a new lane.', 2600);
@@ -1442,7 +1478,7 @@ document.addEventListener('keydown', (e) => {
     if (kk === 'a') { e.preventDefault(); actions.selectAll(); return; }
     if (kk === 'c') { e.preventDefault(); actions.copy(); return; }
     if (kk === 'x') { e.preventDefault(); actions.cut(); return; }
-    if (kk === 'v') { e.preventDefault(); e.shiftKey ? actions.pasteLook() : actions.paste(); return; }
+    if (kk === 'v') { e.preventDefault(); e.shiftKey ? actions.pasteLook() : Promise.resolve(actions.paste()).catch(err => toast('Paste failed: ' + (err && err.message || err))); return; }
   }
   if (!mod && (e.code === 'BracketLeft' || e.code === 'BracketRight')) { handled0(); actions[e.code === 'BracketLeft' ? 'volumeDown' : 'volumeUp'](null, e); return; }
   if (mod || e.altKey) return;
@@ -1738,7 +1774,7 @@ function syncBlurBox() {
 // ---------------------------------------------------------------- projects
 /** Free memory held for media the open project no longer uses (object URLs, decoded images, GIF frames). */
 function releaseUnusedMedia() {
-  const keep = new Set([...mediaIdsOf(app.project), ...app.history.mediaIds()]);
+  const keep = new Set([...mediaIdsOf(app.project), ...app.history.mediaIds(), ...clipboardMediaIds()]); // the clipboard travels between projects
   media.retain(keep);
   if (thumb.v) { thumb.v.removeAttribute('src'); thumb.v.load(); delete thumb.v.dataset.url; }
   for (const v of thumb.ov.values()) { v.removeAttribute('src'); v.load(); }
@@ -1784,6 +1820,7 @@ async function createProject(name) {
   refreshCaps();
 }
 app.openProject = openProject;
+app.createProject = createProject;
 /** "Sep 29, 8:52 PM" (locale aware); the year only for another year. */
 function editedLabel(t) {
   const d = new Date(t || Date.now()), o = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
