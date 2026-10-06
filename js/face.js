@@ -2,6 +2,7 @@
 // WASM + models are vendored under vendor/mediapipe/. First fetch is cached by the service worker
 // in `video-editor-ai` (same pattern as Whisper), then it works offline.
 import { FilesetResolver, FaceDetector } from '../vendor/mediapipe/vision_bundle.mjs';
+import { aiKey } from './ai-manifest.js';
 
 export const WASM_BASE = new URL('../vendor/mediapipe/wasm', import.meta.url).href;
 export const MODEL_SHORT = new URL('../vendor/mediapipe/models/blaze_face_short_range.tflite', import.meta.url).href;
@@ -22,10 +23,7 @@ export async function isFaceCached() {
   try {
     if (!('caches' in self) || !(await caches.has(CACHE_NAME))) return false;
     const c = await caches.open(CACHE_NAME);
-    const keys = await c.keys();
-    const hasWasm = keys.some(r => /vision_wasm_internal\.wasm/.test(r.url));
-    const hasModel = keys.some(r => /blaze_face_.*\.tflite/.test(r.url));
-    return hasWasm && hasModel;
+    return !!(await c.match(aiKey(WASM_BASE + '/vision_wasm_internal.wasm'))) && !!(await c.match(aiKey(MODEL_SHORT))); // this version's files
   } catch { return false; }
 }
 
@@ -33,10 +31,10 @@ async function warm(url) {
   try {
     if (!('caches' in self)) { await fetch(url); return; }
     const c = await caches.open(CACHE_NAME);
-    const hit = await c.match(url, { ignoreSearch: true });
+    const hit = await c.match(aiKey(url)); // versioned key (js/ai-manifest.js): a stale copy from an older release doesn't count
     if (hit) return;
-    const res = await fetch(url);
-    if (res.ok) await c.put(url, res.clone());
+    const res = await fetch(url, { cache: 'no-cache' }); // through the service worker, which stores it under the same key
+    if (res.ok && !(await c.match(aiKey(url)))) await c.put(aiKey(url), res.clone());
   } catch { /* network / private mode — FaceDetector will fetch itself */ }
 }
 

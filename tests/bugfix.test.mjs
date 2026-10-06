@@ -76,3 +76,23 @@ test('bug 6: mediaSourceEnd = the furthest trimmed source end of the items using
   assert.equal(mediaSourceEnd(p, 'm3'), 4);
   assert.equal(mediaSourceEnd(p, 'nope'), 0);
 });
+
+// ---------------------------------------------------------------- bug 5: AI model cache versioning
+test('bug 5: AI files have content-hash cache keys, and sw.js carries the same manifest', async () => {
+  const fs = await import('node:fs'), crypto = await import('node:crypto'), path = await import('node:path');
+  const { AI_FILES, AI_ROOT, aiKey } = await import('../js/ai-manifest.js');
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+  const want = ['vendor/mediapipe/models/selfie_segmenter.tflite', 'vendor/mediapipe/wasm/vision_wasm_internal.wasm', 'vendor/whisper/transformers.min.js', 'vendor/clean-strong/dpdfnet2_48khz_hr.onnx'];
+  for (const rel of want) {
+    const h = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, rel))).digest('hex');
+    assert.ok(AI_FILES[rel] && h.startsWith(AI_FILES[rel]) && AI_FILES[rel].length >= 12, rel + ' hash is current');
+    assert.equal(aiKey(AI_ROOT + rel), AI_ROOT + rel + '?h=' + AI_FILES[rel]);
+    assert.equal(aiKey(AI_ROOT + rel + '?x=1'), AI_ROOT + rel + '?h=' + AI_FILES[rel], 'query ignored');
+  }
+  assert.equal(aiKey(AI_ROOT + 'js/app.js'), AI_ROOT + 'js/app.js', 'other files are untouched');
+  const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+  const m = /const AI_FILES = (\{[^;]*\});/.exec(sw);
+  assert.ok(m, 'sw.js has the manifest');
+  assert.deepEqual(JSON.parse(m[1]), AI_FILES);
+  assert.ok(/'\.\/js\/ai-manifest\.js'/.test(sw), 'the manifest module is part of the app shell');
+});

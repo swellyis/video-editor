@@ -1,6 +1,7 @@
 // On-device person segmentation (MediaPipe Selfie Segmenter). WASM shared with face.js under vendor/mediapipe/.
 // First fetch cached in video-editor-ai (service worker); then offline.
 import { FilesetResolver, ImageSegmenter } from '../vendor/mediapipe/vision_bundle.mjs';
+import { aiKey } from './ai-manifest.js';
 
 export const WASM_BASE = new URL('../vendor/mediapipe/wasm', import.meta.url).href;
 export const MODEL_LANDSCAPE = new URL('../vendor/mediapipe/models/selfie_segmenter_landscape.tflite', import.meta.url).href;
@@ -16,17 +17,17 @@ async function warm(url) {
   try {
     if (!('caches' in self)) { await fetch(url); return; }
     const c = await caches.open(CACHE_NAME);
-    if (await c.match(url, { ignoreSearch: true })) return;
-    const res = await fetch(url);
-    if (res.ok) await c.put(url, res.clone());
+    if (await c.match(aiKey(url))) return; // versioned key (js/ai-manifest.js)
+    const res = await fetch(url, { cache: 'no-cache' }); // through the service worker, which stores it under the same key
+    if (res.ok && !(await c.match(aiKey(url)))) await c.put(aiKey(url), res.clone());
   } catch { /* */ }
 }
 
 export async function isSegCached() {
   try {
     if (!('caches' in self) || !(await caches.has(CACHE_NAME))) return false;
-    const keys = await (await caches.open(CACHE_NAME)).keys();
-    return keys.some(r => /selfie_segmenter.*\.tflite/.test(r.url)) && keys.some(r => /vision_wasm_internal\.wasm/.test(r.url));
+    const c = await caches.open(CACHE_NAME); // this version's files (versioned keys)
+    return !!(await c.match(aiKey(WASM_BASE + '/vision_wasm_internal.wasm'))) && (!!(await c.match(aiKey(MODEL_LANDSCAPE))) || !!(await c.match(aiKey(MODEL_SQUARE))));
   } catch { return false; }
 }
 

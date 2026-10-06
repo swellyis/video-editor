@@ -9,6 +9,7 @@ import { Resampler, SR } from './clean-dsp.js';
 import { db } from './db.js';
 import { cleanId, CLEAN_VERSION, changeId, changeKey, normChange, changeIsOn, CHANGE_VERSION } from './model.js';
 import { yieldToMain } from './util.js';
+import { aiKey } from './ai-manifest.js';
 
 export class CleanCancelled extends Error { constructor() { super('Cleaning cancelled'); this.name = 'CleanCancelled'; } }
 export class CleanError extends Error { constructor(code, msg) { super(msg); this.name = 'CleanError'; this.code = code; } }
@@ -26,6 +27,8 @@ export const STRONG_FILES = [
 export const STRONG_BYTES = STRONG_FILES.reduce((a, f) => a + f.bytes, 0);
 export const STRONG_MB = Math.round(STRONG_BYTES / 1048576);
 const fileUrl = (f) => STRONG_DIR + f.name;
+/** Cache key: URL + content hash (js/ai-manifest.js), so files from an older release never count as this version's engine. */
+const fileKey = (f) => aiKey(fileUrl(f));
 
 /** Test seam: `hooks.engine` may return { init, push, finish, close } instead of the real worker. */
 export const hooks = { engine: null };
@@ -36,7 +39,7 @@ export async function strongReady() {
   try {
     if (!hasCaches() || !(await caches.has(AI_CACHE))) return false;
     const c = await caches.open(AI_CACHE);
-    for (const f of STRONG_FILES) if (!(await c.match(fileUrl(f), { ignoreSearch: true }))) return false;
+    for (const f of STRONG_FILES) if (!(await c.match(fileKey(f)))) return false;
     return true;
   } catch { return false; }
 }
@@ -46,7 +49,7 @@ export async function downloadStrong({ onProgress, signal } = {}) {
   const c = await caches.open(AI_CACHE);
   let done = 0;
   for (const f of STRONG_FILES) {
-    if (await c.match(fileUrl(f), { ignoreSearch: true })) { done += f.bytes; onProgress && onProgress({ loaded: done, total: STRONG_BYTES, file: f.name }); continue; }
+    if (await c.match(fileKey(f))) { done += f.bytes; onProgress && onProgress({ loaded: done, total: STRONG_BYTES, file: f.name }); continue; }
     let res;
     try { res = await fetch(fileUrl(f), { signal, cache: 'no-cache' }); } catch (e) { if (signal && signal.aborted) throw new CleanCancelled(); throw new CleanError('offline', 'The download did not start. Check the internet connection and try again.'); }
     if (!res.ok || !res.body) throw new CleanError('download', 'The download failed (' + res.status + '). Try again later.');
@@ -60,7 +63,8 @@ export async function downloadStrong({ onProgress, signal } = {}) {
     }
     const blob = new Blob(parts, { type: f.type });
     if (blob.size !== f.bytes) throw new CleanError('download', 'The download was incomplete. Try again.'); // never keep a truncated file
-    await c.put(fileUrl(f), new Response(blob, { headers: { 'content-type': f.type, 'content-length': String(blob.size) } }));
+    await c.put(fileKey(f), new Response(blob, { headers: { 'content-type': f.type, 'content-length': String(blob.size) } }));
+    for (const k of await c.keys(fileUrl(f), { ignoreSearch: true })) if (k.url !== fileKey(f)) await c.delete(k); // older copies of this file
     done += f.bytes;
   }
   onProgress && onProgress({ loaded: STRONG_BYTES, total: STRONG_BYTES, file: '' });
@@ -72,7 +76,7 @@ export async function removeStrong() {
 async function strongUrls() {
   const c = await caches.open(AI_CACHE), out = {}, made = [];
   for (const f of STRONG_FILES) {
-    const r = await c.match(fileUrl(f), { ignoreSearch: true });
+    const r = await c.match(fileKey(f));
     if (!r) throw new CleanError('missing', 'The Strong engine is not downloaded yet.');
     const u = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: f.type })); out[f.key] = u; made.push(u);
   }
