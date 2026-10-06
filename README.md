@@ -59,6 +59,7 @@ The app is plain static files (HTML, CSS and ES modules). There's no build step.
 - **PWA:**
   - A real manifest with icons, including maskable and Apple touch icons.
   - A service worker that caches the app shell for offline use under a versioned cache. The page and its scripts are always served from the same cached version. `bump-version.py` stamps one build id into `sw.js`, `index.html` and `js/build.js`; if a stale page ever meets newer scripts, the app resets its offline copy and reloads itself once.
+  - The on-device AI files (MediaPipe face/segmenter, the Whisper runtime, the Clean voice Strong engine) live in a separate `video-editor-ai` cache that survives app updates. `bump-version.py` writes a content hash for each of them into `js/ai-manifest.js` and `sw.js`; they are cached under `URL?h=<hash>`, so a changed vendor file is downloaded again. When a new version activates, the service worker keeps unchanged files (also older unversioned copies whose bytes still match), and deletes stale or removed ones.
   - Self-hosted fonts.
   - An install button (`beforeinstallprompt`) with iOS, Android and desktop instructions. It's never shown when the app already runs installed (display-mode standalone, fullscreen, minimal-ui or window-controls-overlay, iOS `navigator.standalone`, or an `android-app://` referrer), and it's decided before first paint so it can't flash. The `appinstalled` event is remembered in localStorage, so a normal browser tab hides it too; Chrome/Edge's `navigator.getInstalledRelatedApps()` is used as an extra hint (the manifest lists this web app in `related_applications` with its `id`). Dismissing the browser's install prompt hides the button for 90 days; on iPhone the Add to Home Screen hint shows until you tap "Got it" once. If the app is uninstalled, the next `beforeinstallprompt` clears the flag and the button returns.
   - An update banner when a new version is deployed.
@@ -104,7 +105,7 @@ Only Chrome was tested (desktop, plus a phone-sized viewport with touch emulatio
 The real-time fallback takes as long as the video itself. Keep the tab visible while it runs.
 
 ## Deploying
-1. After editing any file, run `python3 bump-version.py`. It stamps `sw.js` with a content hash so installed copies pick up the update.
+1. After editing any file, run `python3 bump-version.py`. It stamps `sw.js` with a content hash so installed copies pick up the update. It also refreshes the AI file hashes (`js/ai-manifest.js` + `sw.js`), so run it after replacing anything under `vendor/mediapipe`, `vendor/whisper` or `vendor/clean-strong`.
 2. Upload the whole folder to any static HTTPS host (GitHub Pages, Netlify, Cloudflare Pages, and so on). Every path is relative, so a sub-path such as `/user.github.io/editor/` works too.
 3. Open the URL on your phone:
    - **Android (Chrome):** tap *Install app*.
