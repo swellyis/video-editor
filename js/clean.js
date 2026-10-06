@@ -115,28 +115,30 @@ const SRC_CHUNK_SEC = 10;
  * options: { level: 'light'|'strong', onProgress({ frac, etaSec, phase }), signal }
  * Resolves the stored record. Throws CleanCancelled / CleanError (codes: noaudio, unreadable, toolong, failed, missing, ...).
  */
-export async function cleanMedia(media, mediaId, { level = 'light', onProgress, signal } = {}) {
+export async function cleanMedia(media, mediaId, { level = 'light', onProgress, signal, fallbackDur } = {}) {
   if (level !== 'light' && level !== 'strong') throw new CleanError('level', 'Unknown level.');
-  return derive(media, mediaId, { engine: level, id: cleanId(mediaId, level), meta: { cleanOf: mediaId, cleanLevel: level, cleanV: CLEAN_VERSION }, label: 'Clean voice', onProgress, signal });
+  return derive(media, mediaId, { engine: level, id: cleanId(mediaId, level), meta: { cleanOf: mediaId, cleanLevel: level, cleanV: CLEAN_VERSION }, label: 'Clean voice', onProgress, signal, fallbackDur });
 }
 /**
  * Change voice: make the changed-voice copy `changeId(mediaId, clean, params)` of a media file. Clean voice comes first: when `clean` is
  * 'light' / 'strong' its cleaned copy must already be stored and is the input. params: { pitch, tone, radio }.
  */
-export async function changeMedia(media, mediaId, { clean = 'off', params, onProgress, signal } = {}) {
+export async function changeMedia(media, mediaId, { clean = 'off', params, onProgress, signal, fallbackDur } = {}) {
   if (!changeIsOn(params)) throw new CleanError('level', 'Nothing to change.');
   const p = normChange(params), src = clean === 'off' ? mediaId : cleanId(mediaId, clean);
   if (clean !== 'off' && !(await hasCleaned(media, mediaId, clean))) throw new CleanError('needclean', 'Apply Clean voice first (“Clean now”), then Change voice.');
-  return derive(media, src, { engine: 'voice', params: p, id: changeId(mediaId, clean, p), meta: { changeOf: mediaId, changeKey: changeKey(p), changeV: CHANGE_VERSION, cleanLevel: clean === 'off' ? undefined : clean }, label: 'Change voice', onProgress, signal });
+  return derive(media, src, { engine: 'voice', params: p, id: changeId(mediaId, clean, p), meta: { changeOf: mediaId, changeKey: changeKey(p), changeV: CHANGE_VERSION, cleanLevel: clean === 'off' ? undefined : clean }, label: 'Change voice', onProgress, signal, fallbackDur });
 }
-async function derive(media, mediaId, { engine, params, id, meta, label, onProgress, signal }) {
+/** A usable stored duration: finite and > 0 (MediaRecorder WebM reports NaN / Infinity until it has been scanned). */
+const knownDur = (d) => (Number.isFinite(d) && d > 0 ? d : 0);
+async function derive(media, mediaId, { engine, params, id, meta, label, onProgress, signal, fallbackDur }) {
   const level = engine;
   if (signal && signal.aborted) throw new CleanCancelled();
   const rec = await media.get(mediaId);
   if (!rec || !rec.blob) throw new CleanError('missing', 'The original file is not on this device.');
   const mb = await loadMediabunny();
   const store = await pickStore(mb);
-  const dur = rec.duration > 0 ? rec.duration : 0;
+  let dur = knownDur(rec.duration);
   if (store.fmt === 'wav' && dur > WAV_MAX_SEC) throw new CleanError('toolong', 'This browser cannot store a processed copy of a recording this long (it has no audio encoder).');
   let eng = null, strong = null, reader = null, output = null;
   const cleanup = async (ok) => {
@@ -156,7 +158,15 @@ async function derive(media, mediaId, { engine, params, id, meta, label, onProgr
     if (signal && signal.aborted) throw new CleanCancelled();
     try { reader = await new SourceReader(rec.blob, rec.name, rec.duration).open(); }
     catch (e) { if (e.noAudio) throw new CleanError('noaudio', 'This file has no sound to clean.'); throw new CleanError('unreadable', 'This browser cannot read the sound of this file (' + (e.message || 'unknown format') + ').'); }
-    const sr = reader.sr, nSrc = Math.max(1, Math.round((dur || 1) * sr)), step = Math.round(SRC_CHUNK_SEC * sr);
+    if (!dur) { // unknown length: find the real one (and remember it), else use how much of it the timeline uses
+      dur = knownDur(await reader.realDuration());
+      if (dur) { rec.duration = dur; db.updateMediaMeta(mediaId, { duration: dur }).catch(() => { }); }
+      else { dur = knownDur(typeof fallbackDur === 'function' ? fallbackDur() : fallbackDur); } // the processed copy then covers what the timeline plays
+      if (!dur) throw new CleanError('unreadable', 'This browser cannot tell how long this file is.');
+      if (store.fmt === 'wav' && dur > WAV_MAX_SEC) throw new CleanError('toolong', 'This browser cannot store a processed copy of a recording this long (it has no audio encoder).');
+    }
+    const sr = reader.sr, step = Math.round(SRC_CHUNK_SEC * sr);
+    let nSrc = Math.max(1, Math.round(dur * sr));
     const rs = new Resampler(sr, SR);
     output = new mb.Output({
       format: store.fmt === 'wav' ? new mb.WavOutputFormat() : store.fmt === 'opus' ? new mb.OggOutputFormat() : new mb.Mp4OutputFormat({ fastStart: 'in-memory' }),

@@ -27,6 +27,18 @@ export function seekVideo(v, t, timeout = 8000) {
   });
 }
 
+/** Length of a media file read from its container (scans to the last packet: works for WebM without a duration header). 0 = unknown. */
+export async function measureDuration(blob) {
+  let input = null;
+  try {
+    const mb = await loadMediabunny();
+    input = new mb.Input({ source: new mb.BlobSource(blob), formats: mb.ALL_FORMATS });
+    const d = await input.computeDuration();
+    return Number.isFinite(d) && d > 0 ? d : 0;
+  } catch { return 0; } finally { try { input && input.dispose && input.dispose(); } catch { /* ignore */ } }
+}
+const goodDur = (d) => Number.isFinite(d) && d > 0;
+
 async function probeVideo(blob) {
   const v = document.createElement('video');
   v.muted = true; v.preload = 'auto'; v.playsInline = true;
@@ -37,6 +49,8 @@ async function probeVideo(blob) {
     let duration = v.duration;
     if (!Number.isFinite(duration)) { // MediaRecorder WebM without duration
       v.currentTime = 1e7; await once(v, 'seeked').catch(() => { }); duration = v.duration; v.currentTime = 0;
+      if (!goodDur(duration)) duration = await measureDuration(blob); // the seek did not reveal it either
+      if (!goodDur(duration)) throw new Error('Cannot tell how long this video is');
     }
     if (v.readyState < 2) await once(v, 'loadeddata').catch(() => { });
     const w = v.videoWidth, h = v.videoHeight;
@@ -85,6 +99,7 @@ async function probeAudio(blob) {
         try { a.currentTime = 1e7; } catch { done(); }
       });
     }
+    if (!goodDur(d)) d = await measureDuration(blob);
     if (!Number.isFinite(d) || d <= 0) {
       try {
         const ac = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 44100);

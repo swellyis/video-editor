@@ -1,6 +1,6 @@
 // Change voice: the block under "Clean voice" (Off / Deeper / Higher / Radio, plus Pitch and Tone sliders once something is on).
 // The audio work is in clean.js (changeMedia) and voice-dsp.js (run in clean-worker.js); playback and export pick the copy through model.soundTargets().
-import { cleanId, cleanLevelOf, changeId, changeTarget, normChange, changeIsOn, changePresetOf, CHANGE_PRESETS } from './model.js';
+import { cleanId, cleanLevelOf, changeId, changeTarget, normChange, changeIsOn, changePresetOf, CHANGE_PRESETS, mediaSourceEnd } from './model.js';
 import { etaText } from './clean-ui.js';
 
 const sgn = (v, unit) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v) + unit;
@@ -66,7 +66,7 @@ export function initVoiceUI(ctx) {
     let wake = null; try { wake = await navigator.wakeLock?.request('screen'); } catch { /* optional */ }
     try {
       const A = await load();
-      await A.changeMedia(media, item.mediaId, { clean: lvl, params: n, signal: ctl.signal, onProgress: (p) => { job.frac = p.frac; job.eta = p.etaSec; renderProgress(); } });
+      await A.changeMedia(media, item.mediaId, { clean: lvl, params: n, fallbackDur: () => mediaSourceEnd(app.project, item.mediaId), signal: ctl.signal, onProgress: (p) => { job.frac = p.frac; job.eta = p.etaSec; renderProgress(); } });
       const it = findItem(type, item.id);
       if (it) { it.change = n; commit('Change voice'); }
       player.invalidate();

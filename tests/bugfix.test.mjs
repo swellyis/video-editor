@@ -2,7 +2,7 @@
 // AI cache versioning, unknown durations). Each was written failing first.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newProject, newClipFromMedia, layout, animated } from '../js/model.js';
+import { newProject, newClipFromMedia, layout, animated, mediaSourceEnd } from '../js/model.js';
 import { insertFreeze } from '../js/freeze.js';
 import { buildReframe } from '../js/reframe.js';
 import { mediaIdsOf } from '../js/db.js';
@@ -65,4 +65,14 @@ test('bug 3: a clip rotated 90° uses the rotated frame (portrait source, face p
 test('bug 1/sweep: mediaIdsOf keeps a background-remove image (gc must not delete it)', () => {
   const p = newProject('t'); const c = newClipFromMedia(vid, p.settings); c.bgremove = { mode: 'image', mediaId: 'medBG' }; p.clips.push(c);
   assert.ok(mediaIdsOf(p).has('medBG'));
+});
+
+// ---------------------------------------------------------------- bug 6: unknown file length falls back to what the timeline uses
+test('bug 6: mediaSourceEnd = the furthest trimmed source end of the items using a file (finite only)', () => {
+  const p = newProject('x');
+  p.clips.push({ ...newClipFromMedia(vid), in: 1, out: 6 }, { ...newClipFromMedia(vid), in: 2, out: 8.5 });
+  p.audio.push({ id: 'a1', mediaId: 'm3', in: 0, out: Infinity, start: 0 }, { id: 'a2', mediaId: 'm3', in: 0, out: 4, start: 1 });
+  assert.equal(mediaSourceEnd(p, 'm1'), 8.5);
+  assert.equal(mediaSourceEnd(p, 'm3'), 4);
+  assert.equal(mediaSourceEnd(p, 'nope'), 0);
 });

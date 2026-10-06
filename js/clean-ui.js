@@ -1,6 +1,6 @@
 // Clean voice: the one control (Off / Light / Strong + compare) that lives under the Volume slider of the selected sound.
 // This file only drives that control; the audio work is in clean.js (worker) and the playback / export hooks are in player.js / audio.js.
-import { cleanId, cleanLevelOf, changeTarget } from './model.js';
+import { cleanId, cleanLevelOf, changeTarget, mediaSourceEnd } from './model.js';
 
 const esc = (n) => (n < 0 ? 0 : n);
 /** "about 40 s left" / "about 3 min left" */
@@ -111,7 +111,7 @@ export function initCleanUI(ctx) {
         job.phase = 'process'; job.frac = 0; render();
       }
       const t0 = performance.now();
-      await A.cleanMedia(media, item.mediaId, { level, signal: ctl.signal, onProgress: (p) => { job.frac = p.frac; job.eta = p.etaSec; renderProgress(); } });
+      await A.cleanMedia(media, item.mediaId, { level, fallbackDur: () => mediaSourceEnd(app.project, item.mediaId), signal: ctl.signal, onProgress: (p) => { job.frac = p.frac; job.eta = p.etaSec; renderProgress(); } });
       job.secs = (performance.now() - t0) / 1000;
       if (findItem(type, item.id)) apply(type, item.id, level);
       else player.invalidate();

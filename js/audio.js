@@ -13,7 +13,9 @@ const FALLBACK_DECODE_LIMIT = 80 * 1024 * 1024; // whole-file decodeAudioData fa
 /** Legacy whole-file decode (small files only; used when WebCodecs can't decode a format). */
 async function decodeWhole(blob, duration) {
   if (blob.size > FALLBACK_DECODE_LIMIT) throw new Error('file too large to decode in memory');
-  if (!(duration > 0) || duration * 48000 * 2 * 4 > 384 * 1024 * 1024) throw new Error('file too long to decode in memory'); // 80 MB of AAC can be hours of PCM
+  // 80 MB of AAC can be hours of PCM. An unknown length (NaN / Infinity: MediaRecorder WebM) is judged by the size cap alone.
+  if (Number.isFinite(duration) && duration * 48000 * 2 * 4 > 384 * 1024 * 1024) throw new Error('file too long to decode in memory');
+  if (!Number.isFinite(duration) && blob.size > FALLBACK_DECODE_LIMIT / 4) throw new Error('file of unknown length too large to decode in memory');
   const ac = new OfflineAudioContext(2, 1, 48000);
   return await ac.decodeAudioData(await blob.arrayBuffer());
 }
@@ -78,6 +80,19 @@ export class SourceReader {
     const keepFrom = s0 - this.sr * 1;
     while (this.chunks.length > 1 && this.chunks[0].s0 + this.chunks[0].n < keepFrom) { this.chunks.shift(); this.lowMark = this.chunks[0].s0; }
     return out;
+  }
+  /**
+   * The real length in seconds, for files whose stored duration is unknown (NaN / Infinity / 0, e.g. WebM from MediaRecorder,
+   * which has no duration header): the decoded buffer, else the container scanned to its last packet, else a whole decode. 0 = unknown.
+   */
+  async realDuration() {
+    const good = (d) => Number.isFinite(d) && d > 0;
+    if (this.whole && good(this.whole.duration)) return this.whole.duration;
+    if (this.input) {
+      try { const d = await this.input.computeDuration(); if (good(d)) return d; } catch { /* fall through */ }
+    }
+    try { const buf = await decodeWhole(this.blob, NaN); if (good(buf.duration)) return buf.duration; } catch { /* too big / undecodable */ }
+    return 0;
   }
   close() { try { this.it && this.it.return().catch(() => { }); } catch { } try { this.input && this.input.dispose && this.input.dispose(); } catch { } this.chunks = []; this.whole = null; }
 }

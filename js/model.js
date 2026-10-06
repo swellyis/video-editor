@@ -552,6 +552,17 @@ export function layout(project) {
 export function totalDuration(project) {
   return layout(project).total;
 }
+/**
+ * How far into a media file the project reaches (the largest trimmed source end of the clips, overlays and audio tracks using it), in
+ * seconds; 0 when nothing finite is known. The fall-back length for processing a file whose own length can't be read.
+ */
+export function mediaSourceEnd(project, mediaId) {
+  let end = 0;
+  for (const it of [...(project.clips || []), ...(project.overlays || []), ...(project.audio || [])]) {
+    if (it.mediaId === mediaId && Number.isFinite(it.out) && it.out > end) end = it.out;
+  }
+  return end;
+}
 /** Source time for a clip at sequence time t */
 export function sourceTime(it, t) {
   const c = it.clip;
