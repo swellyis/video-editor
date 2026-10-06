@@ -75,18 +75,41 @@ export function zoomForFace(face, sw, sh, ratio, { facePad = DEFAULTS.facePad, m
   return r3(clamp(need, minZoom, maxZoom));
 }
 
+/** One detection (MediaPipe-like or already normalised) → { x, y, w, h, score } in 0..1 of the analysed frame. */
+export function normBox(d) {
+  if (!d) return null;
+  const b = d.box || d.boundingBox || d;
+  // MediaPipe: originX/Y, width, height in pixels — caller may already normalise.
+  const x = b.x ?? b.originX ?? b.xmin ?? 0;
+  const y = b.y ?? b.originY ?? b.ymin ?? 0;
+  const w = b.w ?? b.width ?? ((b.xmax ?? 0) - x);
+  const h = b.h ?? b.height ?? ((b.ymax ?? 0) - y);
+  const score = d.score ?? d.categories?.[0]?.score ?? d.confidence ?? 1;
+  return { x, y, w, h, score: +score || 0 };
+}
+const rot90 = (tr) => { const r = Math.round(((((tr && tr.rotate) || 0) % 360) + 360) % 360 / 90) * 90 % 360; return r; };
+/** Size of the picture as the renderer draws it: a 90° / 270° rotation swaps width and height. */
+export function displayDims(sw, sh, tr) { const r = rot90(tr); return r === 90 || r === 270 ? { dw: sh, dh: sw } : { dw: sw, dh: sh }; }
+/**
+ * A face box from the unrotated source frame → the same face in the picture as drawn (render.js drawSource: flip first, then
+ * the 90° rotation clockwise). Boxes are normalised 0..1; the free tilt (transform.angle) is ignored.
+ */
+export function faceToDisplay(f, sw, sh, tr = {}) {
+  const r = rot90(tr), { dw, dh } = displayDims(sw, sh, tr);
+  let X = (f.x + f.w / 2 - 0.5) * sw, Y = (f.y + f.h / 2 - 0.5) * sh, W = f.w * sw, H = f.h * sh;
+  if (tr && tr.flipH) X = -X;
+  if (tr && tr.flipV) Y = -Y;
+  if (r === 90) [X, Y] = [-Y, X]; else if (r === 180) [X, Y] = [-X, -Y]; else if (r === 270) [X, Y] = [Y, -X];
+  if (r === 90 || r === 270) [W, H] = [H, W];
+  const w = W / dw, h = H / dh;
+  return { x: 0.5 + X / dw - w / 2, y: 0.5 + Y / dh - h / 2, w, h, score: f.score };
+}
+
 /** Pick the best face from a MediaPipe-like list: highest score among large boxes, prefer centre. */
 export function pickFace(dets, { confMin = DEFAULTS.confMin } = {}) {
-  const list = (dets || []).map(d => {
-    const b = d.box || d.boundingBox || d;
-    // MediaPipe: originX/Y, width, height in pixels — caller may already normalise.
-    const x = b.x ?? b.originX ?? b.xmin ?? 0;
-    const y = b.y ?? b.originY ?? b.ymin ?? 0;
-    const w = b.w ?? b.width ?? ((b.xmax ?? 0) - x);
-    const h = b.h ?? b.height ?? ((b.ymax ?? 0) - y);
-    const score = d.score ?? d.categories?.[0]?.score ?? d.confidence ?? 1;
-    return { x, y, w, h, cx: x + w / 2, cy: y + h / 2, score: +score || 0, area: Math.max(0, w) * Math.max(0, h) };
-  }).filter(f => f.w > 0 && f.h > 0 && f.score >= confMin);
+  const list = (dets || []).map(normBox).filter(Boolean).map(({ x, y, w, h, score }) => (
+    { x, y, w, h, cx: x + w / 2, cy: y + h / 2, score, area: Math.max(0, w) * Math.max(0, h) }
+  )).filter(f => f.w > 0 && f.h > 0 && f.score >= confMin);
   if (!list.length) return null;
   list.sort((a, b) => {
     const ca = 1 - Math.hypot(a.cx - 0.5, a.cy - 0.5);
@@ -174,16 +197,18 @@ export function applyReframeToClip(clip, keyframes, { setFit = true } = {}) {
  * samples: [{ t, faces: [{x,y,w,h,score}] }] with boxes normalised 0..1.
  */
 export function buildReframe(samples, sw, sh, target, opts = {}) {
-  const tg = resolveTarget(target);
+  const tg = resolveTarget(target, opts.projectRatio);
   const ratio = tg.ratio || RATIOS[tg.key] || (9 / 16);
   const o = { ...DEFAULTS, ...opts };
+  // faces are found in the unrotated source frame; pan/zoom work on the picture as drawn (flip + 90° rotation applied)
+  const tr = opts.transform || {}, { dw, dh } = displayDims(sw, sh, tr);
   let last = null, miss = 0;
   const poses = [];
   let faces = 0, fallbacks = 0;
   for (const s of samples || []) {
-    const face = pickFace(s.faces, o);
+    const face = pickFace((s.faces || []).map(normBox).filter(Boolean).map(f => faceToDisplay(f, sw, sh, tr)), o);
     if (face) faces++;
-    const raw = sampleToPose(face, sw, sh, ratio, o, last, miss);
+    const raw = sampleToPose(face, dw, dh, ratio, o, last, miss);
     miss = raw.miss || 0;
     if (raw.fallback) fallbacks++;
     const sm = smoothPose(last, raw, o);

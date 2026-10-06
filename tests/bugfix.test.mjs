@@ -56,7 +56,7 @@ test('bug 3: a horizontally flipped clip pans the other way (face is drawn mirro
 test('bug 3: a clip rotated 90° uses the rotated frame (portrait source, face position rotated)', () => {
   // landscape 1920x1080 file rotated 90° clockwise shows as 1080x1920: a face at the TOP of the file (cy 0.2) ends up on the RIGHT
   const r = buildReframe([{ t: 0, faces: [face(0.5, 0.2)] }], 1920, 1080, '16:9', { transform: { rotate: 90 } });
-  assert.ok(Math.abs(r.poses[0].x) < 0.05, 'no horizontal overflow in a portrait picture inside 16:9 cover → x≈0, got ' + r.poses[0].x);
+  assert.ok(r.poses[0].x > 0.2, 'face at the TOP of the file → RIGHT of the rotated picture → positive x, got ' + r.poses[0].x);
   const r2 = buildReframe([{ t: 0, faces: [face(0.2, 0.5)] }], 1920, 1080, '16:9', { transform: { rotate: 90 } });
   assert.ok(r2.poses[0].y < -0.2, 'face at the LEFT of the file → TOP of the rotated picture → negative y, got ' + r2.poses[0].y);
 });
