@@ -2,9 +2,9 @@
 // Everything here is a pure function (no DOM, no storage) so the scoring and the cutting rules are unit-tested.
 // The scoring is a transparent HEURISTIC: every point comes with a plain-language reason that the dialog shows.
 // It reads words and their timings, not meaning: it can pick a moment that is not the best one, so the person decides.
-import { captionWords, rechunk, applyPreset, defaultCaptionStyle, normalizeCaption } from './captions.js';
+import { captionWords, rechunk, applyPreset, defaultCaptionStyle, normalizeCaption, CAPTION_PRESETS } from './captions.js';
 import { layout, newProject, migrate, audioSpeed, normalizeClip } from './model.js';
-import { uid } from './util.js';
+import { uid, safeName } from './util.js';
 import * as RAMP from './ramp.js';
 
 export const DEFAULTS = { minLen: 20, maxLen: 60, idealMin: 30, idealMax: 50, minWords: 30, minRate: 0.8, count: 8, lead: 0.25, tail: 0.45, minGap: 0.05 };
@@ -281,15 +281,37 @@ export const cropOffset = (v) => clamp(Number.isFinite(+v) ? +v : 0, -1, 1);
 
 /**
  * A new 9:16 project holding just [a, b] of `project`. The source project is not modified.
- * opts: { name, offset (-1..1), captionPreset ('shorts') }
+ * opts: { name, offset (-1..1), captionPreset ('shorts'; any caption style pack) }
  */
-export function makeShortProject(project, a, b, { name, offset = 0, has } = {}) {
+export function makeShortProject(project, a, b, { name, offset = 0, has, captionPreset = 'shorts' } = {}) {
   const cut = cutRange(project, a, b, has);
   const p = newProject(name);
   p.settings = { ...p.settings, ratio: '9:16', res: 1080, fit: 'cover', bg: 'black' };
   p.clips = cut.clips.map(c => { c.transform = { ...c.transform, x: cropOffset(offset) }; c.fit = 'inherit'; return c; });
   p.audio = cut.audio;
-  p.captionStyle = applyPreset(defaultCaptionStyle(), 'shorts');
+  p.captionStyle = applyPreset(defaultCaptionStyle(), CAPTION_PRESETS[captionPreset] ? captionPreset : 'shorts');
   p.captions = rechunk(captionsInRange(project.captions, a, b), { maxWords: p.captionStyle.maxWords });
   return { project: migrate(p), missing: cut.missing, clips: p.clips.length };
+}
+
+/** Default file-name pattern for Batch Shorts export. Tokens: {name} {n} {start} {score} {date}. */
+export const NAME_PATTERN = '{name} - Short {n}';
+/**
+ * File name (no extension) for one exported Short from a pattern; safe on every OS and unique within `used` (a Set, updated).
+ * vals: { name, n, count, start (s), score, date (Date) }
+ */
+export function shortFileName(pattern, { name = 'Video', n = 1, count = 1, start = 0, score = 0, date = new Date() } = {}, used = null) {
+  const pad = (v, k) => String(v).padStart(k, '0');
+  const st = Math.max(0, Math.floor(+start || 0));
+  const tok = {
+    name: String(name || 'Video'), n: pad(n, String(Math.max(1, count)).length), score: String(Math.round(+score || 0)),
+    start: Math.floor(st / 60) + 'm' + pad(st % 60, 2) + 's',
+    date: date.getFullYear() + '-' + pad(date.getMonth() + 1, 2) + '-' + pad(date.getDate(), 2),
+  };
+  let p = String(pattern || '').trim() || NAME_PATTERN;
+  if (!/\{n\}|\{start\}/.test(p) && count > 1) p += ' {n}'; // several files need something that differs
+  const raw = p.replace(/\{(name|n|start|score|date)\}/g, (m, k) => tok[k]);
+  let out = safeName(raw.replace(/\s+/g, ' '), 'short');
+  if (used) { let k = 2; const b = out; while (used.has(out.toLowerCase())) out = b + '-' + k++; used.add(out.toLowerCase()); }
+  return out;
 }

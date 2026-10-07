@@ -12,7 +12,7 @@ import {
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, ANIM_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
-import { Compositor, ensureFonts } from './render.js';
+import { Compositor, ensureFonts, drawCaptions } from './render.js';
 import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { initCleanUI } from './clean-ui.js';
@@ -37,7 +37,7 @@ import * as G from './group.js';
 import { insertFreeze, freezeTarget, freezeLen, FREEZE_DEFAULT } from './freeze.js';
 import { autoReframeClip, ReframeCancelled } from './reframe-run.js';
 import { loadSegmenter } from './segment.js';
-import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS } from './captions.js';
+import { reconcileWords, retimeWords, newCaption, formatSrt, parseSrt, rechunk, applyPreset, FONT_KEYS, MAX_CAPTIONS, CAPTION_PRESETS, PACK_KEYS } from './captions.js';
 import * as trans from './transcribe.js';
 import { initLayout } from './layout-ui.js';
 import { initSpeedUI } from './speed-ui.js';
@@ -2210,6 +2210,27 @@ let lastExtract = null;
 
 // ---------------------------------------------------------------- captions (tab, SRT, find/replace, auto-transcribe)
 for (const k of FONT_KEYS) $('capFontSelect')?.append(el('option', { value: k, text: FONTS[k].label }));
+// caption style packs: one button per pack with a small live preview drawn by the same code as the preview and the export
+const PACK_SAMPLE = newCaption(0, 2, 'Say it loud', [{ w: 'Say', start: 0, end: 0.4 }, { w: 'it', start: 0.4, end: 0.75 }, { w: 'loud', start: 0.75, end: 1.6 }]);
+function drawPackPreview(cv, key) {
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height, g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, '#3b4a63'); g.addColorStop(1, '#1b2230'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.beginPath(); ctx.arc(W * 0.72, H * 0.32, H * 0.22, 0, Math.PI * 2); ctx.fill();
+  const st0 = applyPreset(null, key), st = { ...st0, position: 'middle', offset: 0, size: Math.max(0.16, Math.min(0.26, st0.size * 4)), maxLines: 2 };
+  drawCaptions(ctx, W, H, { captionStyle: st, captions: [PACK_SAMPLE] }, 0.6);
+}
+function buildCaptionPacks() {
+  const box = $('capPresets'); if (!box) return;
+  box.replaceChildren(...PACK_KEYS.map(k => {
+    const cv = el('canvas', { width: 192, height: 108, 'aria-hidden': 'true' });
+    const b = el('button', { type: 'button', 'data-preset': k, title: CAPTION_PRESETS[k].label + ': apply to every caption' }, cv, el('span', { text: CAPTION_PRESETS[k].label }));
+    return b;
+  }));
+  const paint = () => { for (const b of box.children) { try { drawPackPreview(b.querySelector('canvas'), b.dataset.preset); } catch (e) { console.warn('caption pack preview', e); } } };
+  paint();
+  Promise.resolve(ensureFonts && ensureFonts()).then(paint, () => { });
+}
+buildCaptionPacks();
 const sortedCaptions = () => [...(app.project.captions || [])].sort((a, b) => a.start - b.start);
 /** Re-split every caption to the style's words-per-caption (text is kept; word timings are carried along). */
 function resplitCaptions() {
@@ -2608,7 +2629,24 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) { pla
 // ---------------------------------------------------------------- Add media dialog + files shared from other apps
 const addMedia = initAddMedia({ importFiles, openDialog, closeDialog });
 app.addMedia = addMedia;
-const shorts = initShorts({ app, media, db, actions, openDialog, closeDialog, toast, cleanProjectName, openProject, showProjects: () => { renderProjectList(); openDialog('projectsDialog'); } });
+/** Batch Shorts export: render a project that is NOT the open one (kept in memory, so every file stays downloadable). One at a time. */
+async function exportProject(project, { signal, onProgress } = {}) {
+  if (exporting) throw new Error('Another export is running. Wait for it to finish.');
+  const missing = [...project.clips, ...(project.overlays || [])].filter(c => c.mediaId && !media.has(c.mediaId));
+  if (missing.length) throw new Error('Some media for this Short is missing on this device.');
+  exporting = true; updateSummary();
+  try {
+    const fmtWanted = ['mp4', 'webm'].includes(project.settings.format) ? project.settings.format : 'auto';
+    return await runExport(JSON.parse(JSON.stringify(project)), media, {
+      format: fmtWanted, signal,
+      makeSink: (ext) => createSink({ ext, allowOPFS: false }),
+      onWarn: (msg) => console.warn('Batch export:', msg),
+      onFallback: (why) => console.info('Batch export: real-time recording (' + why + ')'),
+      onProgress: ({ frac, stage }) => onProgress && onProgress(frac, stage),
+    });
+  } finally { exporting = false; updateSummary(); }
+}
+const shorts = initShorts({ app, media, db, actions, openDialog, closeDialog, toast, cleanProjectName, openProject, exportProject, showProjects: () => { renderProjectList(); openDialog('projectsDialog'); } });
 app.shorts = shorts; actions.shorts = () => shorts.open();
 app.match = initMatch({ app, media, toast, openDialog, closeDialog });
 app.beatCut = initBeatCut({ app, media, toast, openDialog, closeDialog });

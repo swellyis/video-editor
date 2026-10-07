@@ -1,19 +1,20 @@
 // Auto Shorts dialog: analyse the captions (and the voice's loudness), suggest ranked 20-60 s moments, let the person nudge / tick them,
 // then make one NEW 9:16 project per ticked moment. The open project is never modified. Logic is in shorts.js; this only wires the DOM.
-import { $, el, fmt } from './util.js';
+import { $, el, fmt, download } from './util.js';
 import { layout } from './model.js';
-import { captionAt } from './captions.js';
-import { findCandidates, nudge, wordsOf, makeShortProject, cropOffset } from './shorts.js';
+import { captionAt, CAPTION_PRESETS, PACK_KEYS } from './captions.js';
+import { findCandidates, nudge, wordsOf, makeShortProject, cropOffset, shortFileName, NAME_PATTERN } from './shorts.js';
+import { runQueue, summarize, Skip } from './queue.js';
 import { autoReframeClip } from './reframe-run.js';
 
 const STEP = 0.5;       // seconds per nudge tap
 const PRESELECT = 3;    // the best few start ticked
 const t1 = (v) => { const m = fmt(Math.floor(v)); return m + '.' + String(Math.floor((v % 1) * 10)); };
 
-export function initShorts({ app, media, db, actions, openDialog, closeDialog, toast, cleanProjectName, openProject, showProjects }) {
+export function initShorts({ app, media, db, actions, openDialog, closeDialog, toast, cleanProjectName, openProject, showProjects, exportProject }) {
   if (!$('shortsDialog') || !$('shList')) return { open() { toast('This copy of the page is out of date. Reload it to use Shorts.', 5000); }, state: {} }; // stale cached page
-  const S = { cands: [], on: new Set(), words: [], total: 0, env: null, envKey: '', job: null, playing: null, made: [], busy: false, epoch: 0 };
-  const show = (ids) => { for (const id of ['shNeed', 'shScan', 'shResults', 'shDone']) $(id).hidden = !ids.includes(id); };
+  const S = { cands: [], on: new Set(), words: [], total: 0, env: null, envKey: '', job: null, playing: null, made: [], busy: false, epoch: 0, batch: null, rows: [], urls: [] };
+  const show = (ids) => { for (const id of ['shNeed', 'shScan', 'shResults', 'shDone', 'shQueue']) $(id).hidden = !ids.includes(id); };
   const v = $('shVideo'); $('shScan').classList.add('show'); // (the hidden attribute decides when it is visible)
 
   // ------------------------------------------------------------ preview (the source file itself, in a 9:16 window; nothing is loaded into memory)
@@ -48,6 +49,8 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
     const n = S.on.size;
     $('shMake').textContent = n ? 'Make ' + n + (n === 1 ? ' Short' : ' Shorts') : 'Tick a moment to make';
     $('shMake').disabled = !n || S.busy;
+    if ($('shExport')) { $('shExport').textContent = n ? 'Export ' + n + ' ticked as ' + (n === 1 ? 'a video' : 'videos') : 'Export ticked as videos'; $('shExport').disabled = !n || S.busy; }
+    nameExample();
     for (const card of $('shList').children) card.classList.toggle('on', S.on.has(card.dataset.id));
   }
   function renderList() {
@@ -129,46 +132,53 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
   }
 
   // ------------------------------------------------------------ make
+  const capPreset = () => { const v = $('shCapStyle') && $('shCapStyle').value; return CAPTION_PRESETS[v] ? v : 'shorts'; };
+  const has = (id) => { const r = media.peek(id); return !!(r && r.blob); };
+  /** Build the 9:16 project for one moment (reframed when that box is ticked). Returns { r, warn } or null when its media is missing. */
+  async function buildShort(c, name, onReframe) {
+    const p = app.project, off = cropOffset($('shOffset').value);
+    const r = makeShortProject(p, c.start, c.end, { name, offset: off, has, captionPreset: capPreset() });
+    if (!r.clips || r.project.clips.every(x => x.kind === 'video' && !has(x.mediaId))) return null;
+    const warn = r.missing.length ? [name] : [];
+    if ($('shReframe') && $('shReframe').checked) {
+      try {
+        for (const clip of r.project.clips.filter(x => x.kind !== 'image' && x.mediaId && has(x.mediaId))) {
+          await autoReframeClip(r.project, clip, async () => { const m = media.peek(clip.mediaId) || await media.get(clip.mediaId); return m && m.blob; }, {
+            target: '9:16', setProjectRatio: false, setFit: true, onProgress: (pr) => onReframe && onReframe(pr.frac || 0),
+          });
+        }
+      } catch (e) { console.warn('Shorts reframe', e); warn.push(name + ' (reframe skipped)'); }
+    }
+    return { r, warn };
+  }
+  async function uniqueProjectNames() { return new Set((await db.listProjects()).map(x => x.name)); }
+  const baseName = () => (app.project.name || 'Video').replace(/\s*·\s*Short \d+$/, '').slice(0, 60);
   async function make() {
     if (S.busy || !S.on.size) return;
     S.busy = true; refreshMake(); stopPreview();
-    const p = app.project, off = cropOffset($('shOffset').value), chosen = S.cands.filter(c => S.on.has(c.id));
-    const has = (id) => { const r = media.peek(id); return !!(r && r.blob); };
+    const chosen = S.cands.filter(c => S.on.has(c.id));
     try {
-      const names = new Set((await db.listProjects()).map(x => x.name));
-      const base = (p.name || 'Video').replace(/\s*·\s*Short \d+$/, '').slice(0, 60);
+      const names = await uniqueProjectNames(), base = baseName();
       let k = 0; const made = [], skipped = [], warn = [];
       const now = Date.now();
       for (let i = 0; i < chosen.length; i++) {
         const c = chosen[i]; let name; do { k++; name = cleanProjectName(base + ' · Short ' + k); } while (names.has(name));
         names.add(name);
-        const r = makeShortProject(p, c.start, c.end, { name, offset: off, has });
-        if (!r.clips || r.project.clips.every(x => x.kind === 'video' && !has(x.mediaId))) { skipped.push(name); continue; }
-        if (r.missing.length) warn.push(name);
-        if ($('shReframe') && $('shReframe').checked) {
-          const rp = $('shReframeProg'), rb = $('shReframeBar'), rs = $('shReframeStatus');
-          if (rp) rp.hidden = false;
-          try {
-            for (const clip of r.project.clips.filter(x => x.kind !== 'image' && x.mediaId && has(x.mediaId))) {
-              await autoReframeClip(r.project, clip, async () => { const m = media.peek(clip.mediaId) || await media.get(clip.mediaId); return m && m.blob; }, {
-                target: '9:16', setProjectRatio: false, setFit: true,
-                onProgress: (pr) => {
-                  if (rb) rb.style.width = (((i + (pr.frac || 0)) / chosen.length) * 100).toFixed(1) + '%';
-                  if (rs) rs.textContent = 'Reframing Short ' + (i + 1) + '/' + chosen.length + '…';
-                },
-              });
-            }
-          } catch (e) { console.warn('Shorts reframe', e); warn.push(name + ' (reframe skipped)'); }
-          if (rp) rp.hidden = true;
-        }
-        r.project.updated = now + (chosen.length - i); r.project.created = now;
-        await db.saveProject(r.project);
-        made.push({ id: r.project.id, name, start: c.start, end: c.end });
+        const rp = $('shReframeProg'), rb = $('shReframeBar'), rs = $('shReframeStatus');
+        const reframing = $('shReframe') && $('shReframe').checked;
+        if (reframing && rp) rp.hidden = false;
+        const b = await buildShort(c, name, (f) => { if (rb) rb.style.width = (((i + f) / chosen.length) * 100).toFixed(1) + '%'; if (rs) rs.textContent = 'Reframing Short ' + (i + 1) + '/' + chosen.length + '…'; });
+        if (rp) rp.hidden = true;
+        if (!b) { skipped.push(name); continue; }
+        warn.push(...b.warn);
+        b.r.project.updated = now + (chosen.length - i); b.r.project.created = now;
+        await db.saveProject(b.r.project);
+        made.push({ id: b.r.project.id, name, start: c.start, end: c.end });
       }
       S.made = made;
       show(['shDone']); $('shIntro').hidden = true;
       $('shDoneText').textContent = made.length
-        ? '✓ ' + made.length + (made.length === 1 ? ' Short' : ' Shorts') + ' created in Projects (9:16, Bold Shorts captions): ' + made.map(m => m.name).join(', ') + '. This project was not changed.' + (warn.length ? ' Some media is missing for: ' + warn.join(', ') + '.' : '') + (skipped.length ? ' Skipped (no media): ' + skipped.join(', ') + '.' : '')
+        ? '✓ ' + made.length + (made.length === 1 ? ' Short' : ' Shorts') + ' created in Projects (9:16, ' + CAPTION_PRESETS[capPreset()].label + ' captions): ' + made.map(m => m.name).join(', ') + '. This project was not changed.' + (warn.length ? ' Some media is missing for: ' + warn.join(', ') + '.' : '') + (skipped.length ? ' Skipped (no media): ' + skipped.join(', ') + '.' : '')
         : 'Nothing was created: the video for the chosen moments is missing on this device.';
       $('shOpen').hidden = !made.length;
       if (made.length) toast(made.length + (made.length === 1 ? ' Short' : ' Shorts') + ' created. Find them in Projects.', 4500);
@@ -179,15 +189,99 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
     } finally { S.busy = false; refreshMake(); }
   }
 
+  // ------------------------------------------------------------ batch export (a queue: build each Short in memory, export it, download it)
+  function nameExample() {
+    const ex = $('shNameEx'); if (!ex) return;
+    const chosen = S.cands.filter(c => S.on.has(c.id)), c = chosen[0] || S.cands[0];
+    const f = shortFileName($('shNamePat').value, { name: baseName(), n: 1, count: Math.max(1, chosen.length), start: c ? c.start : 0, score: c ? c.score : 0 });
+    ex.textContent = 'First file: ' + f + '.mp4 · tokens {name} {n} {start} {score} {date}';
+  }
+  const STATE_TEXT = { waiting: 'Waiting', running: '', done: 'Done', failed: 'Failed', skipped: 'Skipped', cancelled: 'Cancelled' };
+  function renderQueue(rows, frac) {
+    const list = $('shQList');
+    if (list.children.length !== rows.length) {
+      list.replaceChildren(...rows.map((row, i) => el('li', { class: 'sh-q', 'data-i': i },
+        el('div', { class: 'sh-q-top' }, el('b', { class: 'sh-q-name', text: row.item.file }), el('span', { class: 'sh-q-state' })),
+        el('div', { class: 'progress-track sh-q-track' }, el('div', { class: 'progress-bar sh-q-bar' })),
+        el('div', { class: 'sh-q-res' }))));
+    }
+    rows.forEach((row, i) => {
+      const li = list.children[i]; li.dataset.state = row.state;
+      li.querySelector('.sh-q-state').textContent = row.state === 'running' ? (row.stage || 'Working…') + ' ' + Math.floor(row.frac * 100) + '%' : STATE_TEXT[row.state];
+      li.querySelector('.sh-q-bar').style.width = (row.state === 'done' ? 100 : row.frac * 100).toFixed(1) + '%';
+      const res = li.querySelector('.sh-q-res');
+      if (row.state === 'done' && row.result && !res.dataset.filled) {
+        res.dataset.filled = '1';
+        const r = row.result, a = el('a', { href: r.url, download: r.name, class: 'sh-q-again', text: 'Save again' });
+        res.replaceChildren(el('span', { text: r.name + ' · ' + r.width + '×' + r.height + ' · ' + fmt(r.duration) + ' · ' + (r.size / 1048576).toFixed(1) + ' MB' + (r.project ? ' · kept in Projects' : '') + (r.warn ? ' · ' + r.warn : '') + ' ' }), a);
+      } else if ((row.state === 'failed' || row.state === 'skipped') && !res.dataset.filled) { res.dataset.filled = '1'; res.textContent = row.error; }
+    });
+    const running = rows.findIndex(r => r.state === 'running');
+    $('shQBar').style.width = (frac * 100).toFixed(1) + '%'; $('shQPercent').textContent = Math.floor(frac * 100) + '%';
+    $('shQText').textContent = running >= 0 ? 'Short ' + (running + 1) + ' of ' + rows.length + ': ' + (rows[running].stage || 'working…') : summarize(rows);
+  }
+  function freeUrls() { for (const u of S.urls) URL.revokeObjectURL(u); S.urls = []; }
+  async function exportBatch() {
+    if (S.busy || !S.on.size) return;
+    if (!exportProject) return toast('This copy of the page is out of date. Reload it to export Shorts.', 5000);
+    S.busy = true; refreshMake(); stopPreview(); freeUrls();
+    const chosen = S.cands.filter(c => S.on.has(c.id)), keep = $('shKeepProj') && $('shKeepProj').checked;
+    const used = new Set(), base = baseName(), pat = $('shNamePat').value, date = new Date();
+    const names = keep ? await uniqueProjectNames() : new Set();
+    let k = 0;
+    const items = chosen.map((c, i) => ({ c, file: shortFileName(pat, { name: base, n: i + 1, count: chosen.length, start: c.start, score: c.score, date }, used) }));
+    const ac = new AbortController(); S.batch = ac;
+    show(['shQueue']); $('shIntro').hidden = true; $('shQCancel').hidden = false; $('shQBack').hidden = true; $('shQList').replaceChildren();
+    const src = app.project.settings;
+    try {
+      const rows = await runQueue(items, async (it, { signal, progress }) => {
+        let pname; do { k++; pname = cleanProjectName(base + ' · Short ' + k); } while (names.has(pname));
+        names.add(pname);
+        progress(0, 'Building');
+        const b = await buildShort(it.c, pname, (f) => progress(f * 0.2, 'Reframing'));
+        if (signal.aborted) throw Object.assign(new Error('Cancelled'), { name: 'AbortError' });
+        if (!b) throw new Skip('The video for this moment is missing on this device.');
+        const proj = b.r.project;
+        proj.settings = { ...proj.settings, fps: src.fps, quality: src.quality, format: src.format };
+        const reframed = $('shReframe') && $('shReframe').checked, off = reframed ? 0.2 : 0;
+        const res = await exportProject(proj, { signal, onProgress: (f, stage) => progress(off + f * (1 - off), stage || 'Exporting') });
+        const name = it.file + '.' + res.ext;
+        download(res.blob, name);
+        const url = URL.createObjectURL(res.blob); S.urls.push(url);
+        if (keep) { proj.updated = Date.now(); proj.created = proj.created || Date.now(); await db.saveProject(proj); }
+        return { name, url, width: res.width, height: res.height, duration: res.duration, size: res.blob.size, ext: res.ext, project: keep ? proj.id : null, warn: b.warn.length ? 'some media missing' : '' };
+      }, { signal: ac.signal, onUpdate: renderQueue });
+      S.rows = rows;
+      const done = rows.filter(r => r.state === 'done').length;
+      $('shQueue').dataset.done = String(done);
+      toast(summarize(rows) + (done ? '. The files are in your downloads.' : '.'), 5000);
+    } catch (e) {
+      console.warn('Shorts: batch export failed', e);
+      toast('Could not export the Shorts: ' + (e && e.message || e), 6000);
+    } finally {
+      S.batch = null; S.busy = false; refreshMake();
+      $('shQCancel').hidden = true; $('shQBack').hidden = false;
+    }
+  }
+
   // ------------------------------------------------------------ wiring
   $('shOffset').addEventListener('input', applyOffset);
   $('shMake').onclick = make;
+  if ($('shExport')) {
+    $('shCapStyle').replaceChildren(...PACK_KEYS.map(k => el('option', { value: k, text: CAPTION_PRESETS[k].label })));
+    $('shCapStyle').value = 'shorts';
+    $('shNamePat').value = localStorage.getItem('ve.shorts.pattern') || NAME_PATTERN;
+    $('shNamePat').addEventListener('input', () => { nameExample(); try { localStorage.setItem('ve.shorts.pattern', $('shNamePat').value); } catch { /* private mode */ } });
+    $('shExport').onclick = exportBatch;
+    $('shQCancel').onclick = () => { if (S.batch) { S.batch.abort(); $('shQText').textContent = 'Cancelling…'; } };
+    $('shQBack').onclick = () => { show(['shResults']); $('shIntro').hidden = false; };
+  }
   $('shCancel').onclick = () => closeDialog('shortsDialog');
   $('shSkip').onclick = () => { if (S.job) S.job.abort(); };
   $('shGenerate').onclick = () => { closeDialog('shortsDialog'); app.shortsAfterCaptions = true; actions.transcribe(); };
   $('shOpen').onclick = async () => { if (S.made[0]) { await openProject(S.made[0].id); closeDialog('shortsDialog'); } };
   $('shProjects').onclick = () => { closeDialog('shortsDialog'); showProjects(); };
-  $('shortsDialog').addEventListener('close', () => { S.epoch++; stopPreview(); if (S.job) S.job.abort(); v.removeAttribute('src'); delete v.dataset.url; v.load(); });
+  $('shortsDialog').addEventListener('close', () => { S.epoch++; stopPreview(); if (S.job) S.job.abort(); if (S.batch) { S.batch.abort(); toast('Batch export cancelled: the dialog was closed.', 4000); } v.removeAttribute('src'); delete v.dataset.url; v.load(); });
   return {
     state: S,
     async open() { if (!(await precheck())) return; openDialog('shortsDialog'); applyOffset(); await analyse(); },

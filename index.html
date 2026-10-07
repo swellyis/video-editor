@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="ve-build" content="v7fe1a9ad4a" />
+  <meta name="ve-build" content="v8547f1294d" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
@@ -520,12 +520,17 @@
         </div>
         <section class="section" id="capStyleSection">
           <div class="section-head"><h2 class="sh">Style</h2><label class="switch"><input type="checkbox" data-bind="proj.captionStyle.show" /><span class="switch-ui" aria-hidden="true"></span> <span class="switch-label">Show</span></label></div>
-          <div class="segmented four" id="capPresets"><button data-preset="classic" type="button">Classic</button><button data-preset="shorts" type="button">Bold Shorts</button><button data-preset="highlight" type="button">Highlight</button><button data-preset="minimal" type="button">Minimal</button></div>
+          <p class="hint cap-packs-hint">Style packs apply to every caption. Pick one, then fine-tune it under Customize.</p>
+          <div class="cap-packs" id="capPresets" role="group" aria-label="Caption style packs"><button data-preset="classic" type="button"><span>Classic</span></button><button data-preset="shorts" type="button"><span>Bold</span></button><button data-preset="highlight" type="button"><span>Word highlight</span></button><button data-preset="minimal" type="button"><span>Minimal</span></button></div>
           <details class="more" id="capMore">
             <summary>Customize</summary>
             <div class="field-row" style="margin-top:10px">
               <label><span class="label">Font</span><select data-bind="proj.captionStyle.font" id="capFontSelect"></select></label>
               <label><span class="label">Position</span><select data-bind="proj.captionStyle.position"><option value="bottom">Bottom</option><option value="middle">Middle</option><option value="top">Top</option></select></label>
+            </div>
+            <div class="field-row">
+              <label><span class="label">Align</span><select data-bind="proj.captionStyle.align" id="capAlign"><option value="center">Centre</option><option value="left">Left (lower third)</option></select></label>
+              <label><span class="label">Animation</span><select data-bind="proj.captionStyle.anim" id="capAnim"><option value="none">None</option><option value="pop">Pop in</option><option value="type">Typewriter</option></select></label>
             </div>
             <div class="slider-row"><label>Size</label><input type="range" min="0.025" max="0.12" step="0.0025" data-bind="proj.captionStyle.size" /><output data-out="proj.captionStyle.size" data-fmt="size"></output></div>
             <div class="slider-row"><label>Raise</label><input type="range" min="-0.1" max="0.3" step="0.005" data-bind="proj.captionStyle.offset" /><output data-out="proj.captionStyle.offset" data-fmt="pct"></output></div>
@@ -536,13 +541,16 @@
               <label><span class="label">Outline color</span><input class="field color" type="color" data-bind="proj.captionStyle.outlineColor" /></label>
             </div>
             <div class="slider-row"><label>Outline</label><input type="range" min="0" max="0.3" step="0.005" data-bind="proj.captionStyle.outline" /><output data-out="proj.captionStyle.outline" data-fmt="pct"></output></div>
-            <label class="check"><input type="checkbox" data-bind="proj.captionStyle.box" /> Dark box behind the text</label>
+            <label class="check"><input type="checkbox" data-bind="proj.captionStyle.box" /> Box behind the text</label>
             <div class="field-row" style="margin-top:6px">
               <label><span class="label">Box color</span><input class="field color" type="color" data-bind="proj.captionStyle.boxColor" /></label>
               <label><span class="label">Highlight color</span><input class="field color" type="color" data-bind="proj.captionStyle.highlight" /></label>
             </div>
             <div class="slider-row"><label>Box opacity</label><input type="range" min="0" max="1" step="0.01" data-bind="proj.captionStyle.boxOpacity" /><output data-out="proj.captionStyle.boxOpacity" data-fmt="pct"></output></div>
             <label class="check"><input type="checkbox" data-bind="proj.captionStyle.hl" /> Highlight the word being spoken</label>
+            <label class="cap-hlstyle"><span class="label">Highlight style</span><select data-bind="proj.captionStyle.hlStyle" id="capHlStyle"><option value="word">Colour the spoken word</option><option value="sung">Karaoke (fill as spoken)</option><option value="box">Box on the spoken word</option></select></label>
+            <div class="slider-row"><label>Glow</label><input type="range" min="0" max="1" step="0.05" data-bind="proj.captionStyle.glow" id="capGlow" /><output data-out="proj.captionStyle.glow" data-fmt="pct"></output></div>
+            <label class="check"><input type="checkbox" data-bind="proj.captionStyle.accent" id="capAccent" /> Accent bar (highlight colour)</label>
             <label class="check"><input type="checkbox" data-bind="proj.captionStyle.caps" /> ALL CAPS</label>
           </details>
         </section>
@@ -1171,7 +1179,22 @@
     </div>
     <div class="sh-list" id="shList"></div>
     <p class="hint" id="shNote"></p>
-    <div class="button-row" style="margin-top:10px"><button class="btn primary" id="shMake" type="button">Make Shorts</button><button class="btn ghost" id="shCancel" type="button">Close</button></div>
+    <div class="field-row sh-opts">
+      <label><span class="label">Caption style</span><select id="shCapStyle"></select></label>
+      <label><span class="label">File names</span><input class="field" id="shNamePat" type="text" maxlength="80" spellcheck="false" value="{name} - Short {n}" /></label>
+    </div>
+    <p class="hint" id="shNameEx">Use {name}, {n}, {start}, {score} and {date}.</p>
+    <label class="check"><input type="checkbox" id="shKeepProj" /> Also keep each exported Short as a project</label>
+    <div class="button-row" style="margin-top:10px"><button class="btn primary" id="shMake" type="button">Make Shorts</button><button class="btn secondary" id="shExport" type="button">Export ticked as videos</button><button class="btn ghost" id="shCancel" type="button">Close</button></div>
+  </div>
+  <div id="shQueue" hidden>
+    <p class="hint">Each ticked moment is built and exported one after another, without opening it. Keep this window open; closing it cancels the rest.</p>
+    <div class="progress show" aria-live="polite">
+      <div class="progress-track"><div class="progress-bar" id="shQBar"></div></div>
+      <div class="progress-copy"><span id="shQText">Starting…</span><span id="shQPercent">0%</span></div>
+    </div>
+    <ol class="sh-queue" id="shQList"></ol>
+    <div class="button-row" style="margin-top:10px"><button class="btn secondary" id="shQCancel" type="button">Cancel</button><button class="btn primary" id="shQBack" type="button" hidden>Back to the moments</button></div>
   </div>
   <div class="export-result" id="shDone" hidden>
     <p id="shDoneText"></p>

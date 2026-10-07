@@ -337,7 +337,7 @@ export function drawCaptions(ctx, W, H, project, t) {
   const lay = () => {
     ctx.font = fontCss(st.font, size);
     pad = st.box ? size * 0.4 : 0;
-    const space = ctx.measureText(' ').width; avail = Math.max(size, maxW - pad * 2);
+    const space = ctx.measureText(' ').width; avail = Math.max(size, maxW - pad * 2 - (st.accent ? size * 0.46 : 0));
     lines = []; let cur = null;
     for (const w of words) {
       const ww = ctx.measureText(w.w).width;
@@ -368,27 +368,68 @@ export function drawCaptions(ctx, W, H, project, t) {
   else if (st.position === 'middle') top = H * 0.5 - bh / 2 - st.offset * H;
   else top = H * (1 - mB) - bh - st.offset * H;
   top = clamp(top, H * 0.02 + padY, H * 0.98 - bh - padY);
+  // left-aligned packs (lower third) start at the safe margin, after the accent bar
+  const left = st.align === 'left', barW = st.accent ? Math.max(3, size * 0.16) : 0, barGap = st.accent ? size * 0.3 : 0;
+  const leftX = (W - maxW) / 2 + pad + barW + barGap;
+  const xOf = (l) => (left ? leftX : (W - l.w) / 2);
+  // timing: the highlighted word = the last one whose start has passed; typewriter shows words (and letters) as they are spoken
+  let active = -1;
+  for (let i = 0; i < words.length; i++) if (words[i].start <= t + 1e-6) active = i;
+  const typing = st.anim === 'type';
+  const typed = (i) => { // characters of word i to show (Infinity = all)
+    if (!typing) return Infinity;
+    const w = words[i]; if (t < w.start - 1e-6) return 0;
+    const d = Math.max(0.04, Math.min(0.3, (w.end - w.start) || 0.3));
+    return Math.ceil(w.w.length * clamp((t - w.start) / d, 0, 1) - 1e-6);
+  };
+  // pop: the caption springs in (0.8 → 1 with a little overshoot over 0.18 s) and the spoken word is a bit bigger
+  if (st.anim === 'pop') {
+    const k = clamp((t - cap.start) / 0.18, 0, 1), e = 1 + 2.2 * Math.pow(k - 1, 3) + 1.2 * Math.pow(k - 1, 2);
+    const sc = 0.8 + 0.2 * e, cx = left ? leftX : W / 2, cy = top + bh / 2;
+    ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.translate(-cx, -cy);
+  }
+  const lineBox = (l, i, wid) => ({ x0: xOf(l) - pad, y0: top + i * lh + (lh - size * 1.12) / 2 - padY * 0.4, w: wid + pad * 2, h: size * 1.12 + padY * 0.8 });
   if (st.box) {
     ctx.fillStyle = hexA(st.boxColor, st.boxOpacity);
-    lines.forEach((l, i) => { // one rounded box per line keeps ragged lines tidy
-      const x0 = (W - l.w) / 2 - pad, y0 = top + i * lh + (lh - size * 1.12) / 2 - padY * 0.4;
-      roundRect(ctx, x0, y0, l.w + pad * 2, size * 1.12 + padY * 0.8, size * 0.24); ctx.fill();
+    let wi0 = 0;
+    lines.forEach((l, i) => { // one rounded box per line keeps ragged lines tidy (a typewriter box grows with the text)
+      let wid = l.w;
+      if (typing) {
+        wid = 0; let wi = wi0;
+        for (const it of l.items) { const n = typed(wi++); if (n > 0) wid = it.x + (n === Infinity || n >= it.w.length ? it.ww : ctx.measureText(it.w.slice(0, n)).width); }
+      }
+      wi0 += l.items.length;
+      if (wid <= 0) return;
+      const b = lineBox(l, i, wid);
+      roundRect(ctx, b.x0, b.y0, b.w, b.h, size * 0.24); ctx.fill();
     });
   }
-  // the highlighted word = the last one whose start has passed
-  let active = -1;
-  if (st.hl) { for (let i = 0; i < words.length; i++) if (words[i].start <= t + 1e-6) active = i; }
+  if (st.accent) {
+    ctx.fillStyle = st.highlight;
+    const y0 = top + (lh - size * 1.12) / 2 - padY * 0.4;
+    roundRect(ctx, leftX - pad - barGap - barW, y0, barW, bh - (lh - size * 1.12) + padY * 0.8, barW / 2); ctx.fill();
+  }
   const lw = st.outline > 0 ? Math.max(2, size * st.outline) : 0;
+  const glow = st.glow > 0 ? st.glow : 0;
   let wi = 0;
   lines.forEach((l, i) => {
-    const y = top + i * lh + lh / 2, x0 = (W - l.w) / 2;
+    const y = top + i * lh + lh / 2, x0 = xOf(l);
     for (const it of l.items) {
-      const x = x0 + it.x;
-      if (lw) { ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.lineWidth = lw; ctx.strokeStyle = st.outlineColor; ctx.strokeText(it.w, x, y); }
-      else if (!st.box) { ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = size * 0.2; ctx.shadowOffsetY = size * 0.04; }
-      ctx.fillStyle = st.hl && wi === active ? st.highlight : st.color;
-      ctx.fillText(it.w, x, y);
-      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+      const x = x0 + it.x, n = typed(wi);
+      if (n <= 0) { wi++; continue; }
+      const str = n === Infinity || n >= it.w.length ? it.w : it.w.slice(0, n);
+      const isActive = st.hl && wi === active, sung = st.hl && st.hlStyle === 'sung' && wi <= active;
+      ctx.save();
+      if (st.anim === 'pop' && isActive) { const cx = x + it.ww / 2; ctx.translate(cx, y); ctx.scale(1.12, 1.12); ctx.translate(-cx, -y); }
+      if (isActive && st.hlStyle === 'box') {
+        ctx.fillStyle = st.highlight; roundRect(ctx, x - size * 0.16, y - size * 0.6, it.ww + size * 0.32, size * 1.2, size * 0.2); ctx.fill();
+      }
+      if (lw) { ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.lineWidth = lw; ctx.strokeStyle = st.outlineColor; ctx.strokeText(str, x, y); }
+      else if (glow) { ctx.shadowColor = st.highlight; ctx.shadowBlur = size * 0.7 * glow; ctx.fillStyle = st.highlight; ctx.fillText(str, x, y); ctx.shadowBlur = size * 0.25 * glow; }
+      else if (!st.box && !(isActive && st.hlStyle === 'box')) { ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = size * 0.2; ctx.shadowOffsetY = size * 0.04; }
+      ctx.fillStyle = (isActive && st.hlStyle !== 'box') || sung ? st.highlight : st.color;
+      ctx.fillText(str, x, y);
+      ctx.restore();
       wi++;
     }
   });

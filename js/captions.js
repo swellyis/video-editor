@@ -6,13 +6,24 @@ export const MAX_CAPTIONS = 20000;
 export const MAX_CAPTION_CHARS = 300;
 export const FONT_KEYS = ['sans', 'condensed', 'serif', 'serifItalic', 'mono', 'system'];
 
-/** Presets. Picking one copies every field into project.captionStyle (then any control can still be tweaked). */
+/** Style packs. Picking one copies every field into project.captionStyle (applies to every caption; any control can still be tweaked).
+ * Fields beyond the basics: align ('center' | 'left'), anim ('none' | 'pop' | 'type'), hlStyle ('word' | 'sung' | 'box'), glow 0–1, accent (bar). */
+const BASE = { font: 'sans', size: 0.05, color: '#ffffff', outline: 0, outlineColor: '#000000', box: false, boxColor: '#000000', boxOpacity: 0.62, hl: false, highlight: '#ffd400', hlStyle: 'word', position: 'bottom', offset: 0, maxWords: 8, maxLines: 2, caps: false, align: 'center', anim: 'none', glow: 0, accent: false };
 export const CAPTION_PRESETS = {
-  classic: { label: 'Classic', font: 'sans', size: 0.05, color: '#ffffff', outline: 0, outlineColor: '#000000', box: true, boxColor: '#000000', boxOpacity: 0.62, hl: false, highlight: '#ffd400', position: 'bottom', offset: 0, maxWords: 8, maxLines: 2, caps: false },
-  shorts: { label: 'Bold', font: 'sans', size: 0.085, color: '#ffffff', outline: 0.2, outlineColor: '#000000', box: false, boxColor: '#000000', boxOpacity: 0.62, hl: false, highlight: '#ffd400', position: 'bottom', offset: 0, maxWords: 3, maxLines: 2, caps: true },
-  highlight: { label: 'Highlight', font: 'sans', size: 0.08, color: '#ffffff', outline: 0.2, outlineColor: '#000000', box: false, boxColor: '#000000', boxOpacity: 0.62, hl: true, highlight: '#ffd400', position: 'bottom', offset: 0, maxWords: 3, maxLines: 2, caps: true },
-  minimal: { label: 'Minimal', font: 'system', size: 0.04, color: '#ffffff', outline: 0.07, outlineColor: '#000000', box: false, boxColor: '#000000', boxOpacity: 0.62, hl: false, highlight: '#ffd400', position: 'bottom', offset: 0, maxWords: 10, maxLines: 2, caps: false },
+  classic: { ...BASE, label: 'Classic', box: true },
+  shorts: { ...BASE, label: 'Bold', size: 0.085, outline: 0.2, maxWords: 3, caps: true },
+  highlight: { ...BASE, label: 'Word highlight', size: 0.08, outline: 0.2, hl: true, maxWords: 3, caps: true },
+  minimal: { ...BASE, label: 'Minimal', font: 'system', size: 0.04, outline: 0.07, maxWords: 10 },
+  pop: { ...BASE, label: 'Bold pop', size: 0.09, outline: 0.22, hl: true, highlight: '#ffd400', maxWords: 3, caps: true, anim: 'pop' },
+  karaoke: { ...BASE, label: 'Karaoke', size: 0.07, outline: 0.16, hl: true, hlStyle: 'sung', highlight: '#22d3ee', maxWords: 6 },
+  lowerThird: { ...BASE, label: 'Lower third', size: 0.045, box: true, boxColor: '#111827', boxOpacity: 0.86, highlight: '#ef4444', align: 'left', accent: true, maxWords: 8 },
+  boxed: { ...BASE, label: 'Boxed', font: 'condensed', size: 0.065, color: '#111111', box: true, boxColor: '#ffd400', boxOpacity: 1, maxWords: 4, caps: true },
+  outline: { ...BASE, label: 'Outline', size: 0.075, color: '#ffe14d', outline: 0.28, maxWords: 4 },
+  neon: { ...BASE, label: 'Neon', font: 'condensed', size: 0.075, color: '#fff7fe', glow: 1, highlight: '#ff2bd6', maxWords: 4, caps: true },
+  typewriter: { ...BASE, label: 'Typewriter', font: 'mono', size: 0.048, box: true, boxColor: '#000000', boxOpacity: 0.75, anim: 'type', maxWords: 8 },
+  wordBox: { ...BASE, label: 'Word box', size: 0.08, hl: true, hlStyle: 'box', highlight: '#7c3aed', maxWords: 3, caps: true },
 };
+export const PACK_KEYS = Object.keys(CAPTION_PRESETS);
 
 const hex = (v, d) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : d);
 const num = (v, lo, hi, d) => { v = +v; return Number.isFinite(v) ? clamp(v, lo, hi) : d; };
@@ -39,6 +50,11 @@ export function normalizeCaptionStyle(s) {
     maxWords: Math.round(num(o.maxWords, 1, 20, d.maxWords)),
     maxLines: Math.round(num(o.maxLines, 1, 3, d.maxLines)),
     caps: o.caps === true,
+    align: o.align === 'left' ? 'left' : 'center',
+    anim: ['pop', 'type'].includes(o.anim) ? o.anim : 'none',
+    hlStyle: ['sung', 'box'].includes(o.hlStyle) ? o.hlStyle : 'word',
+    glow: num(o.glow, 0, 1, 0),
+    accent: o.accent === true,
   };
 }
 export function applyPreset(style, key) {
