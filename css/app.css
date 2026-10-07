@@ -933,3 +933,10 @@ body.ws #multiPanel{padding:16px}
 .tl-audioitem .duckenv svg{display:block;width:100%;height:100%}
 .duck-line{fill:none;stroke:#f5c542;stroke-width:1.6;stroke-linejoin:round;opacity:.9}
 #duckControls{margin-top:6px;padding-top:6px;border-top:1px solid rgba(127,127,127,.15)}
+/* Cut to beat dialog */
+.bc-beats{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;flex-wrap:wrap}
+.bc-beats .hint{margin:0;flex:1 1 180px}
+#beatCutDialog .check{margin-top:8px}
+#beatCutDialog .segmented{margin-top:4px}
+#beatCutDialog #bcPreview{margin-top:10px}
+#beatBox #beatCutOpen{margin-top:6px}

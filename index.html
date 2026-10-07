@@ -75,7 +75,7 @@
     <div>
       <h2 id="onboardTitle">Welcome — let’s make your first video</h2>
       <ol>
-        <li><b>Add clips</b> (or start from a <b>template</b> like a Scripture verse card).</li>
+        <li><b>Add clips</b> (or start from a <b>template</b> like a Quote card).</li>
         <li><b>Tap a clip</b> on the timeline to trim, reframe and color it. Drag edges to trim.</li>
         <li>Add <b>text</b>, <b>music</b>, a <b>voiceover</b> or a picture-in-picture, then tap <b>Export video</b> at the bottom.</li>
       </ol>
@@ -139,6 +139,7 @@
           </div>
           <div class="button-row">
             <button class="btn secondary small" type="button" data-action="muteSel" id="multiMute">Mute sound</button>
+            <button class="btn secondary small" type="button" data-action="beatCut" id="multiBeatCut" title="Re-time or cut the selected clips and photos so the cuts land on the beats of a music track">Cut to beat…</button>
             <button class="btn ghost small" type="button" data-action="deselect" title="Clear the selection (Esc)">Deselect</button>
           </div>
           <p class="hint">Split, Duplicate, Delete and Volume on the timeline toolbar act on all of them. Drag any selected item to move the group. Shift or Ctrl-click adds or removes one; drag on empty space to select a box; Ctrl+A selects everything.</p>
@@ -267,6 +268,7 @@
               <button class="btn secondary small" type="button" id="beatFind">Find beats</button>
               <label class="check" id="beatSnapRow" hidden><input type="checkbox" id="beatSnap" /> <span>Snap other items to these beats</span></label>
               <p class="hint" id="beatHint"></p>
+              <button class="btn secondary small" type="button" id="beatCutOpen" hidden title="Re-time or cut clips and photos so their cuts land on these beats">Cut clips to these beats…</button>
               <button class="linkish" type="button" id="beatClear" hidden>Clear beats</button>
               <div class="progress" id="beatProg" aria-live="polite">
                 <div class="progress-track"><div class="progress-bar" id="beatBar"></div></div>
@@ -396,15 +398,15 @@
         <section class="section">
           <div class="section-head"><h2>Text layers</h2><button class="btn primary small" data-action="addText" type="button">＋ Text at playhead</button></div>
           <div class="item-list" id="textList"></div>
-          <details class="ta-details" id="taDetails"><summary>Ready-made sermon text</summary>
+          <details class="ta-details" id="taDetails"><summary>Ready-made text</summary>
             <div class="ta-tpl" id="taTemplates"></div>
             <p class="hint ta-tplnote">Each one adds editable, animated text layers at the playhead.</p>
           </details>
-          <p class="hint" id="textEmptyHint">Tap ＋ Text at playhead above (or press T) to add titles, lower thirds, or a key verse. Each layer has its own timing, position and style. Drag text on the preview to move it.</p>
+          <p class="hint" id="textEmptyHint">Tap ＋ Text at playhead above (or press T) to add titles, lower thirds, or a key quote. Each layer has its own timing, position and style. Drag text on the preview to move it.</p>
         </section>
         <div id="textPanel" hidden>
           <section class="section">
-            <label><span class="label">Text</span><textarea data-bind="text.text" maxlength="400" placeholder="A strong opening line or key verse"></textarea></label>
+            <label><span class="label">Text</span><textarea data-bind="text.text" maxlength="400" placeholder="A strong opening line or key quote"></textarea></label>
             <div class="field-row" style="margin-top:10px">
               <label><span class="label">Start (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="text.start" data-commit="change" /></label>
               <label><span class="label">End (s)</span><input class="field mono" type="number" min="0" step="0.1" data-bind="text.end" data-commit="change" /></label>
@@ -599,7 +601,7 @@
         <section class="section">
           <div class="section-head"><h2>Picture-in-picture</h2><label class="btn primary small" for="overlayInput">＋ Add overlay</label><input id="overlayInput" type="file" accept="video/*,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.heic,.heif,.gif,.mov,.mp4,.m4v,.webm" /></div>
           <div class="item-list" id="overlayList"></div>
-          <p class="hint" id="overlayEmptyHint">Place a second video or image over the main clip — a face-cam, a Bible page, a logo reveal or a green-screen shot. It starts at the playhead.</p>
+          <p class="hint" id="overlayEmptyHint">Place a second video or image over the main clip — a face-cam, a product shot, a logo reveal or a green-screen shot. It starts at the playhead.</p>
         </section>
         <div id="overlayPanel" hidden>
           <div class="offline-banner" id="ovlOfflineBanner" hidden><p><b>Media missing.</b> Relink this overlay:</p><label class="btn secondary" for="ovlRelinkInput">Choose file…</label><input id="ovlRelinkInput" type="file" accept="video/*,image/*,.heic,.heif" /></div>
@@ -799,6 +801,7 @@
         <button class="tool" data-action="addMarker" type="button" title="Add marker (M)">⚑<span>Marker</span></button>
         <i class="sep"></i>
         <button class="tool" data-action="match" id="toolMatch" type="button" aria-label="Match" title="Match: make the selected item fit another one on the timeline (length, start / end, loudness)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5v11M14 2.5v11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4.5 8h7M4.5 8l2-2M4.5 8l2 2M11.5 8l-2-2M11.5 8l-2 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Match…</span></button>
+        <button class="tool" data-action="beatCut" id="toolBeatCut" type="button" aria-label="Cut to beat" title="Cut to beat: re-time or cut the selected clips and photos so the cuts land on the beats of a music track, with optional transitions on the beat"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13V9M5 13V5M8 13V3M11 13V6M14 13V9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M1 14.5h14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-dasharray="2 2"/></svg><span>Beat cut…</span></button>
         <i class="sep"></i>
         <button class="tool" data-action="volumeDown" id="toolVolumeDown" type="button" aria-label="Volume down" title="Volume down: lower the selected item's Volume by 10 points (Shift or Alt: 1 point). Shortcut: ["><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Vol −</span></button>
         <button class="tool" data-action="volumeUp" id="toolVolumeUp" type="button" aria-label="Volume up" title="Volume up: raise the selected item's Volume by 10 points (Shift or Alt: 1 point). Shortcut: ]"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 6h3L8.5 2.5v11L4.5 10h-3z" fill="currentColor"/><path d="M11 8h4M13 6v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Vol +</span></button>
@@ -881,7 +884,7 @@
 <!-- Templates -->
 <dialog class="sheet wide" id="templatesDialog" aria-labelledby="templatesTitle">
   <div class="sheet-head"><h2 id="templatesTitle">Starter templates</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
-  <p class="hint">Ready-made, fully editable starting points for devotionals, sermons and Shorts. Change any text, swap backgrounds for your own footage, re-time on the timeline.</p>
+  <p class="hint">Ready-made, fully editable starting points for intros, quotes, talks and Shorts. Change any text, swap backgrounds for your own footage, re-time on the timeline.</p>
   <div class="tpl-grid" id="templateGrid"></div>
 </dialog>
 
@@ -1058,7 +1061,7 @@
       <label><span class="label">Quality</span><select id="tdModel"></select></label>
       <label><span class="label">Language</span><select id="tdLang"></select></label>
     </div>
-    <label style="display:block;margin-top:10px"><span class="label">Names &amp; terms (optional)</span><input class="field" type="text" id="tdCustom" maxlength="400" placeholder="Jesus, Hallelujah, Deuteronomy" autocomplete="off" /></label>
+    <label style="display:block;margin-top:10px"><span class="label">Names &amp; terms (optional)</span><input class="field" type="text" id="tdCustom" maxlength="400" placeholder="Brand names, people, places" autocomplete="off" /></label>
     <p class="hint" style="margin-top:4px">Spellings to prefer: similar-sounding words are corrected to these afterwards.</p>
     <label class="check" id="tdSelRow" hidden><input type="checkbox" id="tdSelOnly" /> <span id="tdSelText">Only the selected item</span></label>
     <p class="hint" id="tdNote" style="margin-top:10px"></p>
@@ -1089,9 +1092,29 @@
   <p class="hint">To line up two recordings of the same sound by their waveform (a camera and a recorder), use <b>Sync</b> in the Audio tab.</p>
   <div class="button-row" style="margin-top:12px"><button class="btn primary" id="mtApply" type="button">Apply</button><button class="btn ghost" id="mtCancel" type="button">Cancel</button></div>
 </dialog>
+<dialog class="sheet" id="beatCutDialog" aria-labelledby="bcTitle">
+  <div class="sheet-head"><h2 id="bcTitle">Cut to beat</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="bcClose">✕</button></div>
+  <p class="hint" id="bcSel"></p>
+  <label style="display:block"><span class="label">Music</span><select id="bcMusic"></select></label>
+  <div class="bc-beats"><span class="hint" id="bcBeats"></span><button class="btn secondary small" id="bcFind" type="button">Find beats</button></div>
+  <div class="progress" id="bcProg" aria-live="polite" hidden><div class="progress-track"><div class="progress-bar" id="bcBar"></div></div><div class="progress-copy"><span id="bcProgText">Listening…</span><button class="linkish" id="bcFindCancel" type="button">Cancel</button></div></div>
+  <span class="label" style="display:block;margin-top:10px">What to do</span>
+  <div class="segmented" id="bcMode" role="radiogroup" aria-label="What to do"><button type="button" data-mode="retime" class="selected" role="radio" aria-checked="true">Re-time</button><button type="button" data-mode="cut" role="radio" aria-checked="false">Cut on beats</button><button type="button" data-mode="transitions" role="radio" aria-checked="false">Transitions only</button></div>
+  <p class="hint" id="bcModeHint"></p>
+  <label style="display:block"><span class="label">Cuts land on</span><select id="bcEvery"></select></label>
+  <label class="check" id="bcFitRow"><input type="checkbox" id="bcFit" checked /> <span>Fit photos to the beat (each photo lasts one step)</span></label>
+  <label class="check"><input type="checkbox" id="bcTrans" /> <span>Add a transition on each cut that lands on a beat</span></label>
+  <div class="field-row" id="bcTransRow" hidden>
+    <label><span class="label">Style</span><select id="bcStyle"></select></label>
+    <label><span class="label">Length</span><select id="bcLen"></select></label>
+  </div>
+  <div class="mt-preview" id="bcPreview" aria-live="polite"></div>
+  <p class="hint">The music and everything on the other lanes stay where they are. One Undo puts the clips back.</p>
+  <div class="button-row" style="margin-top:12px"><button class="btn primary" id="bcApply" type="button">Apply</button><button class="btn ghost" id="bcCancel" type="button">Cancel</button></div>
+</dialog>
 <dialog class="sheet" id="shortsDialog" aria-labelledby="shTitle">
   <div class="sheet-head"><h2 id="shTitle">Auto Shorts</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="shClose">✕</button></div>
-  <p class="hint" id="shIntro">Finds strong 20–60 second moments in this video from its captions, pauses and voice, and makes each one you tick into its own vertical 9:16 project with captions. It is a guess from the words, not an understanding of the sermon: check every moment before you use it. Everything stays on this device.</p>
+  <p class="hint" id="shIntro">Finds strong 20–60 second moments in this video from its captions, pauses and voice, and makes each one you tick into its own vertical 9:16 project with captions. It is a guess from the words, not an understanding of the video: check every moment before you use it. Everything stays on this device.</p>
   <div id="shNeed" hidden>
     <p class="hint warn" id="shNeedText">Auto Shorts reads the captions, and this project has none yet.</p>
     <div class="button-row"><button class="btn primary" id="shGenerate" type="button">✨ Generate captions…</button></div>

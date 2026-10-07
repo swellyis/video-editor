@@ -4,6 +4,19 @@
 import { analyze } from './beat.js';
 import { etaText } from './clean-ui.js';
 
+/**
+ * Find the beats of an audio item's trimmed part (shared by the Beats block and the Cut to beat dialog). Resolves to
+ * { beat } (store it as item.beat) or { refusal } (plain words); throws a BeatCancelled error when `signal` aborts.
+ */
+export async function detectBeats(rec, item, { signal, onProgress } = {}) {
+  const S = await import('./beat-scan.js'), from = Math.max(0, item.in), to = Math.max(from + 0.1, item.out);
+  const env = await S.scanOnsets(rec.blob, rec.name, rec.duration, from, to, { signal, onProgress });
+  await new Promise(r => setTimeout(r, 0));
+  const r = analyze(env, from);
+  if (!r.ok) return { refusal: `No clear beat found, so nothing was added. This works best with drums or a steady pulse; speech, ambient pads and free-time playing don’t have a beat to find. ${r.reason === 'short' ? 'The part you use is also very short.' : 'If this does have a beat, try a longer part or one with louder drums.'}` };
+  return { beat: { on: true, bpm: Math.round(r.bpm * 100) / 100, conf: Math.round(r.confidence * 100) / 100, from, to, t: r.beats.map(t => Math.round(t * 1000) / 1000) } };
+}
+
 export function initBeatUI(ctx) {
   const { $, app, media, toast, commit, current } = ctx;
   const box = $('beatBox'); if (!box) return { render() { } };
@@ -18,13 +31,16 @@ export function initBeatUI(ctx) {
     const cur = current();
     if (!cur || cur.type !== 'audio' || cur.item.loop || !cur.item.mediaId) { box.hidden = true; return; }
     const item = cur.item;
-    if (after && after.nextElementSibling !== box) after.after(box);
+    // after Sync when it shows; Sync hides itself when there is no other sound (e.g. photos + music), so fall back to the block before it
+    const anchor = [after, $('silBox'), $('voiceBox'), $('cleanBox')].find(e => e && !e.hidden) || after;
+    if (anchor && anchor.nextElementSibling !== box) anchor.after(box);
     box.hidden = false;
     const st = $('beatState'), hint = $('beatHint'), has = !!item.beat, refusal = refused.get(item.id);
     $('beatFind').hidden = !!job; $('beatFind').textContent = has || refusal ? 'Find beats again' : 'Find beats';
     $('beatProg').classList.toggle('show', !!job);
     $('beatSnapRow').hidden = !has || !!job; $('beatSnap').checked = has && item.beat.on !== false;
     $('beatClear').hidden = !has || !!job;
+    if ($('beatCutOpen')) $('beatCutOpen').hidden = !has || !!job;
     st.className = 'clean-state';
     if (job) { st.textContent = 'Listening'; hint.className = 'hint'; hint.textContent = ''; renderProgress(); return; }
     if (has) {
@@ -50,17 +66,12 @@ export function initBeatUI(ctx) {
     const ctl = new AbortController(); job = { frac: 0, eta: null, ctl }; refused.delete(item.id); render();
     let wake = null; try { wake = await navigator.wakeLock?.request('screen'); } catch { /* optional */ }
     try {
-      const S = await import('./beat-scan.js'), t0 = Date.now(), from = Math.max(0, item.in), to = Math.max(from + 0.1, item.out);
-      const env = await S.scanOnsets(rec.blob, rec.name, rec.duration, from, to, { signal: ctl.signal, onProgress: (p) => { job.frac = p.frac; job.eta = p.frac > 0.02 ? (Date.now() - t0) / 1000 * (1 - p.frac) / p.frac : null; renderProgress(); } });
-      await new Promise(r => setTimeout(r, 0));
-      const r = analyze(env, from), live = app.project.audio.find(a => a.id === item.id);
+      const t0 = Date.now();
+      const r = await detectBeats(rec, item, { signal: ctl.signal, onProgress: (p) => { job.frac = p.frac; job.eta = p.frac > 0.02 ? (Date.now() - t0) / 1000 * (1 - p.frac) / p.frac : null; renderProgress(); } });
+      const live = app.project.audio.find(a => a.id === item.id);
       if (!live) return;
-      if (!r.ok) {
-        refused.set(item.id, `No clear beat found, so nothing was added. This works best with drums or a steady pulse; speech, ambient pads and free-time playing don’t have a beat to find. ${r.reason === 'short' ? 'The part you use is also very short.' : 'If this does have a beat, try a longer part or one with louder drums.'}`);
-      } else {
-        live.beat = { on: true, bpm: Math.round(r.bpm * 100) / 100, conf: Math.round(r.confidence * 100) / 100, from, to, t: r.beats.map(t => Math.round(t * 1000) / 1000) };
-        commit('Find beats');
-      }
+      if (r.refusal) refused.set(item.id, r.refusal);
+      else { live.beat = r.beat; commit('Find beats'); }
     } catch (e) {
       if (!(e && e.name === 'BeatCancelled')) { refused.set(item.id, (e && e.noAudio ? 'This has no sound.' : (e && e.message) || 'Could not read the sound.')); toast(refused.get(item.id), 6000); }
     } finally { try { wake && wake.release(); } catch { /* ignore */ } job = null; box.dataset.runs = String((+box.dataset.runs || 0) + 1); app.timeline && app.timeline.render(); render(); }
@@ -70,6 +81,7 @@ export function initBeatUI(ctx) {
     const cur = current(); if (!cur) return;
     if (b.id === 'beatFind') return void find(cur);
     if (b.id === 'beatCancel') { if (job) job.ctl.abort(); return; }
+    if (b.id === 'beatCutOpen') { app.beatCut && app.beatCut.open({ music: cur.item.id }); return; }
     if (b.id === 'beatClear') { delete cur.item.beat; refused.delete(cur.item.id); commit('Clear beats'); app.timeline && app.timeline.render(); render(); }
   });
   $('beatSnap').addEventListener('change', (e) => {
