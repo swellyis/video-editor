@@ -57,10 +57,10 @@ test('candidates are 20-60 s, ranked best first, never overlap, and a scripture 
 
 test('a clip that starts mid-thought and ends mid-sentence scores lower than a clean one', () => {
   const caps = transcript([['But that is why it matters so much to all of us here today in this house.', 0.2], ['So we keep going further and further into the long story of grace and truth together.', 0.2], ['And then the next part comes along and it keeps on going for a good while and', 0.2]]);
-  const S = buildSentences(caps), F = S.map(s => ({ refs: [], q: 0, bang: 0, contrast: false, payoff: false, punch: false, faith: 0, nw: s.words.length }));
+  const S = buildSentences(caps), F = S.map(s => ({ refs: [], q: 0, bang: 0, contrast: false, payoff: false, punch: false, value: 0, nw: s.words.length }));
   const bad = scoreRun(S, F, 0, 2);
   const caps2 = transcript([['Why does God let us wait for so long in the middle of the storm?', 0.6], ['Because he is shaping something in you that comfort never could.', 0.6], ['Trust him today.', 1.0]]);
-  const S2 = buildSentences(caps2), F2 = S2.map(s => ({ refs: [], q: s.text.includes('?') ? 1 : 0, bang: 0, contrast: false, payoff: false, punch: false, faith: 1, nw: s.words.length }));
+  const S2 = buildSentences(caps2), F2 = S2.map(s => ({ refs: [], q: s.text.includes('?') ? 1 : 0, bang: 0, contrast: false, payoff: false, punch: false, value: 1, nw: s.words.length }));
   const good = scoreRun(S2, F2, 0, 2);
   assert.ok(good.score > bad.score + 15, good.score + ' vs ' + bad.score);
   assert.ok(bad.reasons.some(r => /mid-thought/.test(r.label)) && bad.reasons.some(r => /mid-sentence/.test(r.label)));
@@ -77,7 +77,7 @@ test('voice energy raises the score of the emphatic moment; silence inside lower
   assert.ok(withEnv.reasons.some(r => /delivery/i.test(r.label)));
   assert.ok(speechLevel({ step, values: v }) > 0);
   const gaps = transcript([['Why does it matter so much that we stand up and speak out about it?', 3.5], ['Because the world is waiting for people who are not afraid of anything at all.', 3.5], ['Stand firm in the faith and never let go of the hope you have received in Christ.', 1]]);
-  const S = buildSentences(gaps), F = S.map(s => ({ refs: [], q: 0, bang: 0, contrast: false, payoff: false, punch: false, faith: 0, nw: s.words.length }));
+  const S = buildSentences(gaps), F = S.map(s => ({ refs: [], q: 0, bang: 0, contrast: false, payoff: false, punch: false, value: 0, nw: s.words.length }));
   assert.ok(scoreRun(S, F, 0, 2).reasons.some(r => /silence/i.test(r.label)));
 });
 

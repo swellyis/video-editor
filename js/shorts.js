@@ -1,4 +1,4 @@
-// Auto Shorts: pick strong 20-60 s moments from a long sermon's captions and turn each one into a 9:16 project.
+// Auto Shorts: pick strong 20-60 s moments from a long video's captions and turn each one into a 9:16 project.
 // Everything here is a pure function (no DOM, no storage) so the scoring and the cutting rules are unit-tested.
 // The scoring is a transparent HEURISTIC: every point comes with a plain-language reason that the dialog shows.
 // It reads words and their timings, not meaning: it can pick a moment that is not the best one, so the person decides.
@@ -11,12 +11,12 @@ export const DEFAULTS = { minLen: 20, maxLen: 60, idealMin: 30, idealMax: 50, mi
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-// ---------------------------------------------------------------- scripture references
+// ---------------------------------------------------------------- spoken references (book + chapter style)
 const BOOKS = ['Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy', 'Joshua', 'Judges', 'Ruth', 'Samuel', 'Kings', 'Chronicles', 'Ezra', 'Nehemiah', 'Esther', 'Job', 'Psalms?', 'Proverbs', 'Ecclesiastes', 'Song of Solomon', 'Song of Songs', 'Isaiah', 'Jeremiah', 'Lamentations', 'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos', 'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai', 'Zechariah', 'Malachi', 'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans', 'Corinthians', 'Galatians', 'Ephesians', 'Philippians', 'Colossians', 'Thessalonians', 'Timothy', 'Titus', 'Philemon', 'Hebrews', 'James', 'Peter', 'Jude', 'Revelation'];
 const ORD = '(?:(?:[1-3]|i{1,3}|first|second|third)\\s+)?';
 const NUMBERED = new Set(['Samuel', 'Kings', 'Chronicles', 'Corinthians', 'Thessalonians', 'Timothy', 'Peter', 'John']);
 const REF = new RegExp('\\b' + ORD + '(?:' + BOOKS.join('|') + ')\\s+(?:chapter\\s+)?\\d{1,3}(?:\\s*(?::|,|verses?)\\s*\\d{1,3}(?:\\s*[-–]\\s*\\d{1,3})?)?', 'gi');
-/** Scripture references spoken in a text: "John 3:16", "Romans chapter 8 verse 28", "1 Corinthians 13:4-7". */
+/** Book-and-chapter style references spoken in a text (e.g. "Book 3:16", "Name chapter 8 verse 28", "1 Name 13:4-7"). Internal name kept for compatibility. */
 export function findScripture(text) {
   const out = [];
   for (const m of String(text || '').matchAll(REF)) {
@@ -58,12 +58,12 @@ export function buildSentences(captions, { pause = 0.9, maxWords = 60 } = {}) {
 }
 
 // ---------------------------------------------------------------- text signals
-const HOOK_START = /^(what if|imagine|have you ever|did you know|do you|are you|here'?s (the|a|what|why)|let me (tell|ask|say|show)|listen|look at|the truth|the (good|bad) news|god (is|says|has|loves|wants|will|can)|jesus (said|is|says|christ|died|rose)|you (need|are|were|can|must|don'?t|have|will)|never|stop|don'?t|why|how|who|when you|if you|there'?s a|one day|today|i want you|i'?m going to tell)\b/i;
-const DEPENDENT_START = /^(and|but|so|because|then|which|that|this|these|those|it|he|she|they|him|her|them|also|or|yet|however|therefore|well|anyway|amen|right|okay|ok|now|as|for|with|to)\b/i;
+const HOOK_START = /^(what if|imagine|have you ever|did you know|do you|are you|here'?s (the|a|what|why)|let me (tell|ask|say|show)|listen|look at|the truth|the (good|bad) news|you (need|are|were|can|must|don'?t|have|will)|never|stop|don'?t|why|how|who|when you|if you|there'?s a|one day|today|i want you|i'?m going to tell)\b/i;
+const DEPENDENT_START = /^(and|but|so|because|then|which|that|this|these|those|it|he|she|they|him|her|them|also|or|yet|however|therefore|well|anyway|right|okay|ok|now|as|for|with|to)\b/i;
 const TRAIL_CONJ = /\b(and|but|so|because|or|that|which|the|a|of|to|in|for|with|if)[.,;:]?$/i;
-const PAYOFF = /\b(amen|in jesus'? name|that'?s the (gospel|good news|truth)|praise god|hallelujah|thank you jesus|it is finished|he is risen|the end of the story|that'?s it|that'?s all)\b/i;
+const PAYOFF = /\b(the end of the story|that'?s it|that'?s all|that'?s the (truth|point|secret|key|lesson)|and that'?s why|bottom line|so remember|in the end|thank you (so much )?for (watching|listening))\b/i;
 const CONTRAST = /\b(not|isn'?t|aren'?t|don'?t|doesn'?t|never|no)\b[^.?!]{3,70}\b(but|it'?s|he'?s|she'?s|you'?re|instead|rather)\b/i;
-const FAITH = /\b(god|jesus|christ|lord|holy spirit|spirit|grace|faith|gospel|cross|sin|saved?|salvation|love|prayer|pray|forgive|forgiven|forgiveness|heaven|hope|mercy|truth|bible|scripture|blessed?|redeem|redeemed|resurrection|worship)\b/gi;
+const VALUE = /\b(love|hope|truth|life|fear|dream|dreams|change|freedom|family|trust|purpose|success|fail|failure|courage|honest|future|heart|believe|choose|grow|matter|matters|mistake|secret|never|always)\b/gi;
 const PUNCH = /\b(here'?s the thing|the truth is|listen to me|let me say that again|i promise you|i'?m telling you|remember this|write this down|this is (the|where)|that'?s (the|what)|what if i told you|the point is|the problem is|the answer is)\b/i;
 
 /** Per-sentence features, computed once. `env` = { step, values } optional loudness per `step` seconds (timeline time). */
@@ -72,7 +72,7 @@ function sentenceFeatures(s) {
   return {
     refs: findScripture(text), q: (text.match(/\?/g) || []).length, bang: (text.match(/!/g) || []).length,
     contrast: CONTRAST.test(text), payoff: PAYOFF.test(text), punch: PUNCH.test(text),
-    faith: (text.match(FAITH) || []).length, nw,
+    value: (text.match(VALUE) || []).length, nw,
   };
 }
 function envSlice(env, a, b) {
@@ -94,7 +94,7 @@ export function speechLevel(env) {
 
 /**
  * Score a run of sentences S[i..j] as a Short. Returns { score 0-100, reasons: [{ label, pts }], len, scripture: [..] }.
- * Points (max 100): hook 22, clean end 14 (+pause), scripture 14, question/punchline 12, voice energy 14, length 8, pace 4, faith words 4, + 8 for a pause before.
+ * Points (max 100): hook 22, clean end 14 (+pause), reference 14, question/punchline 12, voice energy 14, length 8, pace 4, meaningful words 4, + 8 for a pause before.
  * Penalties: starts with "and/but/this…" (needs earlier context), ends on a dangling word, dead air inside.
  */
 export function scoreRun(S, F, i, j, o = {}) {
@@ -116,15 +116,15 @@ export function scoreRun(S, F, i, j, o = {}) {
   if (last.pauseAfter >= 0.7) add('Pause after the last word', 6); else if (last.pauseAfter >= 0.4) add('Short pause after the last word', 3);
   if (TRAIL_CONJ.test(last.text) && !last.terminal) add('Ends on a dangling word', -6);
   // content
-  let refs = [], q = 0, bang = 0, contrast = false, payoff = false, punch = false, faith = 0, nw = 0;
-  for (let k = i; k <= j; k++) { const f = F[k]; refs = refs.concat(f.refs); q += f.q; bang += f.bang; contrast ||= f.contrast; payoff ||= f.payoff; punch ||= f.punch; faith += f.faith; nw += f.nw; }
-  if (refs.length) add('Scripture: ' + [...new Set(refs)].slice(0, 2).join(', '), refs.length > 1 ? 14 : 10);
+  let refs = [], q = 0, bang = 0, contrast = false, payoff = false, punch = false, value = 0, nw = 0;
+  for (let k = i; k <= j; k++) { const f = F[k]; refs = refs.concat(f.refs); q += f.q; bang += f.bang; contrast ||= f.contrast; payoff ||= f.payoff; punch ||= f.punch; value += f.value || 0; nw += f.nw; }
+  if (refs.length) add('Reference: ' + [...new Set(refs)].slice(0, 2).join(', '), refs.length > 1 ? 14 : 10);
   if (q) add(q > 1 ? 'Asks questions' : 'Asks a question', Math.min(7, 4 + q));
   if (contrast) add('“Not this, but that” line', 4);
   if (punch) add('Emphasis phrase (“here’s the thing…”)', 4);
-  if (payoff || bang) add(payoff ? 'Closing line (Amen / gospel / praise)' : 'Exclamation', payoff ? 5 : 3);
-  const faithRate = faith / Math.max(1, nw);
-  if (faithRate > 0.03) add('Faith-centred wording', clamp(faithRate * 60, 1, 4));
+  if (payoff || bang) add(payoff ? 'Clear closing line' : 'Exclamation', payoff ? 5 : 3);
+  const valueRate = value / Math.max(1, nw);
+  if (valueRate > 0.03) add('Strong, meaningful words', clamp(valueRate * 60, 1, 4));
   // length (20-60 s allowed; 30-50 s best)
   const lp = len >= opt.idealMin && len <= opt.idealMax ? 8 : len < opt.idealMin ? 8 * (len - opt.minLen) / Math.max(1, opt.idealMin - opt.minLen) : 8 * (opt.maxLen - len) / Math.max(1, opt.maxLen - opt.idealMax);
   add(len >= opt.idealMin && len <= opt.idealMax ? 'Ideal length (' + Math.round(len) + ' s)' : 'Length ' + Math.round(len) + ' s', clamp(lp, 0, 8));

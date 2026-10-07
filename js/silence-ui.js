@@ -136,7 +136,7 @@ export function initSilenceUI(ctx) {
         $('silPos').textContent = `Pause ${a.review + 1} of ${n} · ${fmtS(e.len)}`;
         $('silPrev').disabled = a.review <= 0; $('silNext').disabled = a.review >= n - 1;
       }
-      hint = n ? `Analysed ${a.label}. Pauses are part of preaching, so only quiet stretches of ${set.minPause.toFixed(1)} s or more are marked and ${set.pad.toFixed(2)} s is kept on each side. Review them first, or cut them all (one Undo brings them back).`
+      hint = n ? `Analysed ${a.label}. Some pauses are part of good speaking, so only quiet stretches of ${set.minPause.toFixed(1)} s or more are marked and ${set.pad.toFixed(2)} s is kept on each side. Review them first, or cut them all (one Undo brings them back).`
         : `Analysed ${a.label}. Try a shorter pause or a higher quiet level.`;
       if (!app.rippleEnabled && n) hint += ' Ripple is off: the pieces are joined, but what comes after stays where it is.';
     } else {

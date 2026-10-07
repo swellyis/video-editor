@@ -199,7 +199,7 @@ const lev = (a, b) => {
 /** Comma / line separated hint words → a clean list. */
 export const parseCustomWords = (s) => [...new Set(String(s || '').split(/[,\n;]+/).map(x => x.trim()).filter(x => x && x.length <= 40))].slice(0, 100);
 /**
- * Snap near-miss words to the user's custom words ("Deuteronomy", "Hallelujah"): a word within a small spelling distance of a custom word
+ * Snap near-miss words to the user's custom words (brand names, people, places): a word within a small spelling distance of a custom word
  * (1 edit for 4-7 letters, 2 for longer) is replaced, keeping punctuation. Returns how many words changed.
  */
 export function applyCustomWords(words, custom) {

@@ -1,5 +1,5 @@
 // Auto Shorts: loudness of the spoken sound along the timeline (for the "emphatic delivery" points). Streams the mix in 30 s pieces at
-// 8 kHz mono, so an hour-long sermon never sits in memory; one number per `step` seconds. Cancel works between pieces.
+// 8 kHz mono, so an hour-long recording never sits in memory; one number per `step` seconds. Cancel works between pieces.
 import { layout } from './model.js';
 
 export class ScanCancelled extends Error { constructor() { super('Cancelled'); this.name = 'ScanCancelled'; } }

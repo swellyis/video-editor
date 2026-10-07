@@ -15,9 +15,10 @@ export const SAFE = {
 };
 /** The area YouTube covers with the video-length badge on a 16:9 thumbnail (fractions of the canvas). */
 export const DURATION_BADGE = { x: 0.82, y: 0.86, w: 0.18, h: 0.14 };
-export const STICKERS = ['🙏', '✝️', '📖', '🕊️', '🔥', '❤️', '✨', '👑', '⭐', '✅', '⚡', '😮'];
+export const STICKERS = ['🔥', '❤️', '✨', '👑', '⭐', '✅', '⚡', '😮', '👉', '🎉', '💡', '🎬'];
 export const SHAPES = ['rect', 'round', 'ellipse', 'triangle', 'line', 'arrow'];
-export const VECTOR_STICKERS = ['cross', 'burst', 'play', 'arrow'];
+export const VECTOR_STICKERS = ['burst', 'play', 'arrow']; // offered in the picker
+const KNOWN_VECTORS = ['cross', ...VECTOR_STICKERS]; // older designs may still use 'cross'; it keeps drawing
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const num = (v, a, b, d) => { v = typeof v === 'string' && v.trim() !== '' ? +v : v; return typeof v === 'number' && Number.isFinite(v) ? clamp(v, a, b) : d; };
@@ -39,7 +40,7 @@ export function newText(o = {}) {
   });
 }
 export const newShape = (o = {}) => base('shape', { name: 'Shape', shape: 'rect', fill: '#df3f34', fill2: '', stroke: { on: false, w: 0.01, color: '#ffffff' }, radius: 0.15, shadow: false, w: 0.3, h: 0.2, ...o });
-export const newSticker = (o = {}) => base('sticker', { name: 'Sticker', kind: 'emoji', char: '🙏', color: '#ffd166', w: 0.14, h: 0.14 * 1280 / 720, ...o });
+export const newSticker = (o = {}) => base('sticker', { name: 'Sticker', kind: 'emoji', char: '⭐', color: '#ffd166', w: 0.14, h: 0.14 * 1280 / 720, ...o });
 export const newImage = (o = {}) => base('image', { name: 'Picture', mediaId: '', ar: 1, radius: 0, border: { on: false, w: 0.008, color: '#ffffff' }, flipH: false, shadow: false, w: 0.3, h: 0.3, ...o });
 
 /** Make any stored layer safe (types, ranges, lengths); returns null for junk. */
@@ -62,7 +63,7 @@ export function normLayer(l) {
     const s = sub(l.stroke, {});
     Object.assign(o, { shape: oneOf(l.shape, SHAPES, 'rect'), fill: hex(l.fill, '#df3f34'), fill2: hex(l.fill2, ''), stroke: { on: s.on === true, w: num(s.w, 0, 0.2, 0.01), color: hex(s.color, '#ffffff') }, radius: num(l.radius, 0, 0.5, 0.15), shadow: l.shadow === true });
   } else if (type === 'sticker') {
-    Object.assign(o, { kind: oneOf(l.kind, ['emoji', ...VECTOR_STICKERS], 'emoji'), char: str(l.char, 8, '🙏'), color: hex(l.color, '#ffd166') });
+    Object.assign(o, { kind: oneOf(l.kind, ['emoji', ...KNOWN_VECTORS], 'emoji'), char: str(l.char, 8, '⭐'), color: hex(l.color, '#ffd166') });
   } else {
     const b = sub(l.border, {});
     Object.assign(o, { mediaId: str(l.mediaId, 80), ar: num(l.ar, 0.05, 20, 1), radius: num(l.radius, 0, 0.5, 0), border: { on: b.on === true, w: num(b.w, 0, 0.1, 0.008), color: hex(b.color, '#ffffff') }, flipH: l.flipH === true, shadow: l.shadow === true });
@@ -81,9 +82,9 @@ export function normDesign(d) {
 }
 export const cloneDesign = (d) => JSON.parse(JSON.stringify(d));
 
-// ---------------------------------------------------------------- templates (sermon-ready, one layout per format)
+// ---------------------------------------------------------------- templates (one layout per format)
 export const TEMPLATES = [
-  { id: 'title', label: 'Big title' }, { id: 'part', label: 'Part 1 / 2' }, { id: 'verse', label: 'Scripture verse' },
+  { id: 'title', label: 'Big title' }, { id: 'part', label: 'Part 1 / 2' }, { id: 'verse', label: 'Quote' },
   { id: 'face', label: 'Face left, text right' }, { id: 'split', label: 'Bold split' }, { id: 'minimal', label: 'Minimal' },
 ];
 /** A fresh design for template `id` in format `fk`. `accent` colours the highlights. */
@@ -95,24 +96,24 @@ export function templateDesign(id, fk, accent = '#df3f34') {
   if (id === 'title') {
     d.adjust.darken = 0.3;
     L.push(S({ name: 'Accent bar', shape: 'rect', fill: accent, x: tall ? 0.5 : sq ? 0.5 : 0.1, y: tall ? 0.34 : sq ? 0.3 : 0.31, w: tall ? 0.7 : 0.16, h: tall ? 0.008 : sq ? 0.012 : 0.02 }));
-    L.push(T({ name: 'Title', text: 'WORD OF\nGOD', font: 'anton', size: tall ? 0.2 : sq ? 0.17 : 0.13, w: tall ? 0.84 : sq ? 0.86 : 0.62, align: tall ? 'center' : 'left', x: tall ? 0.5 : sq ? 0.5 : 0.37, y: tall ? 0.46 : sq ? 0.48 : 0.5, h: 0.3 }));
-    L.push(T({ name: 'Small line', text: 'SUNDAY MESSAGE', font: 'montserrat', size: tall ? 0.05 : 0.026, w: 0.5, align: tall ? 'center' : 'left', x: tall ? 0.5 : sq ? 0.5 : 0.3, y: tall ? 0.65 : sq ? 0.74 : 0.78, stroke: { on: false, w: 0, color: '#000000' }, shadow: { on: false, color: '#000000', blur: 0.2, dx: 0, dy: 0.05 }, box: { on: true, color: accent, pad: 0.35, radius: 0.1 }, h: 0.06, spacing: 0.06 }));
+    L.push(T({ name: 'Title', text: 'BIG\nIDEAS', font: 'anton', size: tall ? 0.2 : sq ? 0.17 : 0.13, w: tall ? 0.84 : sq ? 0.86 : 0.62, align: tall ? 'center' : 'left', x: tall ? 0.5 : sq ? 0.5 : 0.37, y: tall ? 0.46 : sq ? 0.48 : 0.5, h: 0.3 }));
+    L.push(T({ name: 'Small line', text: 'NEW EPISODE', font: 'montserrat', size: tall ? 0.05 : 0.026, w: 0.5, align: tall ? 'center' : 'left', x: tall ? 0.5 : sq ? 0.5 : 0.3, y: tall ? 0.65 : sq ? 0.74 : 0.78, stroke: { on: false, w: 0, color: '#000000' }, shadow: { on: false, color: '#000000', blur: 0.2, dx: 0, dy: 0.05 }, box: { on: true, color: accent, pad: 0.35, radius: 0.1 }, h: 0.06, spacing: 0.06 }));
   } else if (id === 'part') {
     d.adjust.darken = 0.35;
     L.push(T({ name: 'Part', text: 'PART 1', font: 'montserrat', size: tall ? 0.075 : 0.045, w: 0.4, x: tall ? 0.5 : 0.17, y: tall ? 0.2 : 0.14, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: false, color: '#000000', blur: 0.2, dx: 0, dy: 0.05 }, box: { on: true, color: accent, pad: 0.4, radius: 0.12 }, h: 0.08, spacing: 0.05 }));
-    L.push(T({ name: 'Title', text: 'FAITH OVER FEAR', font: 'bebas', size: tall ? 0.24 : sq ? 0.2 : 0.17, w: tall ? 0.9 : 0.86, x: 0.5, y: tall ? 0.52 : sq ? 0.58 : 0.62, align: 'center', h: 0.4 }));
-    L.push(T({ name: 'Small line', text: 'Pastor John · Psalm 23', font: 'montserrat', size: tall ? 0.045 : 0.03, w: 0.8, x: 0.5, y: tall ? 0.78 : sq ? 0.86 : 0.88, stroke: { on: false, w: 0, color: '#000' }, h: 0.05 }));
+    L.push(T({ name: 'Title', text: 'DREAM BIG', font: 'bebas', size: tall ? 0.24 : sq ? 0.2 : 0.17, w: tall ? 0.9 : 0.86, x: 0.5, y: tall ? 0.52 : sq ? 0.58 : 0.62, align: 'center', h: 0.4 }));
+    L.push(T({ name: 'Small line', text: 'Alex Morgan · Episode 23', font: 'montserrat', size: tall ? 0.045 : 0.03, w: 0.8, x: 0.5, y: tall ? 0.78 : sq ? 0.86 : 0.88, stroke: { on: false, w: 0, color: '#000' }, h: 0.05 }));
   } else if (id === 'verse') {
     d.bg = { ...defaultBg(), type: 'gradient', color: '#101a3a', color2: '#0b0f1f', angle: 160 };
     d.adjust.darken = 0;
     L.push(S({ name: 'Glow', shape: 'ellipse', fill: accent, x: 0.5, y: tall ? 0.18 : 0.5, w: tall ? 0.7 : 0.5, h: tall ? 0.18 : 0.9, opacity: 0.14 }));
-    L.push(newSticker({ name: 'Cross', kind: 'cross', color: '#ffd166', w: tall ? 0.16 : 0.07, h: (tall ? 0.16 : 0.07) * (SIZES[fk][0] / SIZES[fk][1]), x: 0.5, y: tall ? 0.15 : 0.16 }));
-    L.push(T({ name: 'Verse', text: '“The Lord is my shepherd; I shall not want.”', font: 'playfair', size: tall ? 0.085 : sq ? 0.06 : 0.052, w: tall ? 0.84 : 0.78, x: 0.5, y: tall ? 0.46 : 0.5, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: true, color: '#000000', blur: 0.2, dx: 0, dy: 0.04 }, lineH: 1.2, h: 0.35 }));
-    L.push(T({ name: 'Reference', text: 'PSALM 23:1', font: 'montserrat', size: tall ? 0.05 : 0.032, w: 0.6, x: 0.5, y: tall ? 0.68 : sq ? 0.76 : 0.8, color: accent, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: false, color: '#000000', blur: 0.2, dx: 0, dy: 0.05 }, spacing: 0.12, h: 0.06 }));
+    L.push(T({ name: 'Quote mark', text: '“', font: 'playfair', size: tall ? 0.2 : 0.14, w: 0.3, x: 0.5, y: tall ? 0.17 : 0.2, color: '#ffd166', stroke: { on: false, w: 0, color: '#000' }, h: 0.16 }));
+    L.push(T({ name: 'Quote', text: '“Make it simple, but significant.”', font: 'playfair', size: tall ? 0.085 : sq ? 0.06 : 0.052, w: tall ? 0.84 : 0.78, x: 0.5, y: tall ? 0.46 : 0.5, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: true, color: '#000000', blur: 0.2, dx: 0, dy: 0.04 }, lineH: 1.2, h: 0.35 }));
+    L.push(T({ name: 'Source', text: '— YOUR NAME', font: 'montserrat', size: tall ? 0.05 : 0.032, w: 0.6, x: 0.5, y: tall ? 0.68 : sq ? 0.76 : 0.8, color: accent, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: false, color: '#000000', blur: 0.2, dx: 0, dy: 0.05 }, spacing: 0.12, h: 0.06 }));
   } else if (id === 'face') {
     d.adjust.darken = 0.1;
     L.push(S({ name: 'Shade', shape: 'rect', fill: '#000000', x: tall ? 0.5 : 0.74, y: tall ? 0.78 : 0.5, w: tall ? 1 : 0.52, h: tall ? 0.44 : 1, opacity: 0.62 }));
-    L.push(T({ name: 'Title', text: 'WHO IS\nJESUS?', font: 'anton', size: tall ? 0.19 : sq ? 0.15 : 0.1, w: tall ? 0.86 : 0.46, x: tall ? 0.5 : 0.74, y: tall ? 0.76 : sq ? 0.5 : 0.46, align: tall ? 'center' : 'left', h: 0.3 }));
+    L.push(T({ name: 'Title', text: 'WHAT\nNEXT?', font: 'anton', size: tall ? 0.19 : sq ? 0.15 : 0.1, w: tall ? 0.86 : 0.46, x: tall ? 0.5 : 0.74, y: tall ? 0.76 : sq ? 0.5 : 0.46, align: tall ? 'center' : 'left', h: 0.3 }));
     L.push(T({ name: 'Small line', text: 'WATCH NOW', font: 'montserrat', size: tall ? 0.05 : 0.026, w: 0.4, x: tall ? 0.5 : 0.65, y: tall ? 0.9 : sq ? 0.84 : 0.74, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: false, color: '#000000', blur: 0.2, dx: 0, dy: 0.05 }, box: { on: true, color: accent, pad: 0.35, radius: 0.1 }, h: 0.06, spacing: 0.06 }));
   } else if (id === 'split') {
     d.adjust.darken = 0;
@@ -120,9 +121,9 @@ export function templateDesign(id, fk, accent = '#df3f34') {
     L.push(T({ name: 'Title', text: 'DON’T\nGIVE UP', font: 'bebas', size: tall ? 0.22 : sq ? 0.18 : 0.15, w: tall ? 0.88 : 0.48, x: tall ? 0.5 : 0.27, y: tall ? 0.8 : 0.5, align: 'center', color: '#ffffff', stroke: { on: false, w: 0, color: '#000' }, shadow: { on: true, color: '#000000', blur: 0.1, dx: 0.03, dy: 0.04 }, h: 0.4 }));
   } else { // minimal
     d.adjust.darken = 0.18;
-    L.push(T({ name: 'Title', text: 'Be Still', font: 'playfair', size: tall ? 0.15 : sq ? 0.12 : 0.1, w: 0.8, x: 0.5, y: tall ? 0.46 : 0.46, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: true, color: '#000000', blur: 0.3, dx: 0, dy: 0.04 }, h: 0.2 }));
+    L.push(T({ name: 'Title', text: 'Breathe', font: 'playfair', size: tall ? 0.15 : sq ? 0.12 : 0.1, w: 0.8, x: 0.5, y: tall ? 0.46 : 0.46, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: true, color: '#000000', blur: 0.3, dx: 0, dy: 0.04 }, h: 0.2 }));
     L.push(S({ name: 'Line', shape: 'rect', fill: '#ffffff', x: 0.5, y: tall ? 0.55 : 0.6, w: 0.12, h: 0.004 }));
-    L.push(T({ name: 'Small line', text: 'PSALM 46:10', font: 'montserrat', size: tall ? 0.04 : 0.026, w: 0.6, x: 0.5, y: tall ? 0.59 : 0.66, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: true, color: '#000000', blur: 0.3, dx: 0, dy: 0.04 }, spacing: 0.18, h: 0.05 }));
+    L.push(T({ name: 'Small line', text: 'SLOW DOWN', font: 'montserrat', size: tall ? 0.04 : 0.026, w: 0.6, x: 0.5, y: tall ? 0.59 : 0.66, stroke: { on: false, w: 0, color: '#000' }, shadow: { on: true, color: '#000000', blur: 0.3, dx: 0, dy: 0.04 }, spacing: 0.18, h: 0.05 }));
   }
   return normDesign(d);
 }

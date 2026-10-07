@@ -239,7 +239,7 @@ export function initDesigner(ctx) {
   for (const b of document.querySelectorAll('#thumbTabs button')) b.addEventListener('click', () => setTab(b.dataset.tab));
 
   // ------------------------------------------------------------ layouts (templates)
-  /** A template applied on top of the current design: the layers are replaced; a video/picture backdrop is kept, a template with its own backdrop (verse card) brings it. */
+  /** A template applied on top of the current design: the layers are replaced; a video/picture backdrop is kept, a template with its own backdrop (quote card) brings it. */
   function applyTpl(cur0, tpl) {
     const d = cloneDesign(cur0);
     d.layers = tpl.layers; d.adjust.darken = tpl.adjust.darken;

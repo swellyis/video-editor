@@ -1,5 +1,5 @@
 // Text & title animations: the catalogue shown in the Text tab's library, the maths for the new motions, "apply to all", and the ready-made
-// sermon text templates. Pure (no DOM) so it is unit-tested; render.js drawText() does the drawing for preview, MP4 and WebM alike.
+// ready-made text templates. Pure (no DOM) so it is unit-tested; render.js drawText() does the drawing for preview, MP4 and WebM alike.
 import { newText, cleanTextAnim } from './model.js';
 
 const EO = (p) => 1 - Math.pow(1 - p, 3);
@@ -131,18 +131,18 @@ export function applyToAll(project, from, kinds) {
 }
 export function removeAnim(text, kind) { return setAnim(text, kind, 'none'); }
 
-// ---- ready-made sermon text (several editable layers each). `tall` = 9:16 (or taller): keep clear of the Shorts bottom UI.
+// ---- ready-made text (several editable layers each). `tall` = 9:16 (or taller): keep clear of the Shorts bottom UI.
 const L = (start, dur, text, o, anim) => { const t = Object.assign(newText(start, dur, text), { fadeIn: 0, fadeOut: 0 }, o); t.anim = cleanTextAnim(Object.assign({ in: 'none', out: 'fade', inDur: 0.6, outDur: 0.5 }, anim || {})); return t; };
 export const TEMPLATES = [
   { id: 'title', label: 'Title card', hint: 'Big title and subtitle, centred', dur: 5, make: (s, d, tall) => [
     L(s, d, 'Title goes here', { y: tall ? 0.42 : 0.44, size: tall ? 0.115 : 0.11, font: 'serif', maxWidth: 0.82, style: 'clean' }, { in: 'blurIn', out: 'fade', inDur: 0.9 }),
     L(s + 0.5, d - 0.5, 'Subtitle or speaker', { y: tall ? 0.56 : 0.6, size: tall ? 0.05 : 0.045, font: 'sans', color: '#f3d9a4', maxWidth: 0.8, style: 'clean' }, { in: 'rise', out: 'fade', inDur: 0.7 })] },
   { id: 'lower', label: 'Lower third', hint: 'Name + role', dur: 5, make: (s, d, tall) => [
-    L(s, d, 'Pastor John Smith', { x: 0.32, y: tall ? 0.7 : 0.78, size: tall ? 0.062 : 0.055, font: 'sans', style: 'box', align: 'left', bg: '#111111', bgOpacity: 0.82, maxWidth: tall ? 0.6 : 0.5 }, { in: 'slideRight', out: 'slideLeft', inDur: 0.6, outDur: 0.5 }),
-    L(s + 0.25, d - 0.25, 'Senior Pastor, Grace Church', { x: 0.32, y: tall ? 0.765 : 0.865, size: tall ? 0.04 : 0.034, font: 'condensed', style: 'box', align: 'left', color: '#111111', bg: '#f0b429', bgOpacity: 0.95, maxWidth: tall ? 0.6 : 0.5 }, { in: 'slideRight', out: 'slideLeft', inDur: 0.6, outDur: 0.5 })] },
-  { id: 'scripture', label: 'Scripture bar', hint: 'Verse + reference', dur: 7, make: (s, d, tall) => [
-    L(s, d, 'For God so loved the world that he gave his one and only Son.', { y: tall ? 0.66 : 0.8, size: tall ? 0.056 : 0.048, font: 'serif', style: 'band', bg: '#000000', bgOpacity: 0.7, maxWidth: tall ? 0.86 : 0.8 }, { in: 'wipe', out: 'fade', inDur: 0.9 }),
-    L(s + 0.6, d - 0.6, 'John 3:16', { y: tall ? 0.755 : 0.92, size: tall ? 0.04 : 0.036, font: 'mono', style: 'clean', color: '#f0b429', maxWidth: 0.6 }, { in: 'rise', out: 'fade' })] },
+    L(s, d, 'Alex Morgan', { x: 0.32, y: tall ? 0.7 : 0.78, size: tall ? 0.062 : 0.055, font: 'sans', style: 'box', align: 'left', bg: '#111111', bgOpacity: 0.82, maxWidth: tall ? 0.6 : 0.5 }, { in: 'slideRight', out: 'slideLeft', inDur: 0.6, outDur: 0.5 }),
+    L(s + 0.25, d - 0.25, 'Host, Your Channel', { x: 0.32, y: tall ? 0.765 : 0.865, size: tall ? 0.04 : 0.034, font: 'condensed', style: 'box', align: 'left', color: '#111111', bg: '#f0b429', bgOpacity: 0.95, maxWidth: tall ? 0.6 : 0.5 }, { in: 'slideRight', out: 'slideLeft', inDur: 0.6, outDur: 0.5 })] },
+  { id: 'scripture', label: 'Quote bar', hint: 'Quote + source', dur: 7, make: (s, d, tall) => [
+    L(s, d, 'The best way to get started is to stop talking and begin doing.', { y: tall ? 0.66 : 0.8, size: tall ? 0.056 : 0.048, font: 'serif', style: 'band', bg: '#000000', bgOpacity: 0.7, maxWidth: tall ? 0.86 : 0.8 }, { in: 'wipe', out: 'fade', inDur: 0.9 }),
+    L(s + 0.6, d - 0.6, 'Source or name', { y: tall ? 0.755 : 0.92, size: tall ? 0.04 : 0.036, font: 'mono', style: 'clean', color: '#f0b429', maxWidth: 0.6 }, { in: 'rise', out: 'fade' })] },
   { id: 'quote', label: 'Quote card', hint: 'Quote + who said it', dur: 6, make: (s, d, tall) => [
     L(s, d, '“Quote goes here, short and strong.”', { y: 0.45, size: tall ? 0.085 : 0.075, font: 'serifItalic', style: 'clean', maxWidth: 0.78 }, { in: 'rise', out: 'fade', inDur: 0.9 }),
     L(s + 0.8, d - 0.8, '— Name', { y: tall ? 0.62 : 0.65, size: tall ? 0.045 : 0.04, font: 'sans', color: '#f3d9a4', style: 'clean' }, { in: 'fade', out: 'fade', inDur: 0.6 })] },

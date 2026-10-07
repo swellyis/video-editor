@@ -123,7 +123,7 @@ async function hasAudioTrack(blob) {
 
 /**
  * Compute waveform peaks (values 0..255, `rate` per second). Streams the audio through WebCodecs in small decoded
- * chunks, so only the low-resolution peak array is kept — an hour-long sermon never sits in memory as PCM.
+ * chunks, so only the low-resolution peak array is kept — an hour-long recording never sits in memory as PCM.
  */
 export async function computePeaks(blob, rate = 20, duration = 0) {
   try {

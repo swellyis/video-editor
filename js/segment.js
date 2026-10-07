@@ -31,7 +31,7 @@ export async function isSegCached() {
   } catch { return false; }
 }
 
-/** kind: 'landscape' (16:9 sermons, default) | 'square' */
+/** kind: 'landscape' (16:9 wide shots, default) | 'square' */
 export async function loadSegmenter({ kind = 'landscape', onProgress } = {}) {
   if (hooks.createSegmenter) return hooks.createSegmenter({ kind });
   if (_seg && _kind === kind) return _seg;

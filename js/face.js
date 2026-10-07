@@ -39,7 +39,7 @@ async function warm(url) {
 }
 
 /**
- * Load (or reuse) a FaceDetector. mode: 'full' (sermons / distance) or 'short' (close-up).
+ * Load (or reuse) a FaceDetector. mode: 'full' (wide shots / distance) or 'short' (close-up).
  * onProgress({ phase, frac }) optional.
  */
 export async function loadFaceDetector({ mode = 'short', onProgress } = {}) {

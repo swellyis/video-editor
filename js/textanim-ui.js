@@ -1,5 +1,5 @@
 // Text tab: the animation library (looping previews drawn by the SAME drawText the video uses), In / Out / Loop, speed, Remove, Apply to all,
-// and the ready-made sermon text. It is the ONE place to animate text; every change is one undo step.
+// and the ready-made text. It is the ONE place to animate text; every change is one undo step.
 import { newText, cleanTextAnim, layout } from './model.js';
 import { drawText } from './render.js';
 import { ANIMS, KINDS, groupsOf, label, summary, setAnim, removeAnim, applyToAll, TEMPLATES, buildTemplate } from './textanim.js';
@@ -13,7 +13,7 @@ const NOTES = {
 };
 /** The sample layer a card previews: the animation is the only thing that differs between cards. */
 export function sampleLayer(kind, id) {
-  const t = newText(0, SAMPLE_DUR, 'Amazing grace');
+  const t = newText(0, SAMPLE_DUR, 'Make it move');
   Object.assign(t, { x: 0.5, y: 0.5, size: 0.2, style: 'clean', font: 'sans', maxWidth: 0.95, fadeIn: 0, fadeOut: 0 });
   t.anim = cleanTextAnim({ in: kind === 'in' ? id : 'none', out: kind === 'out' ? id : 'none', loop: kind === 'loop' ? id : 'none', inDur: 0.9, outDur: 0.9, loopSpeed: 1.2 });
   return t;
@@ -33,7 +33,7 @@ export function initTextAnimUI(ctx) {
   let kind = 'in', cards = [], raf = 0, shown = new Set(), lastBuilt = '';
   const cur = () => selected('text');
 
-  // ---- sermon text templates
+  // ---- ready-made text templates
   const tplEl = $('taTemplates');
   for (const tp of TEMPLATES) {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'ta-tp'; b.dataset.tpl = tp.id; b.title = tp.hint;

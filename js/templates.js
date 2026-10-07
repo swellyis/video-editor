@@ -1,4 +1,4 @@
-// Starter templates for faith / devotional videos and Shorts.
+// Starter templates for general videos and Shorts (quote card, channel intro, lower third, talk outline).
 // Each template produces background image "clips" (generated on a canvas), text layers with
 // animation presets, optional keyframes and section markers — everything stays editable.
 import { newText } from './model.js';
@@ -65,15 +65,15 @@ const T = (start, dur, text, o = {}) => Object.assign(newText(start, dur, text),
 
 export const TEMPLATES = [
   {
-    id: 'verse', name: 'Scripture verse card', icon: '📖', ratio: '16:9',
-    desc: 'A calm verse reveal with reference — word by word, then the reference slides up.',
+    id: 'verse', name: 'Quote card', icon: '💬', ratio: '16:9',
+    desc: 'A calm quote reveal with its source — word by word, then the source slides up.',
     build: () => ({
-      sections: [{ name: 'Verse', dur: 9, bg: { colors: ['#2b1d12', '#5a3b22', '#1a120b'], rays: true, seed: 11 }, zoom: [1, 1.08] }],
+      sections: [{ name: 'Quote', dur: 9, bg: { colors: ['#2b1d12', '#5a3b22', '#1a120b'], rays: true, seed: 11 }, zoom: [1, 1.08] }],
       texts: [
-        T(0.4, 8.2, 'The Lord is my shepherd; I shall not want.', { y: 0.44, size: 0.085, font: 'serif', style: 'clean', maxWidth: 0.78, anim: { in: 'wordByWord', out: 'fade', inDur: 2.6, outDur: 0.6 } }),
-        T(3.2, 5.4, 'PSALM 23:1', { y: 0.66, size: 0.042, font: 'mono', style: 'clean', color: '#f3d9a4', anim: { in: 'slideUp', out: 'fade', inDur: 0.7, outDur: 0.6 } }),
+        T(0.4, 8.2, 'Small steps every day add up to big change.', { y: 0.44, size: 0.085, font: 'serif', style: 'clean', maxWidth: 0.78, anim: { in: 'wordByWord', out: 'fade', inDur: 2.6, outDur: 0.6 } }),
+        T(3.2, 5.4, '— YOUR NAME', { y: 0.66, size: 0.042, font: 'mono', style: 'clean', color: '#f3d9a4', anim: { in: 'slideUp', out: 'fade', inDur: 0.7, outDur: 0.6 } }),
       ],
-      markers: [{ t: 0, name: 'Verse' }],
+      markers: [{ t: 0, name: 'Quote' }],
     }),
   },
   {
@@ -83,7 +83,7 @@ export const TEMPLATES = [
       sections: [{ name: 'Intro', dur: 5, bg: { colors: ['#0e1a2b', '#1d3557', '#0b0f17'], bokeh: true, seed: 5 }, zoom: [1.12, 1] }],
       texts: [
         T(0.3, 4.4, 'Your Channel Name', { y: 0.46, size: 0.11, font: 'sans', style: 'clean', anim: { in: 'pop', out: 'fade', inDur: 0.6, outDur: 0.5 } }),
-        T(1.1, 3.6, 'Daily devotionals · Encouragement · Prayer', { y: 0.6, size: 0.04, font: 'condensed', style: 'clean', color: '#ffd89a', anim: { in: 'slideUp', out: 'fade', inDur: 0.6, outDur: 0.5 } }),
+        T(1.1, 3.6, 'New videos every week · Tips · Stories', { y: 0.6, size: 0.04, font: 'condensed', style: 'clean', color: '#ffd89a', anim: { in: 'slideUp', out: 'fade', inDur: 0.6, outDur: 0.5 } }),
       ],
       markers: [{ t: 0, name: 'Intro' }],
     }),
@@ -93,11 +93,11 @@ export const TEMPLATES = [
     desc: 'Vertical 9:16 quote for Shorts / Reels with a follow prompt at the end.',
     build: () => ({
       settings: { ratio: '9:16', bg: 'blur' },
-      sections: [{ name: 'Quote', dur: 10, bg: { colors: ['#2a1438', '#6b2f4f', '#1a0f24'], rays: true, rayX: 0.5, seed: 3, cross: 0.06, crossY: 0.2 }, zoom: [1, 1.1] }],
+      sections: [{ name: 'Quote', dur: 10, bg: { colors: ['#2a1438', '#6b2f4f', '#1a0f24'], rays: true, rayX: 0.5, seed: 3 }, zoom: [1, 1.1] }],
       texts: [
-        T(0.3, 9.4, 'Be still, and know that I am God.', { y: 0.42, size: 0.1, font: 'serif', style: 'clean', maxWidth: 0.84, anim: { in: 'wordByWord', out: 'fade', inDur: 2.2, outDur: 0.5 } }),
-        T(2.6, 7.1, 'Psalm 46:10', { y: 0.56, size: 0.05, font: 'serifItalic', style: 'clean', color: '#f7c9d8', anim: { in: 'slideUp', out: 'fade', inDur: 0.6, outDur: 0.5 } }),
-        T(6.2, 3.5, 'Follow for daily encouragement', { y: 0.84, size: 0.045, font: 'sans', style: 'box', bg: '#df3f34', bgOpacity: 0.9, anim: { in: 'pop', out: 'none', inDur: 0.5, outDur: 0.3 } }),
+        T(0.3, 9.4, 'Slow down. Breathe. Begin again.', { y: 0.42, size: 0.1, font: 'serif', style: 'clean', maxWidth: 0.84, anim: { in: 'wordByWord', out: 'fade', inDur: 2.2, outDur: 0.5 } }),
+        T(2.6, 7.1, '— Your Name', { y: 0.56, size: 0.05, font: 'serifItalic', style: 'clean', color: '#f7c9d8', anim: { in: 'slideUp', out: 'fade', inDur: 0.6, outDur: 0.5 } }),
+        T(6.2, 3.5, 'Follow for more', { y: 0.84, size: 0.045, font: 'sans', style: 'box', bg: '#df3f34', bgOpacity: 0.9, anim: { in: 'pop', out: 'none', inDur: 0.5, outDur: 0.3 } }),
       ],
       markers: [],
     }),
@@ -108,15 +108,15 @@ export const TEMPLATES = [
     build: () => ({
       sections: [],
       texts: [
-        T(0, 5, 'Pastor John Smith', { x: 0.3, y: 0.78, size: 0.055, font: 'sans', style: 'box', align: 'left', bg: '#111111', bgOpacity: 0.78, maxWidth: 0.5, anim: { in: 'slideUp', out: 'fade', inDur: 0.5, outDur: 0.4 } }),
-        T(0.25, 4.75, 'Grace Community Church', { x: 0.3, y: 0.865, size: 0.034, font: 'condensed', style: 'box', align: 'left', color: '#111111', bg: '#f0b429', bgOpacity: 0.95, maxWidth: 0.5, anim: { in: 'slideUp', out: 'fade', inDur: 0.5, outDur: 0.4 } }),
+        T(0, 5, 'Alex Morgan', { x: 0.3, y: 0.78, size: 0.055, font: 'sans', style: 'box', align: 'left', bg: '#111111', bgOpacity: 0.78, maxWidth: 0.5, anim: { in: 'slideUp', out: 'fade', inDur: 0.5, outDur: 0.4 } }),
+        T(0.25, 4.75, 'Host · Your Channel', { x: 0.3, y: 0.865, size: 0.034, font: 'condensed', style: 'box', align: 'left', color: '#111111', bg: '#f0b429', bgOpacity: 0.95, maxWidth: 0.5, anim: { in: 'slideUp', out: 'fade', inDur: 0.5, outDur: 0.4 } }),
       ],
       markers: [],
     }),
   },
   {
-    id: 'sermon', name: 'Sermon / devotional outline', icon: '🎙️', ratio: '16:9',
-    desc: 'Title card, three points and a closing prayer — with section markers.',
+    id: 'sermon', name: 'Talk / lesson outline', icon: '🎙️', ratio: '16:9',
+    desc: 'Title card, three points and a closing thought — with section markers.',
     build: () => {
       const bg = (seed, c) => ({ colors: c, rays: seed % 2 === 1, bokeh: seed % 2 === 0, seed });
       const secs = [
@@ -124,20 +124,20 @@ export const TEMPLATES = [
         { name: 'Point 1', dur: 12, bg: bg(22, ['#1b1f2e', '#34406b', '#10131c']), zoom: [1.06, 1] },
         { name: 'Point 2', dur: 12, bg: bg(23, ['#2e1f1b', '#6b4434', '#1c1310']), zoom: [1, 1.06] },
         { name: 'Point 3', dur: 12, bg: bg(24, ['#1b2a2e', '#346166', '#101a1c']), zoom: [1.06, 1] },
-        { name: 'Closing prayer', dur: 10, bg: bg(25, ['#241b2e', '#4f3a6b', '#150f1c']), zoom: [1, 1.08] },
+        { name: 'Closing', dur: 10, bg: bg(25, ['#241b2e', '#4f3a6b', '#150f1c']), zoom: [1, 1.08] },
       ];
       const at = (i) => secs.slice(0, i).reduce((a, b) => a + b.dur, 0);
       const texts = [
-        T(0.3, 9.2, 'Finding Peace in Anxious Times', { y: 0.44, size: 0.09, font: 'serif', anim: { in: 'pop', out: 'fade', inDur: 0.6, outDur: 0.4 } }),
-        T(1.0, 8.5, 'Philippians 4:6–7', { y: 0.6, size: 0.042, font: 'mono', color: '#e6f0c8', anim: { in: 'slideUp', out: 'fade' } }),
+        T(0.3, 9.2, 'Three Ideas Worth Trying', { y: 0.44, size: 0.09, font: 'serif', anim: { in: 'pop', out: 'fade', inDur: 0.6, outDur: 0.4 } }),
+        T(1.0, 8.5, 'Episode 4 · 6 minutes', { y: 0.6, size: 0.042, font: 'mono', color: '#e6f0c8', anim: { in: 'slideUp', out: 'fade' } }),
       ];
-      const pts = ['Pray about everything', 'Give thanks in all things', 'Receive the peace of God'];
+      const pts = ['Start with why', 'Keep it simple', 'Take the next step'];
       pts.forEach((p, i) => {
         const s = at(i + 1);
         texts.push(T(s + 0.3, 11.2, 'Point ' + (i + 1), { y: 0.36, size: 0.045, font: 'condensed', color: '#f0b429', anim: { in: 'slideUp', out: 'fade' } }));
         texts.push(T(s + 0.6, 10.9, p, { y: 0.5, size: 0.08, font: 'sans', anim: { in: 'typewriter', out: 'fade', inDur: 1.2 } }));
       });
-      texts.push(T(at(4) + 0.4, 9.2, 'Let’s pray together', { y: 0.46, size: 0.085, font: 'serifItalic', anim: { in: 'wordByWord', out: 'fade', inDur: 1.4, outDur: 0.8 } }));
+      texts.push(T(at(4) + 0.4, 9.2, 'Thanks for watching', { y: 0.46, size: 0.085, font: 'serifItalic', anim: { in: 'wordByWord', out: 'fade', inDur: 1.4, outDur: 0.8 } }));
       return { sections: secs, texts, markers: secs.map((s, i) => ({ t: at(i), name: s.name })) };
     },
   },

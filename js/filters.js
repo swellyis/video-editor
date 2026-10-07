@@ -9,7 +9,7 @@
 export const GROUPS = ['Natural', 'Cinematic', 'Vivid', 'Retro', 'Mono'];
 const F = (id, label, group, p) => ({ id, label, group, p });
 export const FILTERS = [
-  // ---- Natural / sermon
+  // ---- Natural
   F('warm', 'Warm', 'Natural', { temperature: 30, saturation: 8, brightness: 2 }),
   F('cool', 'Cool', 'Natural', { temperature: -30, saturation: -4 }),
   F('golden', 'Golden hour', 'Natural', { temperature: 42, sepia: 12, saturation: 14, vignette: 18 }),

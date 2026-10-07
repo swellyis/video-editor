@@ -102,7 +102,7 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
   /** Quick checks before the dialog opens: something on the timeline, and its video is on this device. Returns false (with a toast) if not. */
   async function precheck() {
     const p = app.project;
-    if (!p.clips.length) { toast('Add your sermon video to the timeline first, then find Shorts.', 4500); return false; }
+    if (!p.clips.length) { toast('Add your video to the timeline first, then find Shorts.', 4500); return false; }
     const recs = await Promise.all(p.clips.filter(c => c.kind === 'video').map(c => media.get(c.mediaId)));
     if (!recs.length || recs.every(r => !r || !r.blob)) { toast('The video for this project is missing on this device (red clip). Relink it first, then find Shorts.', 6000); return false; }
     return true;
@@ -122,7 +122,7 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
     show(['shResults']);
     $('shCount').textContent = cands.length ? cands.length + ' suggested moment' + (cands.length === 1 ? '' : 's') + ', best first. Score is out of 100 and only a guess.' : '';
     $('shNote').textContent = cands.length
-      ? (env ? '' : 'The voice analysis was skipped or unavailable, so these are ranked by the words and pauses only. ') + 'Heuristics: strong opening, finished sentences, scripture references, questions, voice emphasis, pauses at the ends, 20–60 s. Nudge the start / end with − and ＋.'
+      ? (env ? '' : 'The voice analysis was skipped or unavailable, so these are ranked by the words and pauses only. ') + 'Heuristics: strong opening, finished sentences, references, questions, voice emphasis, pauses at the ends, 20–60 s. Nudge the start / end with − and ＋.'
       : 'No 20–60 second moment with finished sentences was found. The captions may be too short or have no punctuation. You can still cut by hand with Split.';
     renderList(); applyOffset();
     return true;
@@ -136,7 +136,7 @@ export function initShorts({ app, media, db, actions, openDialog, closeDialog, t
     const has = (id) => { const r = media.peek(id); return !!(r && r.blob); };
     try {
       const names = new Set((await db.listProjects()).map(x => x.name));
-      const base = (p.name || 'Sermon').replace(/\s*·\s*Short \d+$/, '').slice(0, 60);
+      const base = (p.name || 'Video').replace(/\s*·\s*Short \d+$/, '').slice(0, 60);
       let k = 0; const made = [], skipped = [], warn = [];
       const now = Date.now();
       for (let i = 0; i < chosen.length; i++) {
