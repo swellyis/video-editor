@@ -66,6 +66,21 @@ export function findSilences(db, { thr, minPause = 1, pad = 0.25, hop = HOP, t0 
   return out;
 }
 
+// ---------- tighten pauses ----------
+export const BREATHS = [0.2, 0.3, 0.5, 0.75, 1];   // seconds of pause left after tightening
+export const MIN_SHORTEN = 0.15;                   // a pause is only tightened when it gets at least this much shorter
+export const MICRO_FADE = 0.02;                    // seconds of fade on each side of a tightened join (no click)
+/**
+ * Pauses to shorten rather than remove: every quiet stretch longer than `breath` + MIN_SHORTEN keeps `breath` seconds (half on each side,
+ * so the speech either side keeps its natural tail and in-breath) and the middle is cut. Returns [{ a, b, from, to }] like findSilences.
+ */
+export function tightenRanges(db, { thr, breath = 0.3, hop = HOP, t0 = 0, minShorten = MIN_SHORTEN } = {}) {
+  const keep = Math.max(0, breath);
+  return findSilences(db, { thr, minPause: Math.max(0.05, keep + minShorten), pad: 0, hop, t0 })
+    .map(r => ({ a: r3(r.from + keep / 2), b: r3(r.to - keep / 2), from: r.from, to: r.to }))
+    .filter(r => r.b - r.a >= Math.max(MIN_REMOVE, minShorten) - 1e-9);
+}
+
 // ---------- cutting ----------
 const SPEED_OF = { clip: (c) => c.speed || 1, overlay: (o) => o.speed || 1, audio: audioSpeed };
 const listOf = (p, type) => (type === 'clip' ? p.clips : type === 'overlay' ? p.overlays || [] : p.audio);
@@ -146,7 +161,7 @@ function warpOthers(project, sp, pl, shiftAfter, skip) {
  * blur regions, markers, overlays and sounds that start inside it) with their sound, and with `ripple` on a main-track clip everything
  * after it follows. Returns { removed, pieces } or null (nothing cut).
  */
-export function cutItem(project, type, id, ranges, { ripple = false, lead = true } = {}) {
+export function cutItem(project, type, id, ranges, { ripple = false, lead = true, fade = 0 } = {}) {
   const sp = spanOf(project, type, id); if (!sp || !cuttable(type, sp.item)) return null;
   const pl = plan(sp, ranges); if (!pl) return null;
   const item = sp.item, list = listOf(project, type), idx = list.indexOf(item);
@@ -166,8 +181,8 @@ export function cutItem(project, type, id, ranges, { ripple = false, lead = true
     }
     p.in = s.a; p.out = s.b;
     if (type !== 'clip') p.start = sp.start + s.cum;
-    if (k > 0) p.fadeIn = 0;
-    if (!last) p.fadeOut = 0;
+    if (k > 0) p.fadeIn = fade; // a micro-fade at each new join when asked (Tighten pauses), otherwise a plain cut
+    if (!last) p.fadeOut = fade;
     p.keyframes = rebaseKeyframes(kf, s.u0, last ? Infinity : s.u0 + s.len);
     if (kb) { p.transform = p.transform || {}; p.transform.kbFrom = f0 + (f1 - f0) * (s.cum / pl.newLen); p.transform.kbTo = f0 + (f1 - f0) * ((s.cum + s.len) / pl.newLen); }
     pieces.push(p);
@@ -191,7 +206,7 @@ export function cutItem(project, type, id, ranges, { ripple = false, lead = true
  * picture, a duplicate). The main-track clip leads; the others are cut in place and sync is kept because the cuts are the same source times.
  * Returns { removed, count, cuts } with removed in timeline seconds of the lead item.
  */
-export function cutSilences(project, sel, ranges, { ripple = false, linked = false } = {}) {
+export function cutSilences(project, sel, ranges, { ripple = false, linked = false, fade = 0 } = {}) {
   const start = spanOf(project, sel.type, sel.id); if (!start) return null;
   const mediaId = start.item.mediaId;
   const fam = [];
@@ -210,7 +225,7 @@ export function cutSilences(project, sel, ranges, { ripple = false, linked = fal
   let removed = 0, cuts = 0;
   for (const f of fam) {
     const isLead = f.type === leadType;
-    const r = cutItem(project, f.type, f.id, ranges, { ripple: ripple && isLead, lead: isLead });
+    const r = cutItem(project, f.type, f.id, ranges, { ripple: ripple && isLead, lead: isLead, fade });
     if (!r) continue;
     cuts += 1; if (isLead) removed += r.removed;
   }

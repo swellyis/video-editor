@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="ve-build" content="veb7d7823eb" />
+  <meta name="ve-build" content="v8547f1294d" />
   <meta name="theme-color" content="#20201e" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#090909" media="(prefers-color-scheme: dark)" />
   <!-- Defense in depth: only this site's own scripts, styles, fonts, workers and wasm; media from blob:/data: URLs. -->
@@ -139,6 +139,7 @@
           </div>
           <div class="button-row">
             <button class="btn secondary small" type="button" data-action="muteSel" id="multiMute">Mute sound</button>
+            <button class="btn secondary small" type="button" data-action="multicam" id="multiMulticam" title="Group 2-4 videos of the same moment into one multi-angle clip, lined up by sound">Multi-angle…</button>
             <button class="btn secondary small" type="button" data-action="beatCut" id="multiBeatCut" title="Re-time or cut the selected clips and photos so the cuts land on the beats of a music track">Cut to beat…</button>
             <button class="btn ghost small" type="button" data-action="deselect" title="Clear the selection (Esc)">Deselect</button>
           </div>
@@ -159,6 +160,14 @@
           </div>
           <section class="section">
             <div class="section-head"><h2 id="clipTitle">Clip</h2><span class="hint mono" id="clipLenLabel">00:00</span></div>
+            <div class="clean-box mc-box" id="mcBox" hidden>
+              <div class="clean-head"><span class="label" id="mcLabel">Multi-angle</span><span class="clean-state" id="mcState" aria-live="polite"></span></div>
+              <div class="segmented mc-angles" id="mcAngles" role="group" aria-label="Angles"></div>
+              <div class="segmented two mc-scope" id="mcScope" role="radiogroup" aria-label="Switch"><button type="button" data-scope="here" class="selected" role="radio" aria-checked="true">From the playhead</button><button type="button" data-scope="all" role="radio" aria-checked="false">Whole piece</button></div>
+              <label class="mc-audio"><span class="label">Sound from</span><select id="mcAudio"></select></label>
+              <p class="hint warn" id="mcSyncWarn" hidden>The sound no longer matches the pictures (pieces were moved or deleted). <button class="linkish" type="button" id="mcResync">Re-sync sound</button></p>
+              <p class="hint" id="mcHint">During playback press 1–4 (or tap an angle) to cut to that angle at the playhead. Every piece is a normal clip: trim, split and add effects as usual.</p>
+            </div>
             <div id="trimBlock">
               <div class="field-row">
                 <label><span class="label">In point (s)</span><input class="field mono" id="clipIn" type="number" min="0" step="0.1" /></label>
@@ -231,6 +240,14 @@
             <div class="clean-box silence-box" id="silBox" hidden>
               <div class="clean-head"><span class="label" id="silLabel">Remove silences</span><span class="clean-state" id="silState" aria-live="polite"></span></div>
               <button class="btn secondary small" type="button" id="silFind">Find silences</button>
+              <div class="sil-tight" id="silTight">
+                <div class="sil-tight-head"><span class="label">Tighten pauses</span><span class="sil-sum" id="silTightSum" aria-live="polite"></span></div>
+                <label class="sil-breath"><span>Leave a pause of</span><select id="silBreath"><option value="0.2">0.2 s</option><option value="0.3">0.3 s (a breath)</option><option value="0.5">0.5 s</option><option value="0.75">0.75 s</option><option value="1">1 s</option></select></label>
+                <div class="button-row"><button class="btn primary small" type="button" id="silTighten" title="Shorten every long pause to the length above (one Undo brings them back)">Tighten pauses</button><button class="btn secondary small" type="button" id="silTightReview" hidden>Review list</button></div>
+                <ol class="sil-list" id="silTightList" hidden></ol>
+                <div class="button-row" id="silTightListRow" hidden><button class="btn primary small" type="button" id="silTightApply">Tighten ticked</button><button class="linkish" type="button" id="silTightClose">Close list</button></div>
+                <p class="hint" id="silTightTip" hidden>Tip: turn on <b>Clean voice</b> first (<button class="linkish" type="button" id="silTightClean">show me</button>) so background noise is not taken for speech.</p>
+              </div>
               <div id="silTune" hidden>
                 <p class="sil-sum" id="silSum" aria-live="polite"></p>
                 <div class="slider-row"><label for="silThr">Quiet level</label><input type="range" id="silThr" min="-60" max="-20" step="1" /><output id="silThrOut"></output></div>
@@ -1111,6 +1128,20 @@
   <div class="mt-preview" id="bcPreview" aria-live="polite"></div>
   <p class="hint">The music and everything on the other lanes stay where they are. One Undo puts the clips back.</p>
   <div class="button-row" style="margin-top:12px"><button class="btn primary" id="bcApply" type="button">Apply</button><button class="btn ghost" id="bcCancel" type="button">Cancel</button></div>
+</dialog>
+<dialog class="sheet" id="mcDialog" aria-labelledby="mcTitle">
+  <div class="sheet-head"><h2 id="mcTitle">Multi-angle clip</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="mcClose">✕</button></div>
+  <p class="hint">Groups 2 to 4 videos of the same moment (several cameras or phones) into one clip on the main track. You pick which angle is on screen at any moment; the sound comes from the one you choose.</p>
+  <ol class="mc-list" id="mcList"></ol>
+  <label class="check"><input type="checkbox" id="mcSyncChk" checked /> <span>Line them up by sound (Sync)</span></label>
+  <p class="hint" id="mcSyncNote">They need some of the same sound (voices, a clap). Untick if you already lined them up on the timeline.</p>
+  <div class="field-row">
+    <label><span class="label">Sound from</span><select id="mcAudioPick"></select></label>
+    <label><span class="label">Name</span><input class="field" id="mcName" maxlength="80" /></label>
+  </div>
+  <div class="progress" id="mcProg" aria-live="polite" hidden><div class="progress-track"><div class="progress-bar" id="mcBar"></div></div><div class="progress-copy"><span id="mcProgText">Listening…</span><button class="linkish" id="mcCancelScan" type="button">Cancel</button></div></div>
+  <div class="mt-preview" id="mcPreview" aria-live="polite"></div>
+  <div class="button-row" style="margin-top:12px"><button class="btn primary" id="mcCreate" type="button">Create multi-angle clip</button><button class="btn ghost" id="mcCancel" type="button">Cancel</button></div>
 </dialog>
 <dialog class="sheet" id="shortsDialog" aria-labelledby="shTitle">
   <div class="sheet-head"><h2 id="shTitle">Auto Shorts</h2><button class="icon-btn" data-close type="button" aria-label="Close" id="shClose">✕</button></div>

@@ -1,11 +1,12 @@
 // Remove silences: the one control (a block under Change voice) for the selected sound, plus the marks it puts on the timeline.
 // Detection is in silence.js (settings -> ranges, instantly from the stored loudness curve) and silence-scan.js (reads the sound in pieces);
 // the cut is silence.js cutSilences(), applied as ONE project change so it is one undo step.
-import { soundTargets } from './model.js';
-import { DEFAULTS, MIN_REMOVE, normSettings, autoThreshold, findSilences, spanOf, srcToTimeline, cuttable, curvedClip, cutSilences, alignedWith } from './silence.js';
+import { soundTargets, cleanLevelOf } from './model.js';
+import { DEFAULTS, MIN_REMOVE, normSettings, autoThreshold, findSilences, spanOf, srcToTimeline, cuttable, curvedClip, cutSilences, alignedWith, tightenRanges, BREATHS, MICRO_FADE } from './silence.js';
 import { etaText } from './clean-ui.js';
 
-const LS = 've.silence';
+const LS = 've.silence', LS_BREATH = 've.silence.breath';
+const fmtT = (t) => Math.floor(t / 60) + ':' + (t % 60).toFixed(1).padStart(4, '0');
 const fmtS = (s) => (s >= 60 ? Math.floor(s / 60) + ' min ' + Math.round(s % 60) + ' s' : (Math.round(s * 10) / 10).toFixed(1) + ' s');
 const key = (r) => Math.round(r.a * 100);
 
@@ -17,6 +18,10 @@ export function initSilenceUI(ctx) {
   const cache = new Map(); // mediaId -> { srcId, label, from, to, db, auto, dismissed:Set, review:-1 }
   let job = null, err = null, lastId = null, memo = null, preview = null;
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(set)); } catch { /* private mode */ } };
+  // Tighten pauses: long pauses shrink to `breath` seconds instead of going away
+  let breath = 0.3; try { const b = Number(localStorage.getItem(LS_BREATH)); if (BREATHS.includes(b)) breath = b; } catch { /* default */ }
+  let tightOpen = false, afterScan = null, tightCur = -1, tmemo = null;
+  const tightOff = new Set(); // keys of pauses unticked in the review list
 
   /** The sound the item plays: the changed / cleaned copy when it is stored here, else the original. */
   function sourceOf(item) {
@@ -45,7 +50,18 @@ export function initSilenceUI(ctx) {
   }
   function visible(cur) {
     const a = analysisFor(cur.item); if (!a) return null;
-    const all = rangesAll(a, spanOf(app.project, cur.type, cur.item.id)?.sp || 1).filter(r => !a.dismissed.has(key(r)));
+    return onFamily(cur, rangesAll(a, spanOf(app.project, cur.type, cur.item.id)?.sp || 1).filter(r => !a.dismissed.has(key(r))));
+  }
+  /** The pauses Tighten would shorten (all of them, ticked or not), on the family of the selected item. */
+  function tightVisible(cur) {
+    const a = analysisFor(cur.item); if (!a) return null;
+    const speed = spanOf(app.project, cur.type, cur.item.id)?.sp || 1;
+    if (a.auto == null) a.auto = autoThreshold(a.db);
+    const thr = set.auto ? a.auto.thr : set.thr, k = [thr, breath, speed].join('|');
+    if (!tmemo || tmemo.k !== k || tmemo.db !== a.db) tmemo = { k, db: a.db, r: tightenRanges(a.db, { thr, breath: breath * speed, t0: a.from }) };
+    return onFamily(cur, tmemo.r).map(e => ({ ...e, pause: e.len + breath }));
+  }
+  function onFamily(cur, all) {
     const out = [], by = new Map();
     for (const it of family(cur.type, cur.item)) {
       const sp = spanOf(app.project, cur.type, it.id); if (!sp) continue;
@@ -66,6 +82,7 @@ export function initSilenceUI(ctx) {
   app.silence = {
     marks() {
       const cur = current(); if (!cur || !cuttable(cur.type, cur.item)) return [];
+      if (tightOpen) { const tv = tightVisible(cur); if (!tv) return []; const out = []; tv.forEach((e, i) => { if (!tightOff.has(e.key)) for (const it of e.items) out.push({ type: it.type, id: it.id, t0: it.t0, t1: it.t1, cur: tightCur === i }); }); return out; }
       const v = visible(cur); if (!v) return [];
       const a = analysisFor(cur.item), out = [];
       v.forEach((e, i) => { for (const it of e.items) out.push({ type: it.type, id: it.id, t0: it.t0, t1: it.t1, cur: a.review === i }); });
@@ -95,7 +112,7 @@ export function initSilenceUI(ctx) {
     if (cur && curvedClip(cur.type, cur.item) && cur.item.mediaId && cur.item.hasAudio !== false) { // explain instead of hiding
       if (voiceBox && voiceBox.nextElementSibling !== box) voiceBox.after(box);
       box.hidden = false; if (lastId) { lastId = null; stopPreview(); }
-      $('silFind').hidden = true; $('silTune').hidden = true; $('silProg').classList.remove('show'); $('silState').textContent = '';
+      $('silFind').hidden = true; $('silTune').hidden = true; $('silTight').hidden = true; $('silProg').classList.remove('show'); $('silState').textContent = '';
       const h = $('silHint'); h.hidden = false; h.classList.remove('warn');
       h.textContent = 'Remove silences works on clips that play forwards at a steady speed. Turn off Reverse and the speed curve first (you can turn them back on after).';
       return;
@@ -104,7 +121,7 @@ export function initSilenceUI(ctx) {
     const { item, type } = cur;
     if (voiceBox && voiceBox.nextElementSibling !== box) voiceBox.after(box);
     box.hidden = false;
-    if (lastId !== item.id) { lastId = item.id; err = null; }
+    if (lastId !== item.id) { lastId = item.id; err = null; tightOpen = false; tightOff.clear(); tightCur = -1; afterScan = null; }
     const here = !!job && job.mediaId === item.mediaId;
     const a = here ? null : analysisFor(item), v = a ? visible(cur) : null;
     $('silThr').value = set.thr; $('silMin').value = set.minPause; $('silPad').value = set.pad; $('silAuto').checked = set.auto;
@@ -144,8 +161,27 @@ export function initSilenceUI(ctx) {
       hint = 'Finds long pauses in this sound, on this device (nothing is uploaded). It uses ' + sourceOf(item).label + ' and nothing is cut until you say so.';
     }
     const h = $('silHint'); h.textContent = hint; h.hidden = !hint; h.classList.toggle('warn', warn);
+    renderTight(cur, a, here);
     if (here) renderProgress();
     void type;
+  }
+  function renderTight(cur, a, here) {
+    const tb = $('silTight'); if (!tb) return;
+    tb.hidden = here || (!!err && !a);
+    $('silBreath').value = String(breath);
+    const tv = a ? tightVisible(cur) : null, on = tv ? tv.filter(e => !tightOff.has(e.key)) : [];
+    const saved = on.reduce((s, e) => s + e.len, 0);
+    $('silTightSum').textContent = !tv ? '' : tv.length ? `${tv.length} long ${tv.length === 1 ? 'pause' : 'pauses'} → ${breath} s · ${fmtS(saved)} shorter` : 'No pause longer than ' + (breath + 0.15).toFixed(2).replace(/0$/, '') + ' s';
+    $('silTighten').disabled = !!tv && !tv.length;
+    $('silTighten').textContent = !tv ? 'Find and tighten pauses' : 'Tighten pauses';
+    $('silTightReview').hidden = !tv || !tv.length || tightOpen;
+    const list = $('silTightList'), show = tightOpen && !!tv && tv.length > 0;
+    list.hidden = !show; $('silTightListRow').hidden = !show;
+    if (show) {
+      list.innerHTML = tv.map((e, i) => `<li data-i="${i}" class="${i === tightCur ? 'cur' : ''}"><label><input type="checkbox" data-k="${e.key}" ${tightOff.has(e.key) ? '' : 'checked'} /> <span class="t">${fmtT(e.items[0].t0)}</span> <span>${fmtS(e.pause)} → ${breath} s</span></label><button class="btn ghost small" type="button" data-play="${i}" aria-label="Play pause ${i + 1}">▶</button></li>`).join('');
+      $('silTightApply').disabled = !on.length; $('silTightApply').textContent = on.length ? `Tighten ${on.length} ticked` : 'Nothing ticked';
+    }
+    $('silTightTip').hidden = cleanLevelOf(cur.item) !== 'off' || !$('cleanBox') || $('cleanBox').hidden;
   }
   function renderProgress() {
     if (!job) return;
@@ -173,14 +209,24 @@ export function initSilenceUI(ctx) {
     } finally {
       try { wake && wake.release(); } catch { /* ignore */ }
       job = null; render(); redraw();
+      if (afterScan === 'tighten') { afterScan = null; const c2 = current(); if (c2 && analysisFor(c2.item)) tighten(c2, false); }
     }
   }
+  /** Tighten every (ticked) long pause of the selected sound. */
+  function tighten(cur, onlyTicked) {
+    const tv = tightVisible(cur); if (!tv) { afterScan = 'tighten'; return void scan(cur); }
+    const list = onlyTicked ? tv.filter(e => !tightOff.has(e.key)) : tv;
+    if (!list.length) return toast('No pause long enough to tighten at ' + breath + ' s.');
+    tightOpen = false; tightCur = -1;
+    doCut(cur, list, 'Tighten pauses', (r) => `Tightened ${list.length} ${list.length === 1 ? 'pause' : 'pauses'} to ${breath} s (${fmtS(r.removed)} shorter).`, { fade: MICRO_FADE });
+    tightOff.clear(); render(); redraw();
+  }
 
-  function doCut(cur, ranges, label, doneMsg) {
+  function doCut(cur, ranges, label, doneMsg, { fade = 0 } = {}) {
     stopPreview();
     const sel = { type: cur.type, id: cur.item.id };
     const linked = !$('silLinkedRow').hidden && $('silLinked').checked;
-    const r = cutSilences(app.project, sel, ranges.map(e => ({ a: e.a, b: e.b })), { ripple: !!app.rippleEnabled, linked });
+    const r = cutSilences(app.project, sel, ranges.map(e => ({ a: e.a, b: e.b })), { ripple: !!app.rippleEnabled, linked, fade });
     if (!r) return toast('Nothing to cut here.');
     commit(label);
     player.invalidate();
@@ -216,6 +262,11 @@ export function initSilenceUI(ctx) {
     const a = analysisFor(cur.item), v = a ? visible(cur) : null;
     switch (b.id) {
       case 'silFind': return void scan(cur);
+      case 'silTighten': return void tighten(cur, false);
+      case 'silTightReview': tightOpen = true; tightCur = -1; render(); redraw(); return;
+      case 'silTightClose': tightOpen = false; tightCur = -1; render(); redraw(); return;
+      case 'silTightApply': return void tighten(cur, true);
+      case 'silTightClean': { const cb = $('cleanBox'); if (cb) { cb.scrollIntoView({ block: 'center', behavior: 'smooth' }); cb.classList.add('flash'); setTimeout(() => cb.classList.remove('flash'), 1200); } return; }
       case 'silCancel': if (job) job.ctl.abort(); return;
       case 'silClear': stopPreview(); cache.delete(cur.item.mediaId); render(); redraw(); return;
       case 'silRescan': stopPreview(); cache.delete(cur.item.mediaId); render(); redraw(); return void scan(cur);
@@ -227,7 +278,13 @@ export function initSilenceUI(ctx) {
       case 'silKeep': if (v && a && v[a.review]) { a.dismissed.add(v[a.review].key); const i = a.review; render(); redraw(); const v2 = visible(cur); if (v2 && v2.length) goto(Math.min(i, v2.length - 1)); else { a.review = -1; render(); redraw(); } } return;
       case 'silDelete': if (v && a && v[a.review]) { const e1 = v[a.review], i = a.review; doCut(cur, [e1], 'Delete silence', (r) => `Removed a ${fmtS(r.removed)} silence.`); const v2 = visible(cur); if (v2 && v2.length) goto(Math.min(i, v2.length - 1), false); else { a.review = -1; render(); redraw(); } } return;
       default:
+        if (b.dataset.play != null) { const tv = tightVisible(cur), e1 = tv && tv[+b.dataset.play]; if (e1) { tightCur = +b.dataset.play; render(); redraw(); preview1(e1); } }
     }
+  });
+  box.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.id === 'silBreath') { const v = Number(t.value); if (BREATHS.includes(v)) { breath = v; try { localStorage.setItem(LS_BREATH, String(v)); } catch { /* private mode */ } } tightOff.clear(); render(); redraw(); return; }
+    if (t.dataset && t.dataset.k != null) { const k = Number(t.dataset.k); if (t.checked) tightOff.delete(k); else tightOff.add(k); render(); redraw(); }
   });
   let raf = 0;
   const slide = () => {

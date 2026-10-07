@@ -940,3 +940,31 @@ body.ws #multiPanel{padding:16px}
 #beatCutDialog .segmented{margin-top:4px}
 #beatCutDialog #bcPreview{margin-top:10px}
 #beatBox #beatCutOpen{margin-top:6px}
+/* Tighten pauses (inside Remove silences) */
+.sil-tight{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line)}
+.sil-tight-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.sil-tight .sil-sum{margin:0;font-size:12px}
+.sil-breath{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:12px}
+.sil-breath span{flex:0 0 auto;white-space:nowrap}
+.sil-breath select{flex:1 1 auto;min-width:0;width:auto;max-width:100%}
+.sil-list{list-style:none;margin:6px 0;padding:0;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.sil-list li{display:flex;align-items:center;gap:8px;padding:4px 8px;font-size:12px;border-bottom:1px solid var(--line)}
+.sil-list li:last-child{border-bottom:0}
+.sil-list li.cur{background:var(--surface-2)}
+.sil-list label{display:flex;align-items:center;gap:6px;flex:1;min-width:0;cursor:pointer}
+.sil-list .t{font-family:var(--mono,monospace);opacity:.8}
+.sil-list button{min-width:32px;min-height:28px}
+.clean-box.flash{box-shadow:0 0 0 2px var(--accent);transition:box-shadow .3s}
+/* Multi-angle */
+.mc-box{margin-bottom:10px}
+.mc-angles{grid-template-columns:repeat(var(--n,2),1fr);margin-top:6px}
+.mc-angles button{min-height:40px;line-height:1.15;padding:2px 4px}
+.mc-angles button b{display:block;font-size:13px}
+.mc-angles button small{display:block;font-weight:500;opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mc-scope{margin-top:6px}
+.segmented.two{grid-template-columns:repeat(2,1fr)}
+.mc-audio{display:flex;align-items:center;gap:8px;margin-top:8px}
+.mc-audio select{flex:1;min-width:0}
+.mc-list{margin:8px 0;padding-left:22px;font-size:13px}
+.mc-list li{margin:3px 0}
+.mc-list small{opacity:.7}

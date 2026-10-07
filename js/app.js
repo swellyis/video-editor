@@ -30,6 +30,7 @@ import { initDesigner } from './designer-ui.js';
 import { initShorts } from './shorts-ui.js';
 import { initMatch } from './match-ui.js';
 import { initBeatCut } from './beatcut-ui.js';
+import { initMulticam } from './multicam-ui.js';
 import { FILTERS, GROUPS as FILTER_GROUPS } from './filters.js';
 import { Timeline } from './timeline.js';
 import * as G from './group.js';
@@ -576,6 +577,7 @@ function fillInspector() {
   if (silenceUI) silenceUI.render();
   if (syncUI) syncUI.render();
   if (beatUI) beatUI.render();
+  if (app.multicam) app.multicam.render();
   speedUI.render();
   // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
   // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
@@ -968,6 +970,7 @@ const actions = {
   volumeUp(_b, ev) { stepSelectedVolume(1, ev); },
   match() { app.match.open(); },
   beatCut() { app.beatCut.open(); },
+  multicam() { app.multicam.open(); },
   moveLeft() { const c = selected('clip'); if (!c) return; const i = app.project.clips.indexOf(c); if (i > 0) { moveClip(app.project, i, i - 1); app.commit('Move clip'); } },
   moveRight() { const c = selected('clip'); if (!c) return; const i = app.project.clips.indexOf(c); if (i < app.project.clips.length - 1) { moveClip(app.project, i, i + 1); app.commit('Move clip'); } },
   resetTransform() { const c = selected('clip'); if (!c) return; c.transform = defaultTransform(); c.fit = 'inherit'; app.commit('Reset frame'); },
@@ -1510,6 +1513,7 @@ document.addEventListener('keydown', (e) => {
     case 'r': case 'R': handled(); if (!e.repeat) voice.keyR(); break;
     case '+': case '=': timeline.zoomBy(1.4); break;
     case '-': case '_': timeline.zoomBy(1 / 1.4); break;
+    case '1': case '2': case '3': case '4': if (!e.repeat && app.multicam && app.multicam.key(+k - 1)) handled(); break;
     case '0': timeline.autoFit = true; timeline.fit(); app.onZoom(timeline.pps); break;
     case '?': openDialog('helpDialog'); break;
     case 'Escape': if (voice.state === 'countdown') voice.cancelCountdown(); else if (document.getElementById('ctxMenu')) closeCtx(); else app.select(null); break;
@@ -2608,6 +2612,7 @@ const shorts = initShorts({ app, media, db, actions, openDialog, closeDialog, to
 app.shorts = shorts; actions.shorts = () => shorts.open();
 app.match = initMatch({ app, media, toast, openDialog, closeDialog });
 app.beatCut = initBeatCut({ app, media, toast, openDialog, closeDialog });
+app.multicam = initMulticam({ app, media, player, toast, openDialog, closeDialog, selected });
 let inboxBusy = null;
 /** Take what the service worker stored from the OS share sheet (files, or a link) and put it into the project. */
 function consumeInbox() {
