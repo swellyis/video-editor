@@ -35,8 +35,9 @@ export function applyMask(img, iw, ih, m, S, filterOK = true, maxW = 1920) {
   const x = S.mx; x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'source-over'; x.filter = 'none'; x.globalAlpha = 1; x.clearRect(0, 0, cw, ch);
   const op = Math.max(0, Math.min(1, m.opacity ?? 1)), fe = Math.max(0, m.feather || 0) * Math.min(cw, ch);
   if (filterOK && fe > 0.5) x.filter = `blur(${(fe / 2).toFixed(1)}px)`;
-  if (!m.invert) { if (op < 1) { x.filter = 'none'; x.fillStyle = `rgba(0,0,0,${1 - op})`; x.fillRect(0, 0, cw, ch); if (filterOK && fe > 0.5) x.filter = `blur(${(fe / 2).toFixed(1)}px)`; } x.fillStyle = '#000'; traceMask(x, m, cw, ch); x.fill(); }
-  else { const f = x.filter; x.filter = 'none'; x.fillStyle = '#000'; x.fillRect(0, 0, cw, ch); x.filter = f; x.globalCompositeOperation = 'destination-out'; x.globalAlpha = op; traceMask(x, m, cw, ch); x.fill(); }
+  // opacity = how see-through the part you keep is (outside the mask stays hidden)
+  if (!m.invert) { x.fillStyle = `rgba(0,0,0,${op})`; traceMask(x, m, cw, ch); x.fill(); }
+  else { const f = x.filter; x.filter = 'none'; x.fillStyle = `rgba(0,0,0,${op})`; x.fillRect(0, 0, cw, ch); x.filter = f; x.globalCompositeOperation = 'destination-out'; x.fillStyle = '#000'; traceMask(x, m, cw, ch); x.fill(); }
   x.restore();
   const p = S.px; p.save(); p.globalCompositeOperation = 'source-over'; p.clearRect(0, 0, cw, ch); p.drawImage(img, 0, 0, cw, ch);
   p.globalCompositeOperation = 'destination-in'; p.drawImage(S.msk, 0, 0); p.restore();
