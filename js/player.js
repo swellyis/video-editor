@@ -88,10 +88,12 @@ export class Player {
   }
   _getVideo(clip) {
     let v = this.videos.get(clip.id);
-    if (v) return v;
-    const url = this.media.url(clip.mediaId);
+    // the preview plays the proxy when there is one (export never comes through here); switch elements when that changes
+    const url = this.media.previewUrl ? this.media.previewUrl(clip.mediaId) : this.media.url(clip.mediaId);
+    if (v && v.url === url && v.mediaId === clip.mediaId) return v;
+    if (v) this._dropVideo(clip.id);
     if (!url) return null;
-    v = { el: this._makeEl('video', url), mediaId: clip.mediaId, gain: null };
+    v = { el: this._makeEl('video', url), mediaId: clip.mediaId, gain: null, url };
     this._wire(v);
     this.videos.set(clip.id, v);
     return v;

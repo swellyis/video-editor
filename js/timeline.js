@@ -274,9 +274,10 @@ export class Timeline {
       else if (c.kind === 'video' && !c.hasAudio) badges.push('noaudio');
       if (c.transition.type !== 'cut' && (it.index > 0 || !isOverlap(c.transition.type))) badges.push(isOverlap(c.transition.type) ? 'xfade' : '◐');
       if (c.color.preset !== 'none') badges.push('◑');
+      if (c.kind === 'video' && this.app.media.proxyInUse && this.app.media.proxyInUse(c.mediaId)) badges.push('proxy');
       const bkey = badges.join(' ');
       const bEl = n.querySelector('.badges');
-      if (bEl._key !== bkey) { bEl._key = bkey; bEl.replaceChildren(...badges.flatMap((b, i) => [i ? ' ' : '', b === 'xfade' ? icon('crossfade', 'ico badge-ico') : b === 'muted' ? muteBadge('Muted') : b === 'noaudio' ? muteBadge('No audio in this clip', 'dim') : b])); }
+      if (bEl._key !== bkey) { bEl._key = bkey; bEl.replaceChildren(...badges.flatMap((b, i) => [i ? ' ' : '', b === 'xfade' ? icon('crossfade', 'ico badge-ico') : b === 'muted' ? muteBadge('Muted') : b === 'noaudio' ? muteBadge('No audio in this clip', 'dim') : b === 'proxy' ? el('span', { class: 'proxy-badge', title: 'Playing a proxy here; the export uses the original file', text: 'P' }) : b])); }
       const xf = n.querySelector('.xfade');
       xf.style.width = (it.xIn * this.pps) + 'px'; xf.style.display = it.xIn > 0 ? 'block' : 'none';
       this.renderStrip(n.querySelector('.strip'), c, rec, w);

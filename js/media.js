@@ -320,7 +320,23 @@ export function sanitizeMediaMeta(m) {
 export const isMediaDataURL = (u) => typeof u === 'string' && /^data:(video|audio|image)\/[\w.+-]+;base64,/i.test(u);
 
 export class MediaLibrary {
-  constructor() { this.recs = new Map(); this.urls = new Map(); this.images = new Map(); this.gifs = new Map(); this.listeners = new Set(); this.pending = new Set(); }
+  constructor() { this.recs = new Map(); this.urls = new Map(); this.images = new Map(); this.gifs = new Map(); this.listeners = new Set(); this.pending = new Set(); this.proxies = new Map(); this.proxyUrls = new Map(); this.useProxies = true; }
+  /** Proxy editing (proxy.js / proxy-ui.js): the small copy the PREVIEW plays. Export never asks for it (it reads rec.blob / url()). */
+  setProxy(id, blob) {
+    const u = this.proxyUrls.get(id); if (u) URL.revokeObjectURL(u);
+    this.proxyUrls.delete(id);
+    if (blob) this.proxies.set(id, blob); else this.proxies.delete(id);
+  }
+  /** Is the preview playing a proxy for this media right now? */
+  proxyInUse(id) { return this.useProxies && this.proxies.has(id); }
+  /** Object URL for the preview: the proxy when proxies are on and one is ready, else the original. */
+  previewUrl(id) {
+    if (this.useProxies && this.proxies.has(id)) {
+      if (!this.proxyUrls.has(id)) this.proxyUrls.set(id, URL.createObjectURL(this.proxies.get(id)));
+      return this.proxyUrls.get(id);
+    }
+    return this.url(id);
+  }
   onChange(fn) { this.listeners.add(fn); }
   _emit(id) { this.listeners.forEach(f => f(id)); }
 
@@ -471,12 +487,14 @@ export class MediaLibrary {
     const u = this.urls.get(id); if (u) URL.revokeObjectURL(u);
     const im = this.images.get(id); if (im && !(im instanceof Promise) && im.img) im.img.src = '';
     this.urls.delete(id); this.images.delete(id); this.recs.delete(id);
+    const pu = this.proxyUrls.get(id); if (pu) URL.revokeObjectURL(pu);
+    this.proxyUrls.delete(id); this.proxies.delete(id);
     const g = this.gifs.get(id); if (g && !(g instanceof Promise)) closeGif(g);
     this.gifs.delete(id);
   }
   /** Keep only the given media ids in memory (called when switching, creating or deleting projects). */
   retain(keepIds) {
-    const keep = new Set(keepIds), ids = new Set([...this.recs.keys(), ...this.urls.keys(), ...this.images.keys(), ...this.gifs.keys()]);
+    const keep = new Set(keepIds), ids = new Set([...this.recs.keys(), ...this.urls.keys(), ...this.images.keys(), ...this.gifs.keys(), ...this.proxies.keys()]);
     let n = 0;
     for (const id of ids) if (!keep.has(id)) { this.forget(id); n++; }
     return n;

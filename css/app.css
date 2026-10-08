@@ -988,3 +988,11 @@ body.ws #multiPanel{padding:16px}
 .sh-q-res{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
 .sh-q[data-state="done"] .sh-q-state{color:#1f8a4c}
 .sh-q[data-state="failed"] .sh-q-state,.sh-q[data-state="skipped"] .sh-q-state{color:var(--accent)}
+/* proxy editing (round 5) */
+.proxy-badge{display:inline-block;font:700 9px/13px var(--mono,monospace);padding:0 3px;border-radius:3px;background:#2d7ff9;color:#fff;text-shadow:none;vertical-align:1px}
+.px-list{list-style:none;margin:6px 0 0;padding:0;font-size:12px}
+.px-list li{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px solid var(--line);min-width:0}
+.px-list li:last-child{border-bottom:0}
+.px-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.px-st{color:var(--muted);text-align:right}
+.proxy-box .button-row{margin:6px 0}

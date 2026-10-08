@@ -5,6 +5,7 @@ import { shareOrDownload } from './media-link.js';
 import { BUILD } from './build.js';
 import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar, perf, startLongTaskMonitor } from './util.js';
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
+import { initProxies } from './proxy-ui.js';
 import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, sourceTime, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
@@ -299,6 +300,7 @@ function renderAll() {
   fillInspector();
   renderLists();
   if (wsLayout) { wsLayout.syncProps(); wsLayout.refreshBin(); }
+  if (app.proxies) app.proxies.sync();
   updateSummary();
   $('undoBtn').disabled = !app.history.canUndo;
   $('redoBtn').disabled = !app.history.canRedo;
@@ -578,6 +580,7 @@ function fillInspector() {
   if (syncUI) syncUI.render();
   if (beatUI) beatUI.render();
   if (app.multicam) app.multicam.render();
+  if (app.proxies) app.proxies.render();
   speedUI.render();
   // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
   // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
@@ -2651,6 +2654,7 @@ app.shorts = shorts; actions.shorts = () => shorts.open();
 app.match = initMatch({ app, media, toast, openDialog, closeDialog });
 app.beatCut = initBeatCut({ app, media, toast, openDialog, closeDialog });
 app.multicam = initMulticam({ app, media, player, toast, openDialog, closeDialog, selected });
+app.proxies = initProxies({ app, media, player, toast, selected });
 let inboxBusy = null;
 /** Take what the service worker stored from the OS share sheet (files, or a link) and put it into the project. */
 function consumeInbox() {

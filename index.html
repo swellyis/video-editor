@@ -168,6 +168,15 @@
               <p class="hint warn" id="mcSyncWarn" hidden>The sound no longer matches the pictures (pieces were moved or deleted). <button class="linkish" type="button" id="mcResync">Re-sync sound</button></p>
               <p class="hint" id="mcHint">During playback press 1–4 (or tap an angle) to cut to that angle at the playhead. Every piece is a normal clip: trim, split and add effects as usual.</p>
             </div>
+            <div class="clean-box proxy-box" id="proxyBox" hidden>
+              <div class="clean-head"><span class="label">Proxy (faster editing)</span><span class="clean-state" id="pxState" aria-live="polite"></span></div>
+              <div class="progress show" id="pxProg" hidden><div class="progress-track"><div class="progress-bar" id="pxBar"></div></div><div class="progress-copy"><span id="pxText">Making proxy…</span></div></div>
+              <div class="button-row"><button class="btn secondary small" type="button" id="pxMake">Make proxy</button><button class="btn ghost small" type="button" id="pxCancel" hidden>Cancel</button><button class="btn ghost small" type="button" id="pxDelete" hidden>Delete proxy</button></div>
+              <label class="check"><input type="checkbox" id="pxUse" checked /> Edit with proxies (all files)</label>
+              <label class="check"><input type="checkbox" id="pxAuto" checked /> Make proxies by themselves for 4K and long videos</label>
+              <details class="more px-files"><summary>Files in this project (<span id="pxCount">0</span>)</summary><ul class="px-list" id="pxList"></ul></details>
+              <p class="hint">The preview plays a small 540p copy that seeks fast. <b>Export always uses the original file.</b></p>
+            </div>
             <div id="trimBlock">
               <div class="field-row">
                 <label><span class="label">In point (s)</span><input class="field mono" id="clipIn" type="number" min="0" step="0.1" /></label>

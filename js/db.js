@@ -50,7 +50,7 @@ export const db = {
     if (rec) { const mx = await tx('kv', 'readonly', s => reqP(s.get(MX + id))).catch(() => null); if (mx) Object.assign(rec, mx); }
     return rec;
   },
-  deleteMedia: async (id) => { await tx('media', 'readwrite', s => { s.delete(id); }); await tx('kv', 'readwrite', s => { s.delete(MX + id); }).catch(() => { }); },
+  deleteMedia: async (id) => { await tx('media', 'readwrite', s => { s.delete(id); }); await tx('kv', 'readwrite', s => { s.delete(MX + id); s.delete('px:' + id); }).catch(() => { }); },
   async mediaKeys() { return tx('media', 'readonly', s => reqP(s.getAllKeys())); },
   /**
    * Add small metadata to a stored media record. It is written to its own tiny kv entry: rewriting the media record itself
@@ -68,6 +68,7 @@ export const db = {
   inboxDelete: (ids) => tx('inbox', 'readwrite', s => { for (const id of ids) s.delete(id); }),
   kvGet: (k) => tx('kv', 'readonly', s => reqP(s.get(k))),
   kvSet: (k, v) => tx('kv', 'readwrite', s => { s.put(v, k); }),
+  kvDel: (k) => tx('kv', 'readwrite', s => { s.delete(k); }),
   /**
    * Delete media blobs that no saved project references (keepIds: extra ids to keep, e.g. undo history).
    * Other open tabs of the app are asked which media they still use (unsaved imports, their undo history) and only
