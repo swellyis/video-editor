@@ -996,3 +996,11 @@ body.ws #multiPanel{padding:16px}
 .px-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .px-st{color:var(--muted);text-align:right}
 .proxy-box .button-row{margin:6px 0}
+/* grouped items: one outline around the members; its ends trim the whole group */
+.tl-grp{position:absolute;box-sizing:border-box;border:2px dashed rgba(255,212,0,.75);border-radius:7px;pointer-events:none;z-index:7}
+.tl-grp.sel{border-style:solid;border-color:#ffd400;box-shadow:0 0 0 1px rgba(0,0,0,.6)}
+.tl-grp-name{position:absolute;left:6px;top:-2px;transform:translateY(-100%);font-size:10px;line-height:12px;padding:0 4px;border-radius:3px 3px 0 0;background:#ffd400;color:#111;font-weight:600;white-space:nowrap;pointer-events:none}
+.tl-grp-h{position:absolute;top:-2px;bottom:-2px;width:12px;cursor:ew-resize;pointer-events:auto;touch-action:none}
+.tl-grp-h.l{left:-8px;border-left:4px solid #ffd400;border-radius:4px 0 0 4px}
+.tl-grp-h.r{right:-8px;border-right:4px solid #ffd400;border-radius:0 4px 4px 0}
+.mask-block{margin-top:12px}

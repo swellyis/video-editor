@@ -72,7 +72,12 @@ export function duplicateOne(project, s, ripple) {
 }
 export function duplicateMany(project, list, ripple) {
   const out = [];
-  for (const s of clean(project, list)) { const n = duplicateOne(project, s, ripple); if (n) out.push(n); }
+  const byGroup = new Map();
+  for (const s of clean(project, list)) {
+    const n = duplicateOne(project, s, ripple); if (!n) continue; out.push(n);
+    const g = groupOf(project, s); if (g) { if (!byGroup.has(g.id)) byGroup.set(g.id, []); byGroup.get(g.id).push(n); }
+  }
+  for (const l of byGroup.values()) if (l.length > 1) makeGroup(project, l); // a duplicated group is a group again
   return out;
 }
 /** Split every selected item the playhead is inside. Returns { done: [entries now in the selection], split, skipped }. */
@@ -82,6 +87,7 @@ export function splitMany(project, list, t) {
     const r = splitItem(project, s, t);
     if (!r || r.fail) { skipped++; done.push(s); continue; }
     split++; done.push(s, { type: r.type, id: r.item.id });
+    const g = groupOf(project, s); if (g) g.items.push({ type: r.type, id: r.item.id }); // both halves stay in the group
   }
   return { done, split, skipped };
 }
@@ -130,7 +136,7 @@ export function moveMany(project, list, dt, ripple) {
 export function copyItems(project, list) {
   const its = resolve(project, list); if (!its.length) return null;
   const ctx = spanCtx(project), base = Math.min(...its.map(x => ctx.span(x.type, x.item)[0]));
-  const items = its.map(x => ({ type: x.type, rel: ctx.span(x.type, x.item)[0] - base, data: deepClone(x.item) }));
+  const items = its.map(x => { const g = groupOf(project, x); return { type: x.type, rel: ctx.span(x.type, x.item)[0] - base, data: deepClone(x.item), ...(g ? { grp: g.id } : {}) }; });
   return { v: 1, items, copiedAt: Date.now() };
 }
 const shiftTimes = (it, type, dt) => {
@@ -144,7 +150,7 @@ const shiftTimes = (it, type, dt) => {
  */
 export function pasteItems(project, clip, t, ripple) {
   if (!clip || !clip.items || !clip.items.length) return [];
-  const out = [];
+  const out = [], grp = [];
   const clips = clip.items.filter(i => i.type === 'clip');
   if (clips.length) {
     const lay = layout(project);
@@ -153,15 +159,17 @@ export function pasteItems(project, clip, t, ripple) {
     const news = clips.map((i, k) => { const b = deepClone(i.data); b.id = uid('clip'); b.gap = 0; if (k === 0 || !b.transition) b.transition = { type: 'cut', duration: (b.transition && b.transition.duration) || 0.6 }; return b; }); // joins inside the copied group keep their transition
     project.clips.splice(idx, 0, ...news);
     if (ripple) { const grow = layout(project).total - lay.total; const at = idx < lay.items.length ? lay.items[idx].start : lay.total; rippleShift(project, at - 1e-3, grow); }
-    for (const b of news) out.push({ type: 'clip', id: b.id });
+    news.forEach((b, k) => { out.push({ type: 'clip', id: b.id }); if (clips[k].grp) grp.push([clips[k].grp, out[out.length - 1]]); });
   }
   for (const i of clip.items) {
     if (i.type === 'clip') continue;
     const b = deepClone(i.data); b.id = uid(PREFIX[i.type]);
     shiftTimes(b, i.type, Math.max(0, t) + i.rel - b.start);
     (i.type === 'caption' ? (project.captions = project.captions || []) : listOf(project, i.type)).push(b);
-    out.push({ type: i.type, id: b.id });
+    out.push({ type: i.type, id: b.id }); if (i.grp) grp.push([i.grp, out[out.length - 1]]);
   }
+  const byG = new Map(); for (const [g, sel] of grp) { if (!byG.has(g)) byG.set(g, []); byG.get(g).push(sel); }
+  for (const l of byG.values()) if (l.length > 1) makeGroup(project, l); // a pasted group is a group again
   return out;
 }
 

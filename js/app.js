@@ -222,6 +222,8 @@ app.liveUpdate = (opts = {}) => {
 app.restore = (snap) => { app.project = migrate(snap); renderAll(); };
 app.seek = (t) => { player.setTime(t); };
 app.select = (sel, opts = {}) => {
+  const grp = sel && !opts.member && sel.type !== 'marker' ? G.groupOf(app.project, sel) : null;
+  if (grp) { app.setMulti(grp.items, opts); return; } // a grouped item stands for its whole group
   const prevSel = app.selection; // browsing effects from clip to clip keeps the Effects tab open; coming from a blur region or text opens the clip's own tab
   app.selection = sel;
   if (sel) {
@@ -251,8 +253,17 @@ app.setMulti = (list, opts = {}) => {
   if (wsLayout) { wsLayout.syncProps(); wsLayout.refreshBin(); }
 };
 /** Shift / Ctrl-click: add the item to (or take it out of) the selection. */
+/** Trim a group to [a, b] (the timeline's group outline ends): one undo step. */
+app.trimGroup = (gid, a, b) => {
+  const g = (app.project.groups || []).find(x => x.id === gid); if (!g) return;
+  const out = G.trimGroup(app.project, g, a, b);
+  app.multi = []; app.commit('Trim group'); app.setMulti(out);
+  toast('Group trimmed to ' + fmt(b - a) + '.', 2000);
+};
 app.toggleSelect = (sel) => {
   if (!sel || sel.type === 'marker') return;
+  const grp = G.groupOf(app.project, sel);
+  if (grp) { const cur = app.selList(), has = cur.some(s => s.type === sel.type && s.id === sel.id); app.setMulti(has ? cur.filter(s => !grp.items.some(x => x.type === s.type && x.id === s.id)) : [...cur, ...grp.items]); return; } // whole group in or out
   app.setMulti(G.toggle(app.selList(), sel));
 };
 app.isSel = (type, id) => (app.multi.length ? app.multi.some(s => s.type === type && s.id === id) : !!_sel && _sel.type === type && _sel.id === id);
@@ -297,6 +308,7 @@ const typeOfRoot = (path) => ({ clip: 'clip', text: 'text', ovl: 'overlay', blur
 // ---------------------------------------------------------------- rendering
 function renderAll() {
   if (app.selection && !selected()) app.selection = null;
+  G.tidyGroups(app.project);
   if (app.multi.length) { const l = G.clean(app.project, app.multi); if (l.length > 1) app.multi = l; else { app.multi = []; _sel = l[0] || null; } }
   player.invalidate();
   sizeStage();
@@ -496,7 +508,10 @@ function fillMulti(on) {
   pn.hidden = !on;
   if (!on) return;
   const l = app.multi;
-  $('multiTitle').textContent = l.length + ' items selected';
+  const grp = G.groupIs(app.project, l);
+  $('multiTitle').textContent = grp ? (grp.name || 'Group') + ' · ' + l.length + ' items' : l.length + ' items selected';
+  const gb = $('multiGroup'); gb.textContent = grp ? 'Ungroup' : 'Group'; gb.dataset.action = grp ? 'ungroup' : 'group';
+  gb.title = grp ? 'Dissolve the group: its items stay where they are and can be selected one by one again (Ctrl+Shift+G)' : 'Keep these items together: clicking one selects all, they move, copy and delete as one, and the group outline trims them all (Ctrl+G)';
   $('multiSum').textContent = groupSummary(l);
   const snd = G.resolve(app.project, l).filter(x => G.hasSoundItem(x.type, x.item)), allMuted = snd.length && snd.every(x => x.item.muted);
   const mb = $('multiMute'); mb.textContent = allMuted ? 'Unmute sound' : 'Mute sound'; mb.setAttribute('aria-disabled', snd.length ? 'false' : 'true'); mb.classList.toggle('is-off', !snd.length);
@@ -882,6 +897,18 @@ const actions = {
     app.selection = null; app.commit('Delete'); toast(what + ' deleted. Undo (Ctrl+Z) brings it back.');
   },
   selectAll() { app.selectAll(); },
+  group() {
+    const l = app.selList(); if (l.length < 2) return toast('Select two or more items first (Shift-click, or drag a box), then Group.');
+    if (G.groupIs(app.project, l)) return toast('These items are already a group.');
+    const g = G.makeGroup(app.project, l); if (!g) return;
+    app.multi = g.items; app.commit('Group ' + plural(g.items.length, 'item'));
+    toast(g.name + ': ' + plural(g.items.length, 'item') + ' now move, copy and delete together. Drag an end of the outline to trim them all.', 3200);
+  },
+  ungroup() {
+    const sel = app.selList(), g = G.groupIs(app.project, sel) || (sel.length ? G.groupOf(app.project, sel[0]) : null);
+    if (!g) return toast('Select a group first.');
+    G.ungroup(app.project, g.id); app.commit('Ungroup'); toast(g.name + ' ungrouped. Its items stay selected; click one to select it alone.', 2600);
+  },
   deselect() { app.select(null); },
   muteSel() { const l = app.selList(); if (!l.length) return toast('Select clips, overlays or audio tracks first.'); groupActions.mute(l); },
   copy() {
@@ -1519,6 +1546,7 @@ document.addEventListener('keydown', (e) => {
     if (kk === 'a') { e.preventDefault(); actions.selectAll(); return; }
     if (kk === 'c') { e.preventDefault(); actions.copy(); return; }
     if (kk === 'x') { e.preventDefault(); actions.cut(); return; }
+    if (kk === 'g') { e.preventDefault(); e.shiftKey ? actions.ungroup() : actions.group(); return; }
     if (kk === 'v') { e.preventDefault(); e.shiftKey ? actions.pasteLook() : Promise.resolve(actions.paste()).catch(err => toast('Paste failed: ' + (err && err.message || err))); return; }
   }
   if (!mod && (e.code === 'BracketLeft' || e.code === 'BracketRight')) { handled0(); actions[e.code === 'BracketLeft' ? 'volumeDown' : 'volumeUp'](null, e); return; }

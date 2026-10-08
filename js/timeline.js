@@ -397,6 +397,7 @@ export class Timeline {
     }
     this.renderSilences(top);
     this.renderBeats(top);
+    this.renderGroups(top);
     // remove stale
     for (const [k, n] of this.nodes) if (n._seen !== this._gen) { n.remove(); this.nodes.delete(k); }
     this.lanes.classList.toggle('empty', this.geo.n === 0);
@@ -414,6 +415,57 @@ export class Timeline {
       n.style.left = this.x(m.t0) + 'px'; n.style.width = Math.max(3, (m.t1 - m.t0) * this.pps) + 'px'; n.style.top = top(item) + 'px';
       n.classList.toggle('cur', !!m.cur); n.title = 'Silence · ' + fmt(m.t1 - m.t0) + ' to remove';
     }
+  }
+  /** Grouped items: one outline around the members, with the group's name and two ends that trim every member at once. */
+  renderGroups(top) {
+    const p = this.project, ctx = spanCtx(p);
+    for (const g of p.groups || []) {
+      const its = G.resolve(p, g.items); if (its.length < 2) continue;
+      let a = Infinity, b = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const x of its) { const [s0, e0] = ctx.span(x.type, x.item); a = Math.min(a, s0); b = Math.max(b, e0); const y = top(x.item); if (y == null || !Number.isFinite(y)) continue; y0 = Math.min(y0, y); y1 = Math.max(y1, y + ITEM_H); }
+      if (!Number.isFinite(y0)) continue;
+      const n = this._node('g:' + g.id, () => {
+        const d = el('div', { class: 'tl-grp' }, el('span', { class: 'tl-grp-name' }), el('div', { class: 'tl-grp-h l', 'aria-label': 'Trim the group start', title: 'Drag to trim every item of the group' }), el('div', { class: 'tl-grp-h r', 'aria-label': 'Trim the group end', title: 'Drag to trim every item of the group' }));
+        for (const h of d.querySelectorAll('.tl-grp-h')) h.addEventListener('pointerdown', e => this.startGroupTrim(e, d._gid, h.classList.contains('l') ? 'l' : 'r'));
+        return d;
+      }, this.lanes);
+      n._gid = g.id; n.dataset.id = g.id;
+      if (!(this.drag && this.drag.groupTrim === g.id)) { n.style.left = (this.x(a) - 3) + 'px'; n.style.width = ((b - a) * this.pps + 6) + 'px'; }
+      n.style.top = (y0 - 4) + 'px'; n.style.height = (y1 - y0 + 8) + 'px';
+      n.querySelector('.tl-grp-name').textContent = g.name || 'Group';
+      n.classList.toggle('sel', !!G.groupIs(p, this.app.multi));
+    }
+  }
+  /** Drag a group end: the outline follows the pointer (snapping like other trims); on release every member is cut there in one undo step. */
+  startGroupTrim(e, gid, side) {
+    e.stopPropagation(); e.preventDefault();
+    const app = this.app, p = this.project, g = (p.groups || []).find(x => x.id === gid); if (!g) return;
+    const [a0, b0] = G.groupSpan(p, g), node = this.nodes.get('g:' + gid), pid = e.pointerId, x0 = this.contentX(e);
+    if (!G.groupIs(p, app.multi)) app.setMulti(g.items);
+    let a = a0, b = b0;
+    const ex = new Set(g.items.map(x => x.id));
+    const d = this.drag = { groupTrim: gid, handle: side };
+    try { e.currentTarget.setPointerCapture(pid); } catch { /* */ }
+    const tip = (txt, tm) => { this.tip.textContent = txt; this.tip.style.display = 'block'; this.tip.style.left = this.x(tm) + 'px'; };
+    d.onMove = (ev) => {
+      const dt = (this.contentX(ev) - x0) / this.pps;
+      this._noSnap = ev.altKey;
+      const want = side === 'l' ? clamp(a0 + dt, a0, b0 - 0.1) : clamp(b0 + dt, a0 + 0.1, b0);
+      const sn = this.snap(want, ex); let v = sn.snapped ? sn.t : want;
+      if (sn.snapped) this.showSnap(v);
+      if (side === 'l') a = clamp(v, a0, b0 - 0.1); else b = clamp(v, a0 + 0.1, b0);
+      if (node) { node.style.left = (this.x(a) - 3) + 'px'; node.style.width = ((b - a) * this.pps + 6) + 'px'; }
+      tip((side === 'l' ? 'Start ' : 'End ') + fmt(side === 'l' ? a : b) + ' · ' + fmt(b - a), side === 'l' ? a : b);
+    };
+    const end = (ev) => {
+      if (ev.pointerId !== pid) return;
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end);
+      this.tip.style.display = 'none'; this.snapLine.style.display = 'none'; this.drag = null;
+      if (Math.abs(a - a0) < 1e-3 && Math.abs(b - b0) < 1e-3) { this.render(); return; }
+      app.trimGroup(gid, a, b);
+    };
+    const move = (ev) => { if (ev.pointerId === pid) d.onMove(ev); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
   }
   /** Snap to beat: small ticks on a music item whose beats are known (only the visible ones, thinned when zoomed out; no lane of their own). */
   renderBeats(top) {
@@ -751,7 +803,8 @@ export class Timeline {
     const node = e.currentTarget, app = this.app;
     const isTouch = e.pointerType !== 'mouse';
     this._lastPtr = e.pointerType;
-    const single = this.single(type, id), inGroup = app.multi.length > 1 && app.isSel(type, id);
+    const single = this.single(type, id);
+    let inGroup = app.multi.length > 1 && app.isSel(type, id);
     const handle = e.target.classList.contains('h-l') ? 'l' : e.target.classList.contains('h-r') ? 'r' : 'body';
     e.stopPropagation();
     if (e.button === 2) return; // right-click: the context menu selects it
@@ -765,6 +818,9 @@ export class Timeline {
       node.addEventListener('pointerup', up); node.addEventListener('pointercancel', done);
       return;
     }
+    const grp = groupable ? G.groupOf(this.project, { type, id }) : null;
+    if (grp && !inGroup) { e.preventDefault(); app.setMulti(grp.items); if (isTouch) return; inGroup = true; } // a grouped item selects (and drags) the whole group
+    if (grp && handle !== 'body') { this.startGroupDrag(e, node, type, id); return; } // item ends inside a group: the group's own ends trim it
     const lp = isTouch && groupable ? this.longPress(e, () => app.toggleSelect({ type, id })) : null; // touch: long-press adds / removes
     if (isTouch && !single && !inGroup) {
       // Touch: first tap selects (lets the timeline scroll natively); drag once selected.
