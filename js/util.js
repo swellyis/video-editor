@@ -99,12 +99,16 @@ export function dataURLToBlob(url) {
 
 // ---------- tar (ustar) container: project file with raw media, assembled from Blob parts (no copies in memory) ----------
 const te = new TextEncoder(), td = new TextDecoder();
-function tarHeader(name, size, mtime = Date.now()) {
+/** Largest size the classic 11-digit octal field holds (8 GiB - 1). Bigger entries use the GNU base-256 form, which GNU tar, bsdtar and 7-Zip read. */
+export const TAR_OCTAL_MAX = 0o77777777777;
+export function tarHeader(name, size, mtime = Date.now()) {
   const h = new Uint8Array(512);
   const put = (str, off, len) => { const b = te.encode(str); h.set(b.subarray(0, len), off); };
   const oct = (v, len) => v.toString(8).padStart(len - 1, '0') + '\0';
   put(name, 0, 100); put(oct(0o644, 8), 100, 8); put(oct(0, 8), 108, 8); put(oct(0, 8), 116, 8);
-  put(oct(size, 12), 124, 12); put(oct(Math.floor(mtime / 1000), 12), 136, 12);
+  if (size <= TAR_OCTAL_MAX) put(oct(size, 12), 124, 12);
+  else { h[124] = 0x80; let v = size; for (let i = 135; i > 124; i--) { h[i] = v % 256; v = Math.floor(v / 256); } } // GNU base-256: entries of 8 GiB and more
+  put(oct(Math.floor(mtime / 1000), 12), 136, 12);
   h.fill(32, 148, 156); h[156] = 48; // typeflag '0' (file); checksum field = spaces while summing
   put('ustar\0', 257, 6); put('00', 263, 2);
   let sum = 0; for (const b of h) sum += b;
@@ -126,6 +130,13 @@ export async function isTar(blob) {
   if (blob.size < 1024) return false;
   return td.decode(new Uint8Array(await blob.slice(257, 262).arrayBuffer())) === 'ustar';
 }
+/** Size field of a tar header: octal, or GNU base-256 (high bit set) for entries of 8 GiB and more. */
+export function tarSize(h) {
+  if (h[124] & 0x80) { let v = h[124] & 0x7f; for (let i = 125; i < 136; i++) v = v * 256 + h[i]; return v; }
+  return parseInt(td.decode(h.subarray(124, 136)).replace(/\0.*$/s, '').trim() || '0', 8);
+}
+/** Bytes a tarBlob() of these entry sizes takes (headers, padding and the end marker). */
+export function tarBytes(sizes) { let n = 1024; for (const s of sizes) n += 512 + Math.ceil(s / 512) * 512; return n; }
 /** Read a tar Blob: returns Map name -> Blob slice (no copies). */
 export async function readTar(blob) {
   const out = new Map(); let off = 0;
@@ -133,7 +144,7 @@ export async function readTar(blob) {
     const h = new Uint8Array(await blob.slice(off, off + 512).arrayBuffer());
     if (h.every(b => b === 0)) break;
     const str = (a, b) => td.decode(h.subarray(a, b)).replace(/\0.*$/s, '');
-    const name = str(0, 100), size = parseInt(str(124, 136).trim() || '0', 8);
+    const name = str(0, 100), size = tarSize(h);
     if (!Number.isFinite(size) || size < 0) throw new Error('Damaged project file');
     out.set(name, blob.slice(off + 512, off + 512 + size));
     off += 512 + Math.ceil(size / 512) * 512;

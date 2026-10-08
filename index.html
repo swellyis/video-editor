@@ -909,10 +909,28 @@
 <dialog class="sheet" id="projectsDialog" aria-labelledby="projectsTitle">
   <div class="sheet-head"><h2 id="projectsTitle">Projects</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
   <div class="button-row"><button class="btn primary" id="newProject" type="button">＋ New project</button><label class="btn secondary" for="importProject">Import project…</label><input id="importProject" type="file" accept=".vedit,.json,application/json,application/x-tar" /></div>
-  <label class="check"><input type="checkbox" id="embedMedia" /> Include media files in “Back up project” (larger file, fully portable)</label>
-  <p class="hint">“Back up project” saves a project file (.vedit) you can import later. To make the finished video, use <b>Export video</b> at the bottom of the editor.</p>
+  <p class="hint">“Back up project” saves a project as one file (.vedit), with its media if you like, that you can restore here or on another device with <b>Import project…</b>. To make the finished video, use <b>Export video</b> at the bottom of the editor.</p>
   <div class="project-list" id="projectList"></div>
   <p class="hint" id="storageNote"></p>
+</dialog>
+
+<!-- Project backup -->
+<dialog class="sheet" id="backupDialog" aria-labelledby="backupTitle">
+  <div class="sheet-head"><h2 id="backupTitle">Back up project</h2><button class="icon-btn" data-close type="button" aria-label="Close">✕</button></div>
+  <p><b id="bkName"></b><br /><span class="mono small" id="bkSummary"></span></p>
+  <label class="check"><input type="checkbox" id="embedMedia" /> Include the media files (one file that restores on another device)</label>
+  <p class="hint warn" id="bkMissing" hidden></p>
+  <div class="progress show" id="bkProg" hidden><div class="progress-track"><div class="progress-bar" id="bkBar"></div></div><div class="progress-copy"><span id="bkText"></span></div></div>
+  <p class="hint" id="bkResult" role="status" hidden></p>
+  <div class="button-row"><button class="btn primary" type="button" id="bkSave">Save backup…</button><button class="btn ghost" type="button" id="bkCancel" hidden>Cancel</button></div>
+  <p class="hint" id="bkHow"></p>
+  <p class="hint">Restore with <b>Projects → Import project…</b>. Proxies are not included (they are re-made when needed). Limits: the device you restore to needs free space for the media; single files of 8 GB and more are supported.</p>
+</dialog>
+<dialog class="sheet" id="restoreDialog" aria-labelledby="restoreTitle">
+  <div class="sheet-head"><h2 id="restoreTitle">Restoring project</h2></div>
+  <p><b id="rsName"></b></p>
+  <div class="progress show" id="rsProg" hidden><div class="progress-track"><div class="progress-bar" id="rsBar"></div></div><div class="progress-copy"><span id="rsText"></span></div></div>
+  <div class="button-row"><button class="btn ghost" type="button" id="rsCancel">Cancel</button></div>
 </dialog>
 
 <!-- Templates -->

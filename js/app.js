@@ -3,10 +3,11 @@ import { initInstall } from './install.js';
 import { initAddMedia } from './add-media-ui.js';
 import { shareOrDownload } from './media-link.js';
 import { BUILD } from './build.js';
-import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, dataURLToBlob, uid, tarBlob, readTar, isTar, perf, startLongTaskMonitor } from './util.js';
+import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, download, debounce, el, icon, safeName, isIOS, deepClone, uid, perf, startLongTaskMonitor } from './util.js';
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { initProxies } from './proxy-ui.js';
-import { media, kindOf, isHeic, isMediaDataURL, seekVideo } from './media.js';
+import { initBackup } from './backup-ui.js';
+import { media, kindOf, isHeic, seekVideo } from './media.js';
 import {
   newProject, migrate, layout, clipAt, clipLen, sourceTime, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, ensureLanes, holdNextClip, stepVolume, History, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
@@ -1887,7 +1888,7 @@ async function renderProjectList() {
           el('button', { class: 'btn primary small', type: 'button', text: p.id === app.project.id ? 'Open (current)' : 'Open', onclick: async () => { await openProject(p.id); closeDialog('projectsDialog'); } }),
           el('button', { class: 'btn secondary small', type: 'button', text: 'Rename', onclick: async () => { const n0 = prompt('Project name', shown); if (n0 === null) return; const n = cleanProjectName(n0) || defaultProjectName(p.created || p.updated); if (p.id === app.project.id) { app.project.name = n; app.commit('Rename project'); await saveNow(); } else { p.name = n; p.updated = Date.now(); await db.saveProject(p); } renderProjectList(); renderAll(); } }),
           el('button', { class: 'btn secondary small', type: 'button', text: 'Duplicate', onclick: async () => { if (p.id === app.project.id) await saveNow(); const src = p.id === app.project.id ? JSON.parse(JSON.stringify(app.project)) : p; const c = { ...deepClone(src), id: uid('prj'), name: src.name + ' copy', created: Date.now(), updated: Date.now() }; await db.saveProject(c); renderProjectList(); toast('Project duplicated'); } }),
-          el('button', { class: 'btn secondary small', type: 'button', text: 'Back up project', title: 'Save project file (.vedit)', onclick: () => exportProjectFile(p.id) }),
+          el('button', { class: 'btn secondary small', type: 'button', text: 'Back up project', title: 'Save this project as one file (.vedit), with its media if you like', onclick: () => backup.open(p.id) }),
           el('button', { class: 'btn ghost danger small', type: 'button', text: 'Delete', onclick: async () => {
             if (!confirm(`Delete “${p.name}”? Its media is removed from this device unless another project uses it.`)) return;
             await db.deleteProject(p.id);
@@ -1911,53 +1912,11 @@ $('newProject').onclick = async () => { const n = prompt('Name your new project 
  * from Blob parts that reference the stored media, so nothing is base64-encoded or copied into one giant string.
  * Without media: a small .vedit.json. Old .vedit.json files with base64 media still import.
  */
-async function exportProjectFile(id) {
-  if (id === app.project.id) await flushPendingSave();
-  const p = id === app.project.id ? JSON.parse(JSON.stringify(app.project)) : await db.getProject(id);
-  const embed = $('embedMedia').checked;
-  const mediaOut = [], files = [];
-  for (const mid of mediaIdsOf(p)) {
-    const m = await media.get(mid); if (!m) continue;
-    const { blob, peaks, ...meta } = m; // waveform peaks are rebuilt on import
-    if (embed && blob) { meta.file = 'media/' + mid; files.push({ name: meta.file, data: blob }); }
-    mediaOut.push(meta);
-  }
-  const data = { app: 'video-editor-pro', format: embed ? 2 : 1, exported: new Date().toISOString(), project: p, media: mediaOut };
-  const base = safeName(p.name, 'project');
-  if (embed) download(tarBlob([{ name: 'project.json', data: JSON.stringify(data) }, ...files]), base + '-with-media.vedit');
-  else download(new Blob([JSON.stringify(data)], { type: 'application/json' }), base + '.vedit.json');
-  toast(embed ? 'Project file saved with media (.vedit)' : 'Project file saved (media stays on this device)');
-}
+const backup = initBackup({ app, media, db, toast, openDialog, closeDialog, flushPendingSave, migrate, openProject, mediaIdsOf });
+app.backup = backup;
+const exportProjectFile = (id) => backup.exportNow(id); // one-click download (scripts); the button opens the backup dialog
 app.exportProjectFile = exportProjectFile;
-async function importProjectFile(file) {
-  try {
-    let data, entries = null;
-    if (await isTar(file)) {
-      entries = await readTar(file);
-      const pj = entries.get('project.json'); if (!pj) throw new Error('Not a project file');
-      data = JSON.parse(await pj.text());
-    } else data = JSON.parse(await file.text()); // .vedit.json (format 1, media optionally base64)
-    const src = data.project || data;
-    if (!src || !Array.isArray(src.clips)) throw new Error('Not a project file');
-    let missing = 0, skipped = 0;
-    for (const m of Array.isArray(data.media) ? data.media : []) {
-      if (!m || typeof m.id !== 'string') continue;
-      if (await media.get(m.id)) continue;
-      let blob = null;
-      if (entries && typeof m.file === 'string') blob = entries.get(m.file) || null;
-      else if (m.data) { if (isMediaDataURL(m.data)) blob = dataURLToBlob(m.data); else skipped++; } // never fetch() arbitrary URLs
-      if (blob) { try { await media.importEmbedded(m, blob); } catch (e) { console.warn(e); missing++; } }
-      else missing++;
-    }
-    const p = migrate(src);
-    p.id = uid('prj'); p.updated = Date.now(); // (migrate already gave a placeholder name a dated one)
-    await db.saveProject(p);
-    await openProject(p.id);
-    closeDialog('projectsDialog');
-    if (skipped) console.warn(skipped + ' embedded media entries were not valid media data and were ignored');
-    toast(missing ? `Imported. ${missing} media file(s) need relinking (select the red clips).` : 'Project imported');
-  } catch (e) { console.warn(e); toast('Import failed: ' + e.message); }
-}
+const importProjectFile = (file) => backup.importFile(file);
 app.importProjectFile = importProjectFile;
 $('importProject').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importProjectFile(f); };
 
