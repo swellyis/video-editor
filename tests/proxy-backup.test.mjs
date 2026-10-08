@@ -4,11 +4,13 @@ import { needsProxy, proxyDims, proxyBitrate, proxyEstimate } from '../js/proxy.
 import { tarHeader, tarSize, tarBytes, tarBlob, readTar, isTar, TAR_OCTAL_MAX } from '../js/util.js';
 import { backupPlan, restorePlan, roomFor } from '../js/backup.js';
 
-test('needsProxy: 4K, 1440p+ and long videos only', () => {
+test('needsProxy: 4K, 1440p+ and long videos above 720p only', () => {
   assert.equal(needsProxy({ kind: 'video', width: 3840, height: 2160, duration: 10 }), true);
   assert.equal(needsProxy({ kind: 'video', width: 2560, height: 1440, duration: 10 }), true);
   assert.equal(needsProxy({ kind: 'video', width: 1920, height: 1080, duration: 60 }), false);
-  assert.equal(needsProxy({ kind: 'video', width: 1280, height: 720, duration: 900 }), true);
+  assert.equal(needsProxy({ kind: 'video', width: 1920, height: 1080, duration: 900 }), true);
+  assert.equal(needsProxy({ kind: 'video', width: 1280, height: 720, duration: 900 }), false, 'a long 720p file is small enough already');
+  assert.equal(needsProxy({ kind: 'video', width: 640, height: 360, duration: 3600 }), false);
   assert.equal(needsProxy({ kind: 'video', width: 1080, height: 1920, duration: 30 }), false);
   assert.equal(needsProxy({ kind: 'audio', duration: 9000 }), false);
   assert.equal(needsProxy({ kind: 'image', width: 8000, height: 6000 }), false);
