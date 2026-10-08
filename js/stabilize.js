@@ -2,7 +2,7 @@
 // Frames are small grey images (Uint8Array, w*h). Motion is a similarity transform (shift, rotation, scale) fitted to block matches.
 // Shifts are stored as fractions of the analysis width, so they apply to the proxy, the original or any export size alike.
 
-export const STAB_V = 1;
+export const STAB_V = 2;
 export const ANALYSIS_W = 192;
 export const MODES = { smooth: { sigma: 0.5, maxZoom: 1.12 }, strong: { sigma: 2.2, maxZoom: 1.25 } };
 
@@ -55,6 +55,27 @@ function globalShift(a, b, w, h, gx, gy, R, step) {
   return best;
 }
 
+/** Mean absolute difference of b shifted by (dx,dy) against a over the shared inner area. */
+function frameCost(a, b, w, h, dx, dy) {
+  const m = 26; let s = 0, n = 0;
+  for (let y = m; y < h - m; y += 2) { const ra = y * w, rb = (y + dy) * w + dx; for (let x = m; x < w - m; x += 2) { const d = a[ra + x] - b[rb + x]; s += d < 0 ? -d : d; n++; } }
+  return s / Math.max(1, n);
+}
+/**
+ * Repair single-frame glitches in a motion series (a false match shows as one frame jumping far from its neighbours):
+ * a value further than max(minJump, 4 x local spread) from the median of its 7 neighbours is replaced by that median. In place.
+ */
+export function repairOutliers(arr, minJump) {
+  const n = arr.length, src = Array.from(arr); let fixed = 0;
+  for (let i = 0; i < n; i++) {
+    const win = []; for (let j = Math.max(0, i - 3); j <= Math.min(n - 1, i + 3); j++) if (j !== i) win.push(src[j]);
+    if (win.length < 3) continue;
+    win.sort((x, y) => x - y); const med = win[win.length >> 1];
+    const mad = win.map(v => Math.abs(v - med)).sort((x, y) => x - y)[win.length >> 1];
+    if (Math.abs(src[i] - med) > Math.max(minJump, 4 * mad)) { arr[i] = med; fixed++; }
+  }
+  return fixed;
+}
 /**
  * Global motion from frame a to frame b (grey, w*h). Returns { dx, dy, da, ds, n } with dx,dy in pixels of this size,
  * da in radians, ds = log scale; n = blocks used. A whole-frame shift found coarse-to-fine (robust to repeating patterns), then
@@ -65,6 +86,11 @@ export function estimateMotion(a, b, w, h) {
   let [gx, gy] = globalShift(A2.g, B2.g, A2.w, A2.h, 0, 0, 6, 1);         // +-24 px at full size
   [gx, gy] = globalShift(A1.g, B1.g, A1.w, A1.h, gx * 2, gy * 2, 2, 1);
   [gx, gy] = globalShift(a, b, w, h, gx * 2, gy * 2, 2, 2);
+  if (gx || gy) { // a repeating pattern can fool the coarse level: also try "small motion" and keep whichever matches better at full size
+    let [zx, zy] = globalShift(A1.g, B1.g, A1.w, A1.h, 0, 0, 2, 1);
+    [zx, zy] = globalShift(a, b, w, h, zx * 2, zy * 2, 2, 2);
+    if ((zx !== gx || zy !== gy) && frameCost(a, b, w, h, zx, zy) <= frameCost(a, b, w, h, gx, gy)) { gx = zx; gy = zy; }
+  }
   const B = 16, cols = 7, rows = 5, vecs = [];
   const mx = Math.max(B, Math.round(w * 0.1)), my = Math.max(B, Math.round(h * 0.1));
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
@@ -133,11 +159,14 @@ export function corrections(motions, fps, mode, aspect = 9 / 16) {
   return { zoom, frames: cx.map((v, i) => ({ x: v, y: cy[i], a: ca[i] })) };
 }
 
-/** Correction at source time t from an analysis { t0, fps, frames } (nearest frames, linear blend). */
+/**
+ * Correction at source time t from an analysis { t0, fps, frames }: the frame a decoder shows at t (the last one that started at or
+ * before t). No blending: shake is different on every frame, so a blend of two frames' corrections would correct neither.
+ */
 export function correctionAt(corr, t0, fps, t) {
   const f = corr.frames; if (!f.length) return { x: 0, y: 0, a: 0 };
-  const p = (t - t0) * fps, i = Math.max(0, Math.min(f.length - 1, Math.floor(p))), j = Math.min(f.length - 1, i + 1), u = Math.max(0, Math.min(1, p - i));
-  return { x: f[i].x + (f[j].x - f[i].x) * u, y: f[i].y + (f[j].y - f[i].y) * u, a: f[i].a + (f[j].a - f[i].a) * u };
+  const i = Math.max(0, Math.min(f.length - 1, Math.floor((t - t0) * fps + 0.02)));
+  return { x: f[i].x, y: f[i].y, a: f[i].a };
 }
 
 /** Jitter measure: RMS of the frame-to-frame shift minus its smoothed version (fractions of the width). */

@@ -2,7 +2,7 @@
 // global motion between neighbours (stabilize.js) and cache the result per media file (IndexedDB kv 'st:<id>', versioned).
 import { loadMediabunny } from './media.js';
 import { db } from './db.js';
-import { ANALYSIS_W, STAB_V, estimateMotion } from './stabilize.js';
+import { ANALYSIS_W, STAB_V, estimateMotion, repairOutliers } from './stabilize.js';
 
 export class StabCancelled extends Error { constructor() { super('Cancelled'); this.name = 'StabCancelled'; } }
 const KEY = 'st:';
@@ -45,7 +45,8 @@ export async function analyse(blob, t0, t1, { signal, onProgress } = {}) {
     }
     if (times.length < 2) throw new Error('Too few frames to stabilize.');
     const fps = (times.length - 1) / Math.max(0.001, times[times.length - 1] - times[0]);
-    return { v: STAB_V, t0: times[0], t1: times[times.length - 1], fps, w, h, dx: Float32Array.from(dx), dy: Float32Array.from(dy), da: Float32Array.from(da), ms: Math.round(performance.now() - T0), frames: times.length };
+    const fixed = repairOutliers(dx, 0.03) + repairOutliers(dy, 0.03); // single-frame false matches (3 % of the width or more)
+    return { v: STAB_V, t0: times[0], t1: times[times.length - 1], fps, w, h, dx: Float32Array.from(dx), dy: Float32Array.from(dy), da: Float32Array.from(da), ms: Math.round(performance.now() - T0), frames: times.length, fixed };
   } finally { input.dispose && input.dispose(); }
 }
 export async function saveAnalysis(id, a) { await db.kvSet(KEY + id, a); }

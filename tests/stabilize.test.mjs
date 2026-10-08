@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { estimateMotion, fitSimilarity, gaussSmooth, corrections, correctionAt, jitter, MODES } from '../js/stabilize.js';
+import { estimateMotion, fitSimilarity, gaussSmooth, corrections, correctionAt, jitter, MODES, repairOutliers } from '../js/stabilize.js';
 import { normalizeClip, defaultChroma } from '../js/model.js';
 
 // a random-blob texture sampled with a known shift / rotation
@@ -48,9 +48,10 @@ test('corrections cancel shake, keep a pan, cap the zoom and clamp to the margin
   const big = Array.from({ length: 60 }, (_, i) => ({ dx: i % 2 ? 0.2 : -0.2, dy: 0, da: 0 }));
   assert.ok(corrections(big, 30, 'smooth').zoom <= MODES.smooth.maxZoom + 1e-9, 'huge shake: zoom stays capped');
 });
-test('correctionAt interpolates and clamps to the ends', () => {
+test('correctionAt picks the frame on screen at t (no blending) and clamps to the ends', () => {
   const c = { frames: [{ x: 0, y: 0, a: 0 }, { x: 1, y: 2, a: 0.1 }] };
-  assert.deepEqual(correctionAt(c, 10, 2, 10.25), { x: 0.5, y: 1, a: 0.05 });
+  assert.deepEqual(correctionAt(c, 10, 2, 10.25), { x: 0, y: 0, a: 0 });
+  assert.deepEqual(correctionAt(c, 10, 2, 10.4999), { x: 1, y: 2, a: 0.1 }, 'a time a hair before the frame start (float error) still gets that frame');
   assert.deepEqual(correctionAt(c, 10, 2, 99), { x: 1, y: 2, a: 0.1 });
   assert.deepEqual(correctionAt(c, 10, 2, 0), { x: 0, y: 0, a: 0 });
 });
@@ -58,4 +59,10 @@ test('clips get a chroma block and a stabilize mode (default off)', () => {
   const c = normalizeClip({ id: 'c1' }); assert.deepEqual(c.chroma, defaultChroma()); assert.equal(c.stab, 'off');
   assert.equal(normalizeClip({ stab: 'strong' }).stab, 'strong'); assert.equal(normalizeClip({ stab: 'bogus' }).stab, 'off');
   assert.equal(normalizeClip({ chroma: { enabled: true, color: '#00b140' } }).chroma.spill, defaultChroma().spill);
+});
+test('repairOutliers fixes a one-frame false match but keeps a real move', () => {
+  const a = [0.01, -0.01, 0.012, -0.008, 0.13, 0.009, -0.011, 0.01, -0.01];
+  assert.equal(repairOutliers(a, 0.03), 1); assert.ok(Math.abs(a[4]) < 0.02);
+  const pan = Array.from({ length: 12 }, (_, i) => (i < 6 ? 0 : 0.05)); // a sustained change of speed is not a glitch
+  assert.equal(repairOutliers(pan, 0.03), 0);
 });

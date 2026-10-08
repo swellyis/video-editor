@@ -1229,6 +1229,7 @@ $('chromaPick').onclick = () => {
   else { const t = player.t; if (t < o.start || t >= o.start + overlayLen(o)) player.setTime(o.start + Math.min(0.5, overlayLen(o) / 2)); }
   player.pause();
   app.picking = true; stage.classList.add('picking');
+  stage.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // on a phone the preview may be scrolled away from this button
   toast('Tap the background color to remove in the preview.', 3000);
 };
 function pickColorAt(x, y) {
