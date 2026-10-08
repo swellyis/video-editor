@@ -14,6 +14,7 @@ const setLS = (k, v) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch 
 
 export function initProxies({ app, media, player, toast, selected }) {
   const box = $('proxyBox');
+  const canMake = typeof VideoEncoder !== 'undefined' && typeof VideoDecoder !== 'undefined'; // WebCodecs (stored proxies still play without it)
   const S = { st: new Map(), queue: [], job: null, known: new Set(), use: LS('ve.proxy.use', true), auto: LS('ve.proxy.auto', true) };
   media.useProxies = S.use;
   const stOf = (id) => S.st.get(id) || { state: 'none' };
@@ -28,7 +29,7 @@ export function initProxies({ app, media, player, toast, selected }) {
       const rec = await media.get(id); if (!rec || rec.kind !== 'video') continue;
       const m = await proxyMeta(id), f = m && await proxyFile(id);
       if (f) { media.setProxy(id, f); S.st.set(id, { state: 'ready', meta: m }); refreshPreview(); }
-      else { if (m) await deleteProxy(id); if (S.auto && needsProxy(rec)) enqueue(id); }
+      else { if (m) await deleteProxy(id); if (S.auto && canMake && needsProxy(rec)) enqueue(id); }
     }
     render();
   }
@@ -73,6 +74,7 @@ export function initProxies({ app, media, player, toast, selected }) {
     if (s.state === 'queued') return 'Waiting to make a proxy';
     if (s.state === 'failed') return 'No proxy: ' + s.err;
     if (!rec) return '';
+    if (!canMake) return 'This browser can’t make proxies (it needs WebCodecs: Chrome, Edge, Android Chrome or Safari 16.4+).';
     return needsProxy(rec) ? 'No proxy yet (suggested: ' + (rec.width || '?') + '×' + (rec.height || '?') + ', ' + Math.round(rec.duration || 0) + ' s)' : 'No proxy (not needed for a file this size)';
   }
   function renderProgress(id) {
@@ -98,7 +100,7 @@ export function initProxies({ app, media, player, toast, selected }) {
     box.dataset.state = s.state;
     $('pxState').textContent = stateText(id, rec);
     $('pxProg').hidden = s.state !== 'making';
-    $('pxMake').hidden = !(s.state === 'none' || s.state === 'failed');
+    $('pxMake').hidden = !canMake || !(s.state === 'none' || s.state === 'failed');
     $('pxMake').textContent = s.state === 'failed' ? 'Try again' : 'Make proxy' + (rec && rec.duration ? ' (about ' + MB(proxyEstimate(rec)) + ')' : '');
     $('pxCancel').hidden = !(s.state === 'making' || s.state === 'queued');
     $('pxDelete').hidden = s.state !== 'ready';
