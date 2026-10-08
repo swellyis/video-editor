@@ -226,6 +226,8 @@ export function normalizeClip(c) {
     blur: Object.assign(defaultClipBlur(), c.blur && typeof c.blur === 'object' ? c.blur : {}),
     bgremove: normalizeBgRemove(c.bgremove),
     fx: normFx(c.fx),
+    chroma: Object.assign(defaultChroma(), c.chroma && typeof c.chroma === 'object' ? c.chroma : {}),
+    stab: c.stab === 'smooth' || c.stab === 'strong' ? c.stab : 'off',
   });
 }
 

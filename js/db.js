@@ -50,7 +50,7 @@ export const db = {
     if (rec) { const mx = await tx('kv', 'readonly', s => reqP(s.get(MX + id))).catch(() => null); if (mx) Object.assign(rec, mx); }
     return rec;
   },
-  deleteMedia: async (id) => { await tx('media', 'readwrite', s => { s.delete(id); }); await tx('kv', 'readwrite', s => { s.delete(MX + id); s.delete('px:' + id); }).catch(() => { }); },
+  deleteMedia: async (id) => { await tx('media', 'readwrite', s => { s.delete(id); }); await tx('kv', 'readwrite', s => { s.delete(MX + id); s.delete('px:' + id); s.delete('st:' + id); }).catch(() => { }); },
   async mediaKeys() { return tx('media', 'readonly', s => reqP(s.getAllKeys())); },
   /**
    * Add small metadata to a stored media record. It is written to its own tiny kv entry: rewriting the media record itself

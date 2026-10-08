@@ -9,6 +9,7 @@ import { activeFx } from './effects.js';
 import { newIn, newOut, loopFx, karaokeCount } from './textanim.js';
 import { applyBgRemove, bgRemoveActive } from './bgremove.js';
 import { loadSegmenter, segmentPerson } from './segment.js';
+import { stabAt } from './stab-store.js';
 
 const VERT = `attribute vec2 p;varying vec2 uv;void main(){uv=vec2((p.x+1.0)*0.5,1.0-(p.y+1.0)*0.5);gl_Position=vec4(p,0.0,1.0);}`;
 const FRAG = `precision mediump float;varying vec2 uv;uniform sampler2D tex;
@@ -607,11 +608,24 @@ export class Compositor {
       ctx.restore();
     } else { ctx.fillStyle = bg.color; ctx.fillRect(0, 0, W, H); }
     const g = Compositor.placement(clip, sw, sh, W, H, fit, progress);
+    // green screen on a main clip: the keyed area shows the background painted above (the clip's Background setting)
+    if (clip.chroma && clip.chroma.enabled) {
+      const k = this._key();
+      if (k) {
+        const cw = Math.round(Math.min(sw, sw * g.s * 1.25, 1920)), chh = Math.max(2, Math.round(cw * sh / sw));
+        if (!this.ckc) { this.ckc = document.createElement('canvas'); this.ckx = this.ckc.getContext('2d'); }
+        if (this.ckc.width !== cw || this.ckc.height !== chh) { this.ckc.width = cw; this.ckc.height = chh; }
+        this.ckx.clearRect(0, 0, cw, chh); this.ckx.drawImage(img, 0, 0, cw, chh);
+        img = k.process(this.ckc, cw, chh, clip.chroma);
+      }
+    }
     ctx.save();
     ctx.translate(g.cx, g.cy);
     if (g.rot || g.angle) ctx.rotate((g.rot + g.angle) * Math.PI / 180);
     ctx.scale(g.flipH ? -1 : 1, g.flipV ? -1 : 1);
     ctx.imageSmoothingQuality = 'high';
+    const st = opts.stab; // stabilization: move/rotate the picture along the smoothed camera path, zoomed in to hide the edges
+    if (st) { const dw = sw * g.s; ctx.scale(st.zoom, st.zoom); ctx.translate(st.x * dw, st.y * dw); if (st.a) ctx.rotate(st.a); }
     ctx.drawImage(img, -sw * g.s / 2, -sh * g.s / 2, sw * g.s, sh * g.s);
     ctx.restore();
   }
@@ -670,12 +684,12 @@ export class Compositor {
         if (!unit && !gl && !fxg && (colorIsNeutral(col) || !this.filterOK)) {
           ctx.globalAlpha = a;
           if (bf) ctx.filter = bf;
-          this.drawSource(ctx, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2) });
+          this.drawSource(ctx, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2), stab: stabAt(c, sourceTime(it, t)) });
         } else {
           if (this.layer.width !== W || this.layer.height !== H) { this.layer.width = W; this.layer.height = H; }
           const l = this.lctx;
           l.globalAlpha = 1; l.filter = 'none';
-          this.drawSource(l, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2) });
+          this.drawSource(l, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2), stab: stabAt(c, sourceTime(it, t)) });
           ctx.globalAlpha = a;
           if (fxg) { // colour first, then the clip's effects (Effects tab), then the transition's blur / fade
             let pic = this.layer;

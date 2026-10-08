@@ -7,9 +7,10 @@ import { $, qs, qsa, clamp, fmt, fmtPrecise, fmtDuration, fmtBytes, toast, downl
 import { db, mediaIdsOf, setKeepProvider } from './db.js';
 import { initProxies } from './proxy-ui.js';
 import { initBackup } from './backup-ui.js';
+import { initStab } from './stab-ui.js';
 import { media, kindOf, isHeic, seekVideo } from './media.js';
 import {
-  newProject, migrate, layout, clipAt, clipLen, sourceTime, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
+  newProject, migrate, defaultChroma, layout, clipAt, clipLen, sourceTime, audioLen, newClipFromMedia, newText, newAudio, removeClip, duplicateClip,
   moveClip, rippleShift, ensureLanes, holdNextClip, stepVolume, History, FONTS, outputDims, defaultColor, defaultTransform, MIN_CLIP,
   newOverlay, overlayLen, animated, hasKeyframes, setKeyframe, kfTimes, removeKeyframesAt, setEaseAt, normalizeClip,
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, ANIM_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
@@ -302,6 +303,7 @@ function renderAll() {
   renderLists();
   if (wsLayout) { wsLayout.syncProps(); wsLayout.refreshBin(); }
   if (app.proxies) app.proxies.sync();
+  if (app.stab) app.stab.sync();
   updateSummary();
   $('undoBtn').disabled = !app.history.canUndo;
   $('redoBtn').disabled = !app.history.canRedo;
@@ -499,7 +501,22 @@ function fillMulti(on) {
   mb.title = snd.length ? (allMuted ? 'Unmute the ' + plural(snd.length, 'selected item') + ' with sound' : 'Mute the ' + plural(snd.length, 'selected item') + ' with sound') : 'None of the selected items has sound';
   const pl = $('multiPasteLook'); pl.setAttribute('aria-disabled', app.clipboard ? 'false' : 'true'); pl.classList.toggle('is-off', !app.clipboard);
 }
+/** The one Green screen block lives with whichever item is selected: a video/image clip (Clip tab) or an overlay (PiP tab). */
+function placeChroma() {
+  const blk = $('chromaBlock'); if (!blk) return;
+  const c = selected('clip'), forClip = !!(c && c.kind !== 'audio');
+  const home = forClip ? $('bgRemoveBlock') : $('overlayPanel') && $('overlayPanel').querySelector('#chromaHome');
+  if (forClip) { if (blk.previousElementSibling !== home) home.after(blk); }
+  else if (home && blk.parentElement !== home.parentElement) home.after(blk);
+  const from = forClip ? 'ovl.' : 'clip.', to = forClip ? 'clip.' : 'ovl.';
+  for (const n of blk.querySelectorAll('[data-bind],[data-out]')) {
+    if (n.dataset.bind && n.dataset.bind.startsWith(from + 'chroma')) n.dataset.bind = to + n.dataset.bind.slice(from.length);
+    if (n.dataset.out && n.dataset.out.startsWith(from + 'chroma')) n.dataset.out = to + n.dataset.out.slice(from.length);
+  }
+  $('chromaHintClip').hidden = !forClip; $('chromaHintOvl').hidden = forClip;
+}
 function fillInspector() {
+  placeChroma();
   const p = app.project;
   for (const inp of qsa('[data-bind]')) {
     const v = getVal(inp.dataset.bind);
@@ -582,6 +599,7 @@ function fillInspector() {
   if (beatUI) beatUI.render();
   if (app.multicam) app.multicam.render();
   if (app.proxies) app.proxies.render();
+  if (app.stab) app.stab.render();
   speedUI.render();
   // Toolbar buttons that can't apply right now look dimmed but stay tappable (aria-disabled, not disabled): tapping one
   // explains what to select instead of doing nothing. (A truly disabled button ignores taps and feels "not responding".)
@@ -1203,16 +1221,20 @@ $('ovlPosPresets').addEventListener('click', (e) => {
   }
   app.commit('Overlay position');
 });
+/** the item the Green screen block is editing: the selected clip, else the selected overlay */
+const chromaItem = () => { const c = selected('clip'); return c && c.kind !== 'audio' ? c : selected('overlay'); };
 $('chromaPick').onclick = () => {
-  const o = selected('overlay'); if (!o) return;
-  const t = player.t; if (t < o.start || t >= o.start + overlayLen(o)) player.setTime(o.start + Math.min(0.5, overlayLen(o) / 2));
+  const o = chromaItem(); if (!o) return;
+  if (o === selected('clip')) { const it = layout(app.project).items.find(x => x.clip === o); if (it && (player.t < it.start || player.t >= it.end)) player.setTime(it.start + Math.min(0.5, (it.end - it.start) / 2)); }
+  else { const t = player.t; if (t < o.start || t >= o.start + overlayLen(o)) player.setTime(o.start + Math.min(0.5, overlayLen(o) / 2)); }
   player.pause();
   app.picking = true; stage.classList.add('picking');
   toast('Tap the background color to remove in the preview.', 3000);
 };
 function pickColorAt(x, y) {
-  const o = selected('overlay'); app.picking = false; stage.classList.remove('picking');
+  const o = chromaItem(); app.picking = false; stage.classList.remove('picking');
   if (!o) return;
+  if (!o.chroma) o.chroma = defaultChroma();
   const was = o.chroma.enabled; o.chroma.enabled = false;
   player.render();
   let px;
@@ -2095,6 +2117,7 @@ $('exportBtn').onclick = async () => {
       handle = await window.showSaveFilePicker({ suggestedName: baseName + '.' + plan.ext, types: [plan.ext === 'webm' ? { description: 'WebM video', accept: { 'video/webm': ['.webm'] } } : { description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } }] });
     } catch (e) { if (e.name === 'AbortError') return; console.warn('Save picker unavailable', e); handle = null; }
   }
+  if (app.stab && !(await app.stab.ready())) return toast('A clip could not be stabilized. Set its Stabilize to Off, or try again.', 5000);
   let handleUnused = false; // the engine produced another container than the picked file's extension
   const lay = layout(p), estBytes = bitrateFor(...Object.values(outputDims(p)), p.settings.fps, p.settings.quality) * lay.total / 8;
   const streams = !!handle || canStreamToOPFS();
@@ -2614,6 +2637,7 @@ app.match = initMatch({ app, media, toast, openDialog, closeDialog });
 app.beatCut = initBeatCut({ app, media, toast, openDialog, closeDialog });
 app.multicam = initMulticam({ app, media, player, toast, openDialog, closeDialog, selected });
 app.proxies = initProxies({ app, media, player, toast, selected });
+app.stab = initStab({ app, media, player, toast, selected });
 let inboxBusy = null;
 /** Take what the service worker stored from the OS share sheet (files, or a link) and put it into the project. */
 function consumeInbox() {

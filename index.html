@@ -324,6 +324,13 @@
               <button class="btn secondary toggle" data-toggle="clip.transform.flipV" type="button">⇵ Flip V</button>
             </div>
             <label style="display:block;margin-top:10px"><span class="label">Ken Burns motion (preset)</span><select data-bind="clip.transform.kenBurns"><option value="none">None</option><option value="in">Slow zoom in</option><option value="out">Slow zoom out</option><option value="left">Pan left → right</option><option value="right">Pan right → left</option></select></label>
+            <div id="stabBlock" class="reframe-block stab-block" style="margin-top:14px" hidden>
+              <div class="section-head"><h2 style="font-size:inherit;margin:0">Stabilize</h2><span class="clean-state" id="stabState" aria-live="polite"></span></div>
+              <div class="segmented" data-bind="clip.stab" id="stabSeg"><button data-value="off" type="button">Off</button><button data-value="smooth" type="button">Smooth</button><button data-value="strong" type="button">Strong</button></div>
+              <div class="progress show" id="stabProg" aria-live="polite" hidden><div class="progress-track"><div class="progress-bar" id="stabBar"></div></div><div class="progress-copy"><span id="stabText">Measuring the camera shake…</span><button class="linkish" type="button" id="stabCancel">Cancel</button></div></div>
+              <p class="hint warn" id="stabErr" hidden></p>
+              <p class="hint">Steadies shaky handheld footage on this device: the shake is measured once (saved with the file), the picture follows a smoothed path and zooms in a little to hide the moving edges (<b>Smooth</b> keeps your pans, <b>Strong</b> holds the frame almost still). Preview and export look the same.</p>
+            </div>
             <div id="reframeBlock" class="reframe-block" style="margin-top:14px">
               <div class="section-head"><h2 style="font-size:inherit;margin:0">Auto reframe</h2></div>
               <p class="hint">Tracks the speaker’s face and writes pan/zoom keyframes so a widescreen clip fills a vertical or square frame. Editable afterwards in Keyframes. Runs on this device (first use downloads ~10 MB).</p>
@@ -708,16 +715,20 @@
               </div>
             </div>
 
+            <span id="chromaHome" hidden></span>
+            <div id="chromaBlock" class="chroma-block">
             <h2 class="sh">Green screen (chroma key)</h2>
             <label class="check"><input type="checkbox" data-bind="ovl.chroma.enabled" id="chromaEnable" /> Remove background color</label>
             <div class="field-row" style="margin-top:6px">
               <label><span class="label">Key color</span><input class="field color" type="color" data-bind="ovl.chroma.color" /></label>
               <button class="btn secondary" id="chromaPick" type="button" style="align-self:end"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v4M8 11v4M1 8h4M11 8h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Pick from preview</button>
             </div>
-            <div class="slider-row"><label>Similarity</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.chroma.similarity" /><output data-out="ovl.chroma.similarity" data-fmt="pct"></output></div>
-            <div class="slider-row"><label>Smoothness</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.chroma.smoothness" /><output data-out="ovl.chroma.smoothness" data-fmt="pct"></output></div>
-            <div class="slider-row"><label>Spill</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.chroma.spill" /><output data-out="ovl.chroma.spill" data-fmt="pct"></output></div>
-            <p class="hint">Tip: “Full” size + chroma key puts a green-screen subject over your footage. Use “Pick from preview”, then tap the green area.</p>
+            <div class="slider-row"><label>Tolerance</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.chroma.similarity" /><output data-out="ovl.chroma.similarity" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Edge softness</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.chroma.smoothness" /><output data-out="ovl.chroma.smoothness" data-fmt="pct"></output></div>
+            <div class="slider-row"><label>Spill removal</label><input type="range" min="0" max="1" step="0.01" data-bind="ovl.chroma.spill" /><output data-out="ovl.chroma.spill" data-fmt="pct"></output></div>
+            <p class="hint" id="chromaHintOvl">Tip: “Full” size + chroma key puts a green-screen subject over your footage. Use “Pick from preview”, then tap the green area.</p>
+            <p class="hint" id="chromaHintClip" hidden>The removed colour shows this clip’s <b>Background</b> (Frame, crop &amp; motion). To put a green-screen subject over another video, add it in the <b>PiP</b> tab instead. Use “Pick from preview”, then tap the green area.</p>
+            </div>
           </section>
           <section class="section kf-panel" data-kf="overlay"></section>
         </div>
