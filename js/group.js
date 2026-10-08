@@ -189,3 +189,60 @@ export function pasteAttributes(project, clip, list) {
   }
   return n;
 }
+
+// ---------------------------------------------------------------- groups (grouped items act as one block)
+// project.groups = [{ id, name, items: [{ type, id }] }]. Clicking a member selects the whole group (then the multi-select tools move,
+// copy, duplicate, delete it), the timeline draws the group as one block whose ends trim every member, and Ungroup dissolves it.
+// Members render exactly as before, so preview and export are unchanged by grouping.
+export function tidyGroups(project) {
+  const seen = new Set(), out = [];
+  for (const g of project.groups || []) {
+    const items = clean(project, g.items).filter(s => !seen.has(s.id));
+    if (items.length < 2) continue;
+    items.forEach(s => seen.add(s.id)); out.push({ ...g, items });
+  }
+  project.groups = out; return out;
+}
+export function groupOf(project, s) { return s ? (project.groups || []).find(g => g.items.some(x => x.type === s.type && x.id === s.id)) || null : null; }
+/** The group whose members are exactly this list (any order), or null. */
+export function groupIs(project, list) {
+  const l = clean(project, list); if (l.length < 2) return null;
+  const g = groupOf(project, l[0]); return g && g.items.length === l.length && l.every(s => g.items.some(x => same(x, s))) ? g : null;
+}
+export function makeGroup(project, list) {
+  const items = clean(project, list); if (items.length < 2) return null;
+  project.groups = (project.groups || []).map(g => ({ ...g, items: g.items.filter(x => !items.some(s => same(s, x))) }));
+  const n = (project.groups || []).length + 1;
+  const g = { id: uid('grp'), name: 'Group ' + n, items };
+  project.groups.push(g); tidyGroups(project);
+  return project.groups.find(x => x.id === g.id) || null;
+}
+export function ungroup(project, id) { const before = (project.groups || []).length; project.groups = (project.groups || []).filter(g => g.id !== id); return before !== project.groups.length; }
+/** [start, end] of a group on the timeline. */
+export function groupSpan(project, g) {
+  const ctx = spanCtx(project); let a = Infinity, b = -Infinity;
+  for (const x of resolve(project, g.items)) { const [s, e] = ctx.span(x.type, x.item); a = Math.min(a, s); b = Math.max(b, e); }
+  return Number.isFinite(a) ? [a, b] : [0, 0];
+}
+/**
+ * Trim the group block to [a, b]: members are cut at the new ends (the same split as the Split tool, so speed, keyframes and fades stay
+ * right), pieces outside are removed, members wholly outside are removed. Main clips leave a gap (nothing after them moves).
+ * Returns the group's new member list.
+ */
+export function trimGroup(project, g, a, b) {
+  const MIN = 0.1; let items = clean(project, g.items);
+  const span0 = groupSpan(project, { items });
+  a = Math.max(span0[0], a); b = Math.min(span0[1], b); if (b - a < MIN) return items;
+  const out = [];
+  for (const s of items) {
+    let cur = s;
+    let [st, en] = spanCtx(project).span(cur.type, findItem(project, cur.id).item);
+    if (en <= a + 1e-6 || st >= b - 1e-6) { deleteMany(project, [cur], false); continue; }
+    if (st < a - 1e-6) { const r = splitItem(project, cur, a); if (r && !r.fail) { deleteMany(project, [cur], false); cur = { type: r.type, id: r.item.id }; } }
+    en = spanCtx(project).span(cur.type, findItem(project, cur.id).item)[1];
+    if (en > b + 1e-6) { const r = splitItem(project, cur, b); if (r && !r.fail) deleteMany(project, [{ type: r.type, id: r.item.id }], false); }
+    out.push(cur);
+  }
+  g.items = out; tidyGroups(project);
+  return out;
+}

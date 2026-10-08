@@ -32,6 +32,18 @@ export const RATIOS = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5 }
 export const defaultColor = () => ({ preset: 'none', filterAmount: 1, brightness: 0, contrast: 0, saturation: 0, temperature: 0, vignette: 0 });
 export const defaultTransform = () => ({ zoom: 1, x: 0, y: 0, rotate: 0, angle: 0, flipH: false, flipV: false, kenBurns: 'none', kbFrom: 0, kbTo: 1 });
 export const defaultChroma = () => ({ enabled: false, color: '#00ff00', similarity: 0.4, smoothness: 0.15, spill: 0.5 });
+/** Mask of a clip's or overlay's own picture. x, y, w, h are fractions of the picture (centre and size); a pen mask keeps its
+ *  points as fractions of that box, so moving / resizing (or keyframing mx, my, mw, mh) carries the drawn shape along. */
+export const MASK_SHAPES = ['none', 'rect', 'ellipse', 'path'];
+export const defaultMask = () => ({ shape: 'none', x: 0.5, y: 0.5, w: 0.6, h: 0.6, feather: 0.04, invert: false, opacity: 1, points: [] });
+export function normalizeMask(m) {
+  const d = defaultMask(); if (!m || typeof m !== 'object') return d;
+  const n = (v, lo, hi, def) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : def);
+  return { shape: MASK_SHAPES.includes(m.shape) ? m.shape : 'none', x: n(m.x, -1, 2, d.x), y: n(m.y, -1, 2, d.y), w: n(m.w, 0.01, 3, d.w), h: n(m.h, 0.01, 3, d.h),
+    feather: n(m.feather, 0, 0.5, d.feather), invert: !!m.invert, opacity: n(m.opacity, 0, 1, 1),
+    points: Array.isArray(m.points) ? m.points.filter(q => Array.isArray(q) && q.length === 2 && q.every(Number.isFinite)).slice(0, 2000).map(q => [n(q[0], 0, 1, 0), n(q[1], 0, 1, 0)]) : [] };
+}
+export const maskActive = (it) => !!(it && it.mask && it.mask.shape !== 'none' && (it.mask.shape !== 'path' || it.mask.points.length >= 3));
 
 export const PROJECT_NAME_MAX = 80;
 /** Friendly dated default for a project: "Project · Sep 29, 8:52 PM" (locale aware; the year is added for another year). */
@@ -78,6 +90,7 @@ export function migrate(p) {
   out.blurs = (Array.isArray(p.blurs) ? p.blurs : []).filter(b => b && typeof b === 'object').slice(0, 200).map(b => normalizeBlur(b));
   out.markers = (Array.isArray(p.markers) ? p.markers : []).filter(m => m && typeof m === 'object').map(m => ({ ...m, name: typeof m.name === 'string' ? m.name.slice(0, NAME_MAX) : '', time: num(m.time, 0, 1e6, 0) }));
   out.captions = normalizeCaptions(p.captions);
+  out.groups = (Array.isArray(p.groups) ? p.groups : []).filter(g => g && typeof g.id === 'string' && Array.isArray(g.items)).map(g => ({ id: g.id, name: typeof g.name === 'string' ? g.name.slice(0, NAME_MAX) : '', items: g.items.filter(x => x && typeof x.id === 'string' && typeof x.type === 'string').map(x => ({ type: x.type, id: x.id })) }));
   out.captionStyle = normalizeCaptionStyle(p.captionStyle);
   if ((p.schema || 0) < 5 && out.thumb.time === 0) out.thumb.time = null; // before v5, 0 meant "not chosen yet"
   sanitizeProject(out);
@@ -228,6 +241,7 @@ export function normalizeClip(c) {
     fx: normFx(c.fx),
     chroma: Object.assign(defaultChroma(), c.chroma && typeof c.chroma === 'object' ? c.chroma : {}),
     stab: c.stab === 'smooth' || c.stab === 'strong' ? c.stab : 'off',
+    mask: normalizeMask(c.mask),
   });
 }
 
@@ -280,7 +294,7 @@ export function normalizeOverlay(o) {
     id: uid('ovl'), kind: 'video', mediaId: null, name: 'Overlay', srcDuration: 1, width: 16, height: 9, hasAudio: false,
     start: 0, in: 0, out: 1, speed: 1, x: 0.76, y: 0.26, w: 0.36, radius: 0.12, opacity: 1, rotation: 0, scale: 1,
     border: 0, borderColor: '#ffffff', shadow: true, volume: 1, muted: true, fadeIn: 0.25, fadeOut: 0.25,
-  }, o, { chroma: Object.assign(defaultChroma(), o.chroma || {}), bgremove: normalizeBgRemove(o.bgremove), keyframes: o.keyframes || {}, fx: normFx(o.fx), color: tidyColor({ preset: 'none', filterAmount: 1, ...(o.color && typeof o.color === 'object' ? { preset: o.color.preset, filterAmount: o.color.filterAmount } : {}) }) });
+  }, o, { mask: normalizeMask(o.mask), chroma: Object.assign(defaultChroma(), o.chroma || {}), bgremove: normalizeBgRemove(o.bgremove), keyframes: o.keyframes || {}, fx: normFx(o.fx), color: tidyColor({ preset: 'none', filterAmount: 1, ...(o.color && typeof o.color === 'object' ? { preset: o.color.preset, filterAmount: o.color.filterAmount } : {}) }) });
 }
 export function newOverlay(media, start, settings) {
   const isImg = media.kind === 'image';
@@ -314,7 +328,8 @@ export const EASES = {
   hold: () => 0,
 };
 export const MOTION_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity', 'w', 'h'];
-export const ANIM_PROPS = [...MOTION_PROPS, 'volume'];
+export const MASK_PROPS = ['mx', 'my', 'mw', 'mh']; // mask position / size (not 'motion': they don't move the picture)
+export const ANIM_PROPS = [...MOTION_PROPS, 'volume', ...MASK_PROPS];
 /** The properties a given item type can animate (blur regions animate position and size). */
 /** Clips and overlays that have an audio track can also animate their volume (a multiplier of the Volume slider); music/voice tracks animate only that. */
 
@@ -373,7 +388,8 @@ function cleanClean(it) {
 
 export const hasSound = (item) => !!item && item.kind !== 'image' && item.hasAudio !== false;
 export const animPropsOf = (type, item) => (type === 'blur' ? ['x', 'y', 'w', 'h'] : type === 'audio' ? ['volume']
-  : ['x', 'y', 'scale', 'rotation', 'opacity', ...(item && (type === 'clip' || type === 'overlay') && hasKeyframes(item, 'volume') ? ['volume'] : [])]);
+  : ['x', 'y', 'scale', 'rotation', 'opacity', ...(item && (type === 'clip' || type === 'overlay') && hasKeyframes(item, 'volume') ? ['volume'] : []),
+    ...(item && (type === 'clip' || type === 'overlay') && item.mask && item.mask.shape !== 'none' ? MASK_PROPS : [])]);
 
 /** Eased progress 0..1 of the segment starting at key `a`. A key may carry an ease window [e0, e1] (set when a
  *  segment is cut by a split or trim) so each piece continues exactly along the original curve. */
@@ -436,6 +452,7 @@ export function rebaseKeyframes(kf, from, to = Infinity) {
 /** base (non-animated) value of a property for an item of a given type */
 export function animBase(type, item, prop) {
   if (prop === 'volume') return 1; // the envelope is a multiplier of the item's Volume slider
+  if (MASK_PROPS.includes(prop)) { const m = item.mask || {}; return { mx: m.x ?? 0.5, my: m.y ?? 0.5, mw: m.w ?? 0.6, mh: m.h ?? 0.6 }[prop]; }
   if (type === 'clip') {
     const tr = item.transform || {};
     return prop === 'x' ? tr.x || 0 : prop === 'y' ? tr.y || 0 : prop === 'scale' ? tr.zoom || 1 : prop === 'rotation' ? tr.angle || 0 : item.opacity ?? 1;

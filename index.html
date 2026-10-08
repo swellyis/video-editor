@@ -716,6 +716,21 @@
             </div>
 
             <span id="chromaHome" hidden></span>
+            <div id="maskBlock" class="mask-block">
+              <h2 class="sh">Mask</h2>
+              <div class="segmented" data-bind="clip.mask.shape" id="maskShape"><button data-value="none" type="button">None</button><button data-value="rect" type="button">Rectangle</button><button data-value="ellipse" type="button">Ellipse</button><button data-value="path" type="button">Pen</button></div>
+              <div id="maskBody" hidden>
+                <div class="button-row" id="maskPenRow" hidden style="margin-top:8px"><button class="btn secondary small" type="button" id="maskDraw">✎ Draw on preview</button><span class="hint" id="maskPenHint"></span></div>
+                <div class="slider-row"><label>Mask X</label><input type="range" min="0" max="1" step="0.005" data-bind="clip.mask.x" /><output data-out="clip.mask.x" data-fmt="pct"></output></div>
+                <div class="slider-row"><label>Mask Y</label><input type="range" min="0" max="1" step="0.005" data-bind="clip.mask.y" /><output data-out="clip.mask.y" data-fmt="pct"></output></div>
+                <div class="slider-row"><label>Mask width</label><input type="range" min="0.02" max="1.5" step="0.005" data-bind="clip.mask.w" /><output data-out="clip.mask.w" data-fmt="pct"></output></div>
+                <div class="slider-row"><label>Mask height</label><input type="range" min="0.02" max="1.5" step="0.005" data-bind="clip.mask.h" /><output data-out="clip.mask.h" data-fmt="pct"></output></div>
+                <div class="slider-row"><label>Feather</label><input type="range" min="0" max="0.5" step="0.005" data-bind="clip.mask.feather" /><output data-out="clip.mask.feather" data-fmt="pct"></output></div>
+                <div class="slider-row"><label>Mask opacity</label><input type="range" min="0" max="1" step="0.01" data-bind="clip.mask.opacity" /><output data-out="clip.mask.opacity" data-fmt="pct"></output></div>
+                <label class="check"><input type="checkbox" data-bind="clip.mask.invert" id="maskInvert" /> Invert (hide the inside instead)</label>
+                <p class="hint">Shows only the part of this picture inside the shape; outside you see the clip’s background (or what is below an overlay). Position and size can be keyframed in Keyframes.</p>
+              </div>
+            </div>
             <div id="chromaBlock" class="chroma-block">
             <h2 class="sh">Green screen (chroma key)</h2>
             <label class="check"><input type="checkbox" data-bind="ovl.chroma.enabled" id="chromaEnable" /> Remove background color</label>

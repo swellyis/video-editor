@@ -10,6 +10,7 @@ import { newIn, newOut, loopFx, karaokeCount } from './textanim.js';
 import { applyBgRemove, bgRemoveActive } from './bgremove.js';
 import { loadSegmenter, segmentPerson } from './segment.js';
 import { stabAt } from './stab-store.js';
+import { applyMask, maskAt } from './mask.js';
 
 const VERT = `attribute vec2 p;varying vec2 uv;void main(){uv=vec2((p.x+1.0)*0.5,1.0-(p.y+1.0)*0.5);gl_Position=vec4(p,0.0,1.0);}`;
 const FRAG = `precision mediump float;varying vec2 uv;uniform sampler2D tex;
@@ -517,6 +518,8 @@ export class Compositor {
         img = k.process(this.ovl, cw, chh, o.chroma);
       }
     }
+    const om = opts.mask === undefined ? maskAt(o, local) : opts.mask;
+    if (om) { this.mkO = this.mkO || {}; img = applyMask(img, src.w, src.h, om, this.mkO, this.filterOK, Math.min(1920, Math.max(64, bw * 1.25))); }
     const ocol = effectiveColor({}, o), gk = colorIsNeutral(ocol) ? null : this._glo();
     if (gk) { // the overlay's own filter (Looks tab): same colour pass as the clips
       const cw = Math.round(Math.min(src.w, bw * 1.25, 1920)), chh = Math.max(2, Math.round(cw * src.h / src.w));
@@ -619,6 +622,7 @@ export class Compositor {
         img = k.process(this.ckc, cw, chh, clip.chroma);
       }
     }
+    if (opts.mask) { this.mkS = this.mkS || {}; img = applyMask(img, sw, sh, opts.mask, this.mkS, this.filterOK, Math.min(1920, Math.max(64, sw * g.s * 1.25))); }
     ctx.save();
     ctx.translate(g.cx, g.cy);
     if (g.rot || g.angle) ctx.rotate((g.rot + g.angle) * Math.PI / 180);
@@ -684,12 +688,12 @@ export class Compositor {
         if (!unit && !gl && !fxg && (colorIsNeutral(col) || !this.filterOK)) {
           ctx.globalAlpha = a;
           if (bf) ctx.filter = bf;
-          this.drawSource(ctx, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2), stab: stabAt(c, sourceTime(it, t)) });
+          this.drawSource(ctx, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2), stab: stabAt(c, sourceTime(it, t)), mask: maskAt(it.clip, t - it.start) });
         } else {
           if (this.layer.width !== W || this.layer.height !== H) { this.layer.width = W; this.layer.height = H; }
           const l = this.lctx;
           l.globalAlpha = 1; l.filter = 'none';
-          this.drawSource(l, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2), stab: stabAt(c, sourceTime(it, t)) });
+          this.drawSource(l, src, c, W, H, fit, prog, bg, { t, maskKey: c.id + ':' + t.toFixed(2), stab: stabAt(c, sourceTime(it, t)), mask: maskAt(it.clip, t - it.start) });
           ctx.globalAlpha = a;
           if (fxg) { // colour first, then the clip's effects (Effects tab), then the transition's blur / fade
             let pic = this.layer;

@@ -16,6 +16,7 @@ import {
   splitItem, audioSpan, defaultProjectName, cleanProjectName, fixedProjectName, rebaseKeyframes, ANIM_PROPS, detachAudio, hasSound, volumeEnv, VOL_KEY_MAX, audioSpeed, overlaysAt, overlaySourceTime, thumbFormat, newBlur, animPropsOf, cleanBlur, cleanClipBlur, textLabel, blurLabel,
 } from './model.js';
 import { Compositor, ensureFonts, drawCaptions } from './render.js';
+import { pathFromPoints } from './mask.js';
 import { TEMPLATES, paintBackground } from './templates.js';
 import { Player } from './player.js';
 import { initCleanUI } from './clean-ui.js';
@@ -289,6 +290,7 @@ const KF_PATHS = {
   'text.x': 'x', 'text.y': 'y', 'text.scale': 'scale', 'text.rotation': 'rotation', 'text.opacity': 'opacity',
   'ovl.x': 'x', 'ovl.y': 'y', 'ovl.scale': 'scale', 'ovl.rotation': 'rotation', 'ovl.opacity': 'opacity',
   'blur.x': 'x', 'blur.y': 'y', 'blur.w': 'w', 'blur.h': 'h',
+  'clip.mask.x': 'mx', 'clip.mask.y': 'my', 'clip.mask.w': 'mw', 'clip.mask.h': 'mh', 'ovl.mask.x': 'mx', 'ovl.mask.y': 'my', 'ovl.mask.w': 'mw', 'ovl.mask.h': 'mh',
 };
 const typeOfRoot = (path) => ({ clip: 'clip', text: 'text', ovl: 'overlay', blur: 'blur' })[path.split('.')[0]];
 
@@ -503,17 +505,20 @@ function fillMulti(on) {
 }
 /** The one Green screen block lives with whichever item is selected: a video/image clip (Clip tab) or an overlay (PiP tab). */
 function placeChroma() {
-  const blk = $('chromaBlock'); if (!blk) return;
+  const blk = $('chromaBlock'), mb = $('maskBlock'); if (!blk) return;
   const c = selected('clip'), forClip = !!(c && c.kind !== 'audio');
   const home = forClip ? $('bgRemoveBlock') : $('overlayPanel') && $('overlayPanel').querySelector('#chromaHome');
-  if (forClip) { if (blk.previousElementSibling !== home) home.after(blk); }
-  else if (home && blk.parentElement !== home.parentElement) home.after(blk);
+  // order in both places: Mask, then Green screen
+  if (forClip) { if (mb && mb.previousElementSibling !== home) home.after(mb); if (blk.previousElementSibling !== (mb || home)) (mb || home).after(blk); }
+  else if (home && blk.parentElement !== home.parentElement) { home.after(blk); if (mb) home.after(mb); }
   const from = forClip ? 'ovl.' : 'clip.', to = forClip ? 'clip.' : 'ovl.';
-  for (const n of blk.querySelectorAll('[data-bind],[data-out]')) {
-    if (n.dataset.bind && n.dataset.bind.startsWith(from + 'chroma')) n.dataset.bind = to + n.dataset.bind.slice(from.length);
-    if (n.dataset.out && n.dataset.out.startsWith(from + 'chroma')) n.dataset.out = to + n.dataset.out.slice(from.length);
+  for (const n of [...blk.querySelectorAll('[data-bind],[data-out]'), ...(mb ? mb.querySelectorAll('[data-bind],[data-out]') : [])]) {
+    if (n.dataset.bind && n.dataset.bind.startsWith(from)) n.dataset.bind = to + n.dataset.bind.slice(from.length);
+    if (n.dataset.out && n.dataset.out.startsWith(from)) n.dataset.out = to + n.dataset.out.slice(from.length);
   }
   $('chromaHintClip').hidden = !forClip; $('chromaHintOvl').hidden = forClip;
+  const it = forClip ? c : selected('overlay'), m = it && it.mask;
+  if (mb && m) { $('maskBody').hidden = m.shape === 'none'; $('maskPenRow').hidden = m.shape !== 'path'; $('maskPenHint').textContent = m.shape === 'path' ? (m.points.length >= 3 ? m.points.length + ' points' : 'Draw the shape with your finger or mouse') : ''; }
 }
 function fillInspector() {
   placeChroma();
@@ -1103,7 +1108,7 @@ app.actions = actions;
 
 // ---------------------------------------------------------------- keyframe panels
 const KF_STATE = new Map(); // item id -> 'open' | 'closed' (what the user chose; otherwise open only when the item has keyframes)
-const KF_LABEL = { x: 'Position', y: 'Position', scale: 'Size', w: 'Size', h: 'Size', rotation: 'Rotation', opacity: 'Opacity', volume: 'Volume' };
+const KF_LABEL = { x: 'Position', y: 'Position', scale: 'Size', w: 'Size', h: 'Size', rotation: 'Rotation', opacity: 'Opacity', volume: 'Volume', mx: 'Mask', my: 'Mask', mw: 'Mask', mh: 'Mask' };
 function renderKfPanels() {
   // ONE Keyframes section per selected item (it sits in the tab of that item: Clip, Text, PiP, Audio track, Blur region). Motion keys and the volume
   // envelope are listed together by time; the ◆ next to a Volume slider only adds a volume key to this same list.
@@ -1678,6 +1683,54 @@ wsLayout.start();
 }
 for (const [k, v] of Object.entries(FONTS)) { $('fontSelect').append(el('option', { value: k, text: v.label })); }
 
+// ---------------------------------------------------------------- mask pen: draw a freehand shape on the preview
+/** Stage pixel (x, y) -> fractions of the item's own picture (inverse of how the compositor places it at the playhead). */
+function stageToPicture(it, type, x, y) {
+  const W = stage.width, H = stage.height, rec = media.peek(it.mediaId) || {};
+  const sw = it.width || rec.width || 16, sh = it.height || rec.height || 9;
+  let cx, cy, ang, dw, dh, fx = 1, fy = 1;
+  if (type === 'clip') {
+    const L = layout(app.project).items.find(i => i.clip.id === it.id); const local = L ? player.t - L.start : 0;
+    const A = animated('clip', it, local), c = { ...it, transform: { ...it.transform, x: A.x, y: A.y, zoom: A.scale, angle: A.rotation } };
+    const fit = it.fit && it.fit !== 'inherit' ? it.fit : app.project.settings.fit;
+    const g = Compositor.placement(c, sw, sh, W, H, fit, 0);
+    cx = g.cx; cy = g.cy; ang = (g.rot + g.angle) * Math.PI / 180; dw = sw * g.s; dh = sh * g.s; fx = g.flipH ? -1 : 1; fy = g.flipV ? -1 : 1;
+  } else {
+    const A = animated('overlay', it, player.t - it.start);
+    dw = Math.max(4, it.w * W * A.scale); dh = dw * sh / sw; cx = A.x * W; cy = A.y * H; ang = (A.rotation || 0) * Math.PI / 180;
+  }
+  const dx = x - cx, dy = y - cy, c = Math.cos(-ang), s2 = Math.sin(-ang);
+  const u = (dx * c - dy * s2) * fx, v = (dx * s2 + dy * c) * fy;
+  return [Math.min(1, Math.max(0, u / dw + 0.5)), Math.min(1, Math.max(0, v / dh + 0.5))];
+}
+function maskTarget() { const c = selected('clip'); if (c && c.kind !== 'audio') return { it: c, type: 'clip' }; const o = selected('overlay'); return o ? { it: o, type: 'overlay' } : null; }
+function maskPen(e, sx, sy, r) {
+  const t = maskTarget(); if (!t) { app.maskDrawing = false; stage.classList.remove('picking'); return; }
+  const pts = [], pid = e.pointerId;
+  const add = (ev) => pts.push(stageToPicture(t.it, t.type, (ev.clientX - r.left) * sx, (ev.clientY - r.top) * sy));
+  add(e);
+  try { stage.setPointerCapture(pid); } catch { /* */ }
+  const ov = stage.getContext('2d');
+  const move = (ev) => { if (ev.pointerId !== pid) return; add(ev); const x = (ev.clientX - r.left) * sx, y = (ev.clientY - r.top) * sy; ov.save(); ov.fillStyle = '#ffd400'; ov.beginPath(); ov.arc(x, y, Math.max(2, stage.width / 300), 0, 7); ov.fill(); ov.restore(); };
+  const up = (ev) => {
+    if (ev.pointerId !== pid) return;
+    stage.removeEventListener('pointermove', move); stage.removeEventListener('pointerup', up); stage.removeEventListener('pointercancel', up);
+    app.maskDrawing = false; stage.classList.remove('picking');
+    const P = pathFromPoints(pts);
+    if (!P) { toast('Draw a bigger shape (press, move around the area and let go).'); player.render(); return; }
+    Object.assign(t.it.mask, { shape: 'path', x: P.x, y: P.y, w: P.w, h: P.h, points: P.points });
+    app.commit('Draw mask'); toast('Mask drawn (' + P.points.length + ' points). Adjust Feather, Invert or the box below.', 3000);
+  };
+  stage.addEventListener('pointermove', move); stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
+}
+app.drawMaskPoints = (pts) => { const t = maskTarget(); const P = t && pathFromPoints(pts); if (!P) return false; Object.assign(t.it.mask, { shape: 'path', x: P.x, y: P.y, w: P.w, h: P.h, points: P.points }); app.commit('Draw mask'); return true; };
+$('maskDraw').onclick = () => {
+  const t = maskTarget(); if (!t) return;
+  player.pause(); app.maskDrawing = true; stage.classList.add('picking');
+  stage.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  toast('Draw around the area to keep, on the preview.', 3000);
+};
+
 // ---------------------------------------------------------------- preview interactions (drag text/overlays on canvas, pick key color, tap to play)
 (() => {
   let drag = null;
@@ -1687,6 +1740,7 @@ for (const [k, v] of Object.entries(FONTS)) { $('fontSelect').append(el('option'
     const sx = stage.width / r.width, sy = stage.height / r.height;
     const x = (e.clientX - r.left) * sx, y = (e.clientY - r.top) * sy;
     if (app.picking) { e.preventDefault(); pickColorAt(x, y); return; }
+    if (app.maskDrawing) { e.preventDefault(); maskPen(e, sx, sy, r); return; }
     const hit = [...player.lastBoxes].reverse().find(b => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1);
     if (hit) {
       const kind = hit.type === 'overlay' ? 'overlay' : 'text';
