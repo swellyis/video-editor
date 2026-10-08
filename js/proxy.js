@@ -18,7 +18,8 @@ const DIR = 'proxies', KEY = 'px:';
 export function needsProxy(rec) {
   if (!rec || rec.kind !== 'video') return false;
   const w = rec.width || 0, h = rec.height || 0;
-  return Math.max(w, h) >= AUTO_SIDE || Math.min(w, h) >= 1440 || (rec.duration || 0) >= AUTO_SECONDS;
+  // long files only when they are bigger than 720p: a proxy of a small file would be no smaller, and costs a full decode
+  return Math.max(w, h) >= AUTO_SIDE || Math.min(w, h) >= 1440 || ((rec.duration || 0) >= AUTO_SECONDS && Math.min(w, h) > 720);
 }
 /** Proxy size for a source: short side SHORT_SIDE (never upscaled), even numbers, same aspect. */
 export function proxyDims(w, h, short = SHORT_SIDE) {
